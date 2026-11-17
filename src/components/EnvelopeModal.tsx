@@ -1,0 +1,1607 @@
+import { ThemeMode } from "./ThemeToggle";
+import { useState, useEffect, useRef, type FormEvent, type ChangeEvent, type MouseEvent } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import confetti from 'canvas-confetti';
+import {
+  Heart,
+  Sparkles,
+  MailOpen,
+  Edit3,
+  Check,
+  X,
+  User,
+  UserPlus,
+  ChevronDown,
+  Users,
+  Bookmark,
+  Music,
+  Volume2,
+  VolumeX,
+  SkipForward,
+  Camera,
+  Trash2,
+  Globe,
+  Cake,
+  Home,
+  ChevronsRight,
+  Gift,
+  MapPin,
+  Calendar,
+  Clock,
+  Star,
+  Palette,
+} from 'lucide-react';
+import { Language, WeddingEvent } from '../types';
+import { getSavedGuests, GuestPreset } from '../data/guests';
+import RoyalGoldRibbonBanner from './RoyalGoldRibbonBanner';
+import IntertwinedRibbonHearts from './IntertwinedRibbonHearts';
+import RingIcon from './RingIcon';
+import BeautifulButterflies from './BeautifulButterflies';
+import FloatingEngagementRingsAndSparkles from './FloatingEngagementRingsAndSparkles';
+import FloatingBalloonsAndGifts from './FloatingBalloonsAndGifts';
+import weddingArchBg from '../assets/images/wedding_arch_bg_1790321830759.jpg';
+const khmerRoyalGoldWeddingCover = '/assets/images/white_arch_columns_wedding_cover_1790394461049.jpg';
+import {
+  KhmerCornerKbach,
+  RoyalWeddingMonogram,
+  KhmerDividerKbach,
+  RoyalWaxSealEmblem,
+  CameoFloralWeddingEmblem,
+  KhmerWeddingTitleWithBotanicalFlourish,
+  HangingGarlandsOverlay,
+  VintageScallopedGuestPlaque,
+  KhmerRoyalGoldenGuestPlaque,
+  AngkorTemplePillarsOverlay,
+  RomanticRoseGardenArchOverlay,
+  RoseGoldAnniversaryCalligraphy,
+  RoseGoldOrnateGuestPlaque,
+  TheapKhmerTemplate1WaxSeal,
+  TheapKhmerBotanicalBranches,
+  TheapKhmerCover1ArchOverlay,
+  RoseGoldBeveledOpenButton,
+  KhmerGoldenTeardropLocket,
+  GoldenGlitterPlayButton,
+  CircularPlayOpenButton,
+  FiligreeGoldOrnamentDivider,
+  FiligreeGoldCircularMonogramCrest,
+  FiligreeGoldPillOpenButton,
+  FiligreeGoldOvalMonogramCrest,
+  ModernWeddingScallopedOpenButton,
+  ModernWeddingCrystalOctagonCrest,
+  ModernWeddingFullCrystalRococoFrame,
+  ModernWeddingFloralCalendarCover,
+  KhmerRoyalModernWeddingCover,
+  ShapedTitleText,
+  getKhmerInitial,
+} from './KhmerRoyalOrnament';
+import TheapKhmerTemplate15Cover from './TheapKhmerTemplate15Cover';
+import KhmerNatureHousewarmingCover, { khmerNatureBg } from './KhmerNatureHousewarmingCover';
+import KhmerStoryAnniversaryCover, { khmerAnnivSilkBg } from './KhmerStoryAnniversaryCover';
+
+interface EnvelopeModalProps {
+  isOpen: boolean;
+  onOpen: () => void;
+  guestName: string;
+  onUpdateGuestName?: (newName: string) => void;
+  onOpenAddGuestModal?: () => void;
+  groom: string;
+  bride: string;
+  groomEn?: string;
+  brideEn?: string;
+  singlePerson?: boolean;
+  id?: string;
+  eventType?: string;
+  name?: string;
+  language: Language;
+  isAdmin?: boolean;
+  coverBackground?: string;
+  primaryColor?: string;
+  textColor?: string;
+  envelopeFrame?: string;
+  envelopeHeaderImage?: string;
+  onUpdateEnvelopeHeaderImage?: (url: string) => void;
+  mainTitleKh?: string;
+  mainTitleEn?: string;
+  coverSubtitleKh?: string;
+  coverSubtitleEn?: string;
+  invitationSubtitleKh?: string;
+  invitationSubtitleEn?: string;
+  invitationTitleKh?: string;
+  invitationTitleEn?: string;
+  coverEnNameColor?: string;
+  coverEnFontFamily?: string;
+  eventDate?: string;
+  eventTime?: string;
+  eventLocation?: string;
+  eventLocationEn?: string;
+  mapUrl?: string;
+  titleTextShape?: 'straight' | 'arch-up' | 'arch-down' | 'wave';
+  guestNameColor?: string;
+  guestNameFontFamily?: string;
+  guestNameFontSize?: string;
+  envelopeThemeColor?: string;
+  guestFrameStyle?: string;
+  anniversaryMilestone?: string;
+  anniversaryMilestoneEn?: string;
+  storyStartYear?: string;
+  guestLabelText?: string;
+  guestLabelTextEn?: string;
+  invitationMessageKh?: string;
+  invitationMessageEn?: string;
+  eventData?: WeddingEvent;
+  onSaveAnniversaryInfo?: (updatedEvent: WeddingEvent) => Promise<void> | void;
+  allowQuickEdit?: boolean;
+  onRequireAdminAuth?: (onSuccess: () => void) => void;
+  onOpenDesignTab?: () => void;
+  onToggleLanguage?: () => void;
+  theme?: ThemeMode;
+}
+
+import { compressImageFile } from '../utils/imageCompressor';
+
+// Compress image via canvas to prevent database quota errors
+function compressImage(file: File, maxWidth = 800, maxHeight = 800, quality = 0.68): Promise<string> {
+  return compressImageFile(file, { maxWidth, maxHeight, quality });
+}
+
+export default function EnvelopeModal({
+  isOpen,
+  onOpen,
+  guestName,
+  onUpdateGuestName,
+  onOpenAddGuestModal,
+  groom,
+  bride,
+  groomEn,
+  brideEn,
+  singlePerson,
+  id,
+  eventType,
+  name,
+  language,
+  isAdmin = false,
+  coverBackground,
+  primaryColor = '#f5b80f',
+  textColor = '#f5b80f',
+  envelopeFrame,
+  envelopeHeaderImage,
+  onUpdateEnvelopeHeaderImage,
+  mainTitleKh,
+  mainTitleEn,
+  coverSubtitleKh,
+  coverSubtitleEn,
+  invitationSubtitleKh,
+  invitationSubtitleEn,
+  invitationTitleKh,
+  invitationTitleEn,
+  coverEnNameColor,
+  coverEnFontFamily,
+  eventDate,
+  eventTime,
+  eventLocation,
+  eventLocationEn,
+  mapUrl,
+  titleTextShape,
+  guestNameColor = '#364153',
+  guestNameFontFamily,
+  guestNameFontSize,
+  envelopeThemeColor,
+  guestFrameStyle,
+  anniversaryMilestone,
+  anniversaryMilestoneEn,
+  storyStartYear,
+  guestLabelText,
+  guestLabelTextEn,
+  invitationMessageKh,
+  invitationMessageEn,
+  eventData,
+  onSaveAnniversaryInfo,
+  allowQuickEdit,
+  onRequireAdminAuth,
+  onOpenDesignTab,
+  onToggleLanguage,
+  theme = 'dark',
+}: EnvelopeModalProps) {
+  const activeEnvelopeColor = envelopeThemeColor || '#6c2925';
+  const plaqueStyle = guestFrameStyle || 'rose-gold';
+  const GuestPlaqueWrapper = (plaqueStyle === 'royal-gold' || plaqueStyle === 'vintage-leaf')
+    ? KhmerRoyalGoldenGuestPlaque
+    : (plaqueStyle === 'vintage' || plaqueStyle === 'vintage-scallop')
+    ? VintageScallopedGuestPlaque
+    : RoseGoldOrnateGuestPlaque;
+  const [isOpening, setIsOpening] = useState(false);
+  const [isEditingGuest, setIsEditingGuest] = useState(false);
+  const [tempGuestName, setTempGuestName] = useState(guestName);
+  const [savedGuestsList, setSavedGuestsList] = useState<GuestPreset[]>([]);
+  const [currentGuestInfo, setCurrentGuestInfo] = useState<GuestPreset | null>(null);
+  const [isPlayingMusic, setIsPlayingMusic] = useState(false);
+  const [isWaxFlapOpen, setIsWaxFlapOpen] = useState(false);
+  const [isGiftSurpriseOpen, setIsGiftSurpriseOpen] = useState(false);
+  const [isLocationExpanded, setIsLocationExpanded] = useState(false);
+
+  const handleGiftClick = () => {
+    setIsGiftSurpriseOpen(true);
+    try {
+      confetti({
+        particleCount: 80,
+        spread: 70,
+        origin: { y: 0.5 },
+        colors: ['#2dd4bf', '#fde047', '#38bdf8', '#f43f5e', '#ffffff'],
+      });
+    } catch {}
+    setTimeout(() => {
+      setIsGiftSurpriseOpen(false);
+    }, 4000);
+  };
+
+  const eventTypeLower = (eventType || '').toLowerCase();
+  const idLower = (id || '').toLowerCase();
+  const nameLower = (name || '').toLowerCase();
+
+  const isAnniversary = eventTypeLower === 'anniversary' || idLower.includes('anniversary') || nameLower.includes('ខួបអាពាហ៍ពិពាហ៍') || nameLower.includes('anniversary');
+  const isBirthday = !isAnniversary && (eventTypeLower === 'birthday' || idLower.includes('birthday') || nameLower.includes('ខួបកំណើត') || nameLower.includes('birthday'));
+  const isEngagement = eventTypeLower === 'engagement' || idLower.includes('engagement') || nameLower.includes('ភ្ជាប់ពាក្យ') || nameLower.includes('engage');
+  const isHousewarming = eventTypeLower === 'housewarming' || idLower.includes('housewarming') || nameLower.includes('ឡើងផ្ទះ') || nameLower.includes('house');
+
+  // Directly pull from ចំណងជើងធំ (Main Title) first, or coverSubtitle for Anniversary story headings
+  let subtitleKh = isAnniversary
+    ? (coverSubtitleKh?.trim() || mainTitleKh?.trim())
+    : (mainTitleKh?.trim() || coverSubtitleKh?.trim());
+  if (!subtitleKh || (isBirthday && (subtitleKh === 'សូមគោរពអញ្ជើញ' || subtitleKh === 'សិរីសួស្តី អាពាហ៍ពិពាហ៍' || subtitleKh === 'រីករាយថ្ងៃកំណើត'))) {
+    subtitleKh = isBirthday
+      ? 'រីករាយពិធីខួបកំណើត'
+      : isAnniversary
+      ? 'ពិធីខួបអាពាហ៍ពិពាហ៍'
+      : isEngagement
+      ? 'ពិធីភ្ជាប់ពាក្យ'
+      : isHousewarming
+      ? 'ពិធីឡើងគេហដ្ឋានថ្មី'
+      : 'សិរីសួស្តី អាពាហ៍ពិពាហ៍';
+  }
+
+  if (subtitleKh === 'រីករាយថ្ងៃកំណើត') {
+    subtitleKh = 'រីករាយពិធីខួបកំណើត';
+  }
+
+  const subtitleEn = (isAnniversary
+    ? (coverSubtitleEn?.trim() || mainTitleEn?.trim())
+    : (mainTitleEn?.trim() || coverSubtitleEn?.trim())) || (isBirthday
+    ? 'HAPPY BIRTHDAY INVITATION'
+    : isAnniversary
+    ? 'Wedding Anniversary Story'
+    : isEngagement
+    ? 'ENGAGEMENT INVITATION'
+    : isHousewarming
+    ? 'HOUSEWARMING INVITATION'
+    : 'ROYAL WEDDING INVITATION');
+
+  const isWeddingStyle = !isBirthday && !isEngagement && !isHousewarming;
+  const isModernWedding = isWeddingStyle && (idLower.includes('modern') || nameLower.includes('សម័យ') || nameLower.includes('modern'));
+  const isTraditionalWedding = isWeddingStyle && !isModernWedding;
+
+  // Information label / subtitle customized from Design (ការរចនា)
+  const ribbonLabel = language === 'kh'
+    ? (isAnniversary
+        ? (guestLabelText?.trim() || invitationSubtitleKh?.trim() || 'សូមគោរពអញ្ជើញចូលរួមអបអរសាទរ')
+        : isBirthday || isHousewarming
+        ? (invitationSubtitleKh?.trim() || invitationTitleKh?.trim() || (isBirthday ? 'សូមគោរពអញ្ជើញចូលរួមពិធីខួបកំណើត' : 'សូមគោរពអញ្ជើញចូលរួមពិធីឡើងគេហដ្ឋានថ្មី'))
+        : (invitationSubtitleKh?.trim() || 'សូមគោរពអញ្ជើញ'))
+    : (isAnniversary
+        ? (guestLabelTextEn?.trim() || (invitationSubtitleEn && invitationSubtitleEn.trim().length <= 60 ? invitationSubtitleEn.trim() : '') || 'Cordially Invited to Celebrate With Us')
+        : isBirthday || isHousewarming
+        ? (invitationSubtitleEn?.trim() || invitationTitleEn?.trim() || (isBirthday ? 'Cordially Invited to Birthday Party' : 'Cordially Invited to Housewarming Blessing'))
+        : (invitationSubtitleEn?.trim() || 'Cordially Invited'));
+
+  const activeCoverBg = isAnniversary
+    ? (coverBackground && !coverBackground.includes('unsplash.com') && !coverBackground.includes('free-background') && !coverBackground.includes('default') ? coverBackground : khmerAnnivSilkBg)
+    : isHousewarming
+    ? (coverBackground && !coverBackground.includes('free-background') && !coverBackground.includes('default') && !coverBackground.includes('white_arch_columns') ? coverBackground : khmerNatureBg)
+    : isEngagement
+    ? (coverBackground && !coverBackground.includes('free-background') && !coverBackground.includes('default') && !coverBackground.includes('white_arch_columns') ? coverBackground : '/assets/aistudio/image_6e49a03a.png')
+    : isWeddingStyle
+    ? (coverBackground && !coverBackground.includes('free-background') && !coverBackground.includes('default') ? coverBackground : (isModernWedding ? 'https://focuz-staging-space.sgp1.cdn.digitaloceanspaces.com/plan-essential/template/free/template-1/free-background.jpg' : '/assets/template15/opening-background.webp'))
+    : (coverBackground || khmerRoyalGoldWeddingCover);
+
+  const headerImageInputRef = useRef<HTMLInputElement>(null);
+
+  const handleHeaderImageClick = () => {
+    if (isAdmin && onUpdateEnvelopeHeaderImage) {
+      headerImageInputRef.current?.click();
+    }
+  };
+
+  const handleHeaderImageChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (files && files.length > 0 && onUpdateEnvelopeHeaderImage) {
+      try {
+        const compressedBase64 = await compressImage(files[0]);
+        onUpdateEnvelopeHeaderImage(compressedBase64);
+      } catch (err) {
+        console.error('Error uploading envelope header image:', err);
+      }
+    }
+  };
+
+  const handleResetHeaderImage = (e: MouseEvent) => {
+    e.stopPropagation();
+    if (onUpdateEnvelopeHeaderImage) {
+      onUpdateEnvelopeHeaderImage('none');
+    }
+  };
+
+  useEffect(() => {
+    const audio = document.getElementById('wedding-audio') as HTMLAudioElement | null;
+    if (audio) {
+      setIsPlayingMusic(!audio.paused);
+      const handlePlay = () => setIsPlayingMusic(true);
+      const handlePause = () => setIsPlayingMusic(false);
+      audio.addEventListener('play', handlePlay);
+      audio.addEventListener('pause', handlePause);
+      return () => {
+        audio.removeEventListener('play', handlePlay);
+        audio.removeEventListener('pause', handlePause);
+      };
+    }
+  }, [isOpen]);
+
+  const toggleMusicPlay = () => {
+    const audio = document.getElementById('wedding-audio') as HTMLAudioElement | null;
+    if (!audio) return;
+    if (audio.paused) {
+      audio.muted = false;
+      audio.play().then(() => {
+        setIsPlayingMusic(true);
+      }).catch(err => {
+        console.error('Audio play error:', err);
+      });
+    } else {
+      audio.pause();
+      setIsPlayingMusic(false);
+    }
+  };
+
+  useEffect(() => {
+    setTempGuestName(guestName);
+    const guests = getSavedGuests();
+    setSavedGuestsList(guests);
+    const match = guests.find(g => g.name.toLowerCase() === (guestName || '').toLowerCase());
+    setCurrentGuestInfo(match || null);
+  }, [guestName, isOpen]);
+
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden';
+      return () => {
+        document.body.style.overflow = '';
+      };
+    } else {
+      document.body.style.overflow = '';
+    }
+  }, [isOpen]);
+
+  const triggerAutoPlayMusic = () => {
+    try {
+      const audio = document.getElementById('wedding-audio') as HTMLAudioElement | null;
+      if (audio) {
+        audio.muted = false;
+        audio.currentTime = audio.currentTime || 0;
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              setIsPlayingMusic(true);
+            })
+            .catch(err => {
+              console.warn('Direct audio play error:', err);
+            });
+        }
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleSelectFromDropbox = (selectedName: string) => {
+    if (!selectedName) return;
+    if (selectedName === '__ADD_NEW__') {
+      if (onOpenAddGuestModal) {
+        onOpenAddGuestModal();
+      } else {
+        setIsEditingGuest(true);
+      }
+      return;
+    }
+
+    if (onUpdateGuestName) {
+      onUpdateGuestName(selectedName);
+    }
+    const match = savedGuestsList.find(g => g.name === selectedName);
+    setCurrentGuestInfo(match || null);
+    setTempGuestName(selectedName);
+  };
+
+  const handleOpenInvitation = () => {
+    // Auto-play music when clicking open invitation button
+    triggerAutoPlayMusic();
+    setIsOpening(true);
+
+    // Trigger golden celebratory confetti burst
+    try {
+      const count = 200;
+      const defaults = {
+        origin: { y: 0.7 },
+        colors: ['#f5b80f', '#d97706', '#fbbf24', '#fef3c7', '#f43f5e', '#ffffff'],
+      };
+
+      const fire = (particleRatio: number, opts: confetti.Options) => {
+        confetti({
+          ...defaults,
+          ...opts,
+          particleCount: Math.floor(count * particleRatio),
+        });
+      };
+
+      fire(0.25, { spread: 26, startVelocity: 55 });
+      fire(0.2, { spread: 60 });
+      fire(0.35, { spread: 100, decay: 0.91, scalar: 0.8 });
+      fire(0.1, { spread: 120, startVelocity: 25, decay: 0.92, scalar: 1.2 });
+      fire(0.1, { spread: 120, startVelocity: 45 });
+    } catch {
+      // ignore
+    }
+
+    setTimeout(() => {
+      onOpen();
+    }, 800);
+  };
+
+  const handleSaveGuestName = (e: FormEvent) => {
+    e.preventDefault();
+    const trimmed = tempGuestName.trim();
+    if (trimmed) {
+      if (onUpdateGuestName) {
+        onUpdateGuestName(trimmed);
+      }
+    }
+    setIsEditingGuest(false);
+  };
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          id="envelope-screen"
+          initial={{ opacity: 1 }}
+          exit={{ opacity: 0, scale: 1.05, filter: 'blur(8px)' }}
+          transition={{ duration: 0.8, ease: 'easeInOut' }}
+          className={`fixed inset-0 z-40 overflow-y-auto scroll-smooth touch-auto ${
+            isTraditionalWedding
+              ? 'bg-[#e9e4dc]'
+              : isHousewarming || isEngagement
+              ? (theme === 'light'
+                  ? 'bg-gradient-to-b from-[#edf3e8] via-[#f7f4e9] to-[#e1ebda]'
+                  : 'bg-gradient-to-b from-[#04140e] via-[#09241b] to-[#030f0a]')
+              : isAnniversary
+              ? (theme === 'light'
+                  ? 'bg-gradient-to-b from-[#f9f3e3] via-[#fdf9ee] to-[#f1e5c8]'
+                  : 'bg-gradient-to-b from-[#1a070d] via-[#2b0b15] to-[#120408]')
+              : isBirthday
+              ? 'bg-gradient-to-b from-[#021317] via-[#06232b] to-[#010b0e]'
+              : theme === 'light'
+              ? 'bg-gradient-to-b from-white via-amber-50 to-white'
+              : theme === 'gray'
+              ? 'bg-gradient-to-b from-zinc-950 via-zinc-900 to-zinc-950'
+              : 'bg-gradient-to-b from-black via-black to-black'
+          }`}
+        >
+          {/* Subtle Background Image Wallpaper with Blur */}
+          {!isBirthday && (
+            <div
+              className={`fixed inset-0 z-0 bg-cover bg-center ${theme === 'light' ? 'opacity-35' : 'opacity-45'} filter blur-[8px] pointer-events-none scale-110 transition-all duration-700`}
+              style={{ backgroundImage: `url(${activeCoverBg})` }}
+            />
+          )}
+
+          {/* Luxury Midnight Teal & Gold Ambient Glow for Birthday */}
+          {isBirthday && (
+            <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+              <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] rounded-full bg-gradient-to-tr from-[#0d9488]/25 via-[#2dd4bf]/20 to-[#fde047]/10 blur-[120px]" />
+              <div className="absolute bottom-10 left-1/3 w-[380px] h-[380px] rounded-full bg-[#14b8a6]/15 blur-[100px]" />
+              <div className="absolute -top-20 right-10 w-[300px] h-[300px] rounded-full bg-[#fde047]/10 blur-[90px]" />
+            </div>
+          )}
+
+          {/* Subtle Golden Particles Background */}
+          <div className={`fixed inset-0 z-0 ${isBirthday ? 'opacity-30' : theme === 'light' ? 'opacity-10' : 'opacity-20'} pointer-events-none bg-[radial-gradient(#fde047_1px,transparent_1px)] [background-size:28px_28px]`} />
+
+          <div
+            className={`min-h-screen w-full flex flex-col items-center justify-center relative z-10 ${
+              isHousewarming || isAnniversary
+                ? `px-3 sm:px-6 md:px-8 ${isAnniversary && isAdmin ? 'pt-[182px]' : 'pt-[92px]'} pb-5 sm:py-8 ${
+                    isHousewarming
+                      ? theme === 'light'
+                        ? 'bg-[radial-gradient(circle_at_50%_40%,rgba(232,191,84,0.16),transparent_65%)]'
+                        : 'bg-[radial-gradient(circle_at_50%_40%,rgba(16,185,129,0.14),transparent_68%)]'
+                      : theme === 'light'
+                      ? 'bg-[radial-gradient(circle_at_50%_40%,rgba(212,175,55,0.14),transparent_66%)]'
+                      : 'bg-[radial-gradient(circle_at_50%_40%,rgba(153,27,51,0.16),transparent_68%)]'
+                  }`
+                : 'p-3 sm:p-6 md:p-8 py-5 sm:py-8'
+            }`}
+          >
+            {/* Envelope Card Container */}
+            <motion.div
+              initial={{ opacity: 0, y: 32, scale: 0.96 }}
+              animate={
+                isOpening
+                  ? { scale: [1, 1.04, 0.94], y: -50, opacity: [1, 1, 0] }
+                  : { opacity: 1, y: 0, scale: 1 }
+              }
+              transition={{
+                duration: isOpening ? 0.75 : 0.8,
+                ease: [0.22, 1, 0.36, 1],
+              }}
+              className={`relative w-full ${isBirthday ? 'max-w-[360px] sm:max-w-[395px] md:max-w-[425px]' : 'max-w-sm sm:max-w-md md:max-w-lg'} mx-auto my-auto rounded-[32px] p-0.5 transition-shadow duration-500 ${
+                isBirthday
+                  ? 'bg-gradient-to-b from-[#2dd4bf]/50 via-[#fde047]/35 to-[#0d9488]/60 shadow-[0_25px_60px_rgba(1,14,18,0.9),0_0_40px_rgba(45,212,191,0.2)]'
+                  : isHousewarming
+                  ? (theme === 'light'
+                      ? 'bg-gradient-to-b from-[#d4af37]/75 via-[#2e6f52]/55 to-[#8a5a10]/75 shadow-[0_24px_60px_rgba(16,59,42,0.22),0_0_32px_rgba(212,175,55,0.18)]'
+                      : 'bg-gradient-to-b from-[#f4cb5c]/75 via-[#156045]/75 to-[#9a6d16]/80 shadow-[0_28px_70px_rgba(2,14,10,0.85),0_0_40px_rgba(244,203,92,0.18)]')
+                  : isAnniversary
+                  ? (theme === 'light'
+                      ? 'bg-gradient-to-b from-[#d4af37]/75 via-[#946212]/55 to-[#731325]/70 shadow-[0_24px_60px_rgba(115,19,37,0.2),0_0_32px_rgba(212,175,55,0.2)]'
+                      : 'bg-gradient-to-b from-[#f4cb5c]/75 via-[#7c1428]/75 to-[#9a6d16]/80 shadow-[0_28px_70px_rgba(16,4,8,0.88),0_0_40px_rgba(244,203,92,0.18)]')
+                  : isWeddingStyle
+                  ? (isModernWedding
+                      ? 'bg-gradient-to-b from-[#fef9c3]/70 via-[#fde047]/50 to-[#d97706]/60 shadow-[0_20px_50px_rgba(30,58,138,0.2)]'
+                      : 'bg-gradient-to-b from-[#e5dfd5] via-[#dcd5c9] to-[#bfb39f] shadow-[0_0_42px_rgba(91,76,54,0.18)]')
+                  : theme === 'light'
+                  ? 'bg-gradient-to-b from-amber-200 via-amber-400 to-amber-500 shadow-[0_20px_60px_rgba(245,184,15,0.25),0_8px_25px_rgba(0,0,0,0.08)]'
+                  : 'bg-gradient-to-b from-amber-300/80 via-amber-500/60 to-amber-900/80 shadow-[0_30px_80px_rgba(0,0,0,0.7),0_0_40px_rgba(245,184,15,0.2)]'
+              }`}
+            >
+              {/* Modern Invitation Card Body */}
+              <div
+                className={`relative rounded-[30px] overflow-hidden min-h-[580px] sm:min-h-[660px] md:min-h-[720px] flex flex-col justify-between items-center text-center border backdrop-blur-xl transition-all duration-300 ${
+                  isBirthday
+                    ? 'p-0 border-[#2dd4bf]/40 shadow-[0_20px_50px_rgba(1,14,18,0.85),inset_0_1px_3px_rgba(255,255,255,0.25)] bg-gradient-to-b from-[#051f26]/95 via-[#082d36]/90 to-[#021317]/98'
+                    : isHousewarming
+                    ? (theme === 'light'
+                        ? 'p-0 border-[#c9972c]/50 shadow-[0_18px_45px_rgba(16,59,42,0.16)] bg-[#f8f5eb]'
+                        : 'p-0 border-[#f4cb5c]/45 shadow-[0_20px_55px_rgba(2,14,10,0.8)] bg-[#071e16]')
+                    : isEngagement
+                    ? (theme === 'light'
+                        ? 'py-7 sm:py-9 md:py-10 px-4 sm:px-7 md:px-9 border-amber-400/60 shadow-[inset_0_1px_3px_rgba(255,255,255,0.75),0_16px_45px_rgba(180,83,9,0.2)] bg-[#fdf6ec]'
+                        : 'py-7 sm:py-9 md:py-10 px-4 sm:px-7 md:px-9 border-amber-300/50 shadow-[inset_0_1px_2px_rgba(255,255,255,0.18),0_22px_60px_rgba(0,0,0,0.75)] bg-[#140a0e]')
+                    : isAnniversary
+                    ? (theme === 'light'
+                        ? 'p-0 border-[#c9972c]/55 shadow-[0_18px_45px_rgba(115,19,37,0.18)] bg-[#fcf7eb]'
+                        : 'p-0 border-[#f4cb5c]/45 shadow-[0_20px_55px_rgba(16,4,8,0.85)] bg-[#1a070d]')
+                    : isWeddingStyle
+                    ? (isModernWedding
+                        ? 'p-0 border-[#d4af37]/60 shadow-[0_15px_45px_rgba(30,58,138,0.18)] bg-[#fbfcf9]'
+                        : 'p-0 border-[#ad8b55]/30 shadow-[0_0_42px_rgba(91,76,54,0.14)] bg-[#faf7f2]')
+                    : theme === 'light'
+                    ? 'py-8 sm:py-10 md:py-12 px-4 sm:px-8 md:px-10 border-amber-300/70 shadow-[inset_0_1px_3px_rgba(255,255,255,0.8),0_10px_35px_rgba(245,184,15,0.2)]'
+                    : 'py-8 sm:py-10 md:py-12 px-4 sm:px-8 md:px-10 border-amber-400/40 shadow-[inset_0_1px_2px_rgba(255,255,255,0.2),0_15px_45px_rgba(0,0,0,0.5)]'
+                }`}
+              >
+                {/* Crisp Cover Background Layer Inside Envelope Card */}
+                {!isWeddingStyle && !isBirthday && !isHousewarming && !isAnniversary && (
+                  <div
+                    className="absolute inset-0 bg-cover bg-center pointer-events-none transition-all duration-700"
+                    style={{ backgroundImage: `url(${activeCoverBg})` }}
+                  />
+                )}
+
+                {isModernWedding && (
+                  <>
+                    {/* Golden Border Overlays (Matching Screenshot 1) */}
+                    <div className="absolute inset-3 border-[1.5px] border-[#d4af37]/50 rounded-[22px] pointer-events-none z-10" />
+                    <div className="absolute inset-4 border border-[#d4af37]/30 rounded-[20px] pointer-events-none z-10" />
+
+                    {/* Corner Flourishes */}
+                    <div className="absolute top-4 left-4 w-10 h-10 text-[#d4af37]/80 pointer-events-none z-10">
+                      <KhmerCornerKbach position="top-left" className="w-full h-full" />
+                    </div>
+                    <div className="absolute top-4 right-4 w-10 h-10 text-[#d4af37]/80 pointer-events-none z-10">
+                      <KhmerCornerKbach position="top-right" className="w-full h-full" />
+                    </div>
+                    <div className="absolute bottom-4 left-4 w-10 h-10 text-[#d4af37]/80 pointer-events-none z-10">
+                      <KhmerCornerKbach position="bottom-left" className="w-full h-full" />
+                    </div>
+                    <div className="absolute bottom-4 right-4 w-10 h-10 text-[#d4af37]/80 pointer-events-none z-10">
+                      <KhmerCornerKbach position="bottom-right" className="w-full h-full" />
+                    </div>
+
+                    {/* Floating Peonies with Gold Outlines on Left, Right and Top */}
+                    <div className="absolute bottom-0 right-0 w-44 sm:w-56 h-44 sm:h-56 opacity-85 pointer-events-none z-10 select-none">
+                      <img src="https://focuz-staging-space.sgp1.cdn.digitaloceanspaces.com/plan-essential/template/free/template-1/contents/peony-bottom-right.png" className="w-full h-full object-contain" alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                    </div>
+                    <div className="absolute bottom-12 left-0 w-36 sm:w-48 h-36 sm:h-48 opacity-80 pointer-events-none z-10 select-none">
+                      <img src="https://focuz-staging-space.sgp1.cdn.digitaloceanspaces.com/plan-essential/template/free/template-1/contents/peony-bottom-left.png" className="w-full h-full object-contain" alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                    </div>
+                    <div className="absolute top-16 right-0 w-36 sm:w-44 h-36 sm:h-44 opacity-75 pointer-events-none z-10 select-none">
+                      <img src="https://focuz-staging-space.sgp1.cdn.digitaloceanspaces.com/plan-essential/template/free/template-1/contents/peony-top-right.png" className="w-full h-full object-contain" alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                    </div>
+                  </>
+                )}
+
+                {isAnniversary ? (
+                  <KhmerStoryAnniversaryCover
+                    eventData={eventData}
+                    groom={groom}
+                    bride={bride}
+                    groomEn={groomEn}
+                    brideEn={brideEn}
+                    singlePerson={singlePerson}
+                    subtitleKh={subtitleKh}
+                    subtitleEn={subtitleEn}
+                    anniversaryMilestone={anniversaryMilestone}
+                    anniversaryMilestoneEn={anniversaryMilestoneEn}
+                    storyStartYear={storyStartYear}
+                    storyMessageKh={invitationMessageKh}
+                    storyMessageEn={invitationMessageEn}
+                    ribbonLabel={ribbonLabel}
+                    guestName={guestName}
+                    language={language}
+                    theme={theme}
+                    isOpening={isOpening}
+                    isAdmin={isAdmin}
+                    savedGuestsList={savedGuestsList}
+                    eventDate={eventDate}
+                    eventTime={eventTime}
+                    eventLocation={eventLocation}
+                    eventLocationEn={eventLocationEn}
+                    mapUrl={mapUrl}
+                    coverBackground={coverBackground}
+                    envelopeHeaderImage={envelopeHeaderImage}
+                    coverEnNameColor={coverEnNameColor}
+                    coverEnFontFamily={coverEnFontFamily}
+                    guestNameFontFamily={guestNameFontFamily}
+                    guestNameFontSize={guestNameFontSize}
+                    activeEnvelopeColor={activeEnvelopeColor}
+                    isPlayingMusic={isPlayingMusic}
+                    onToggleMusic={toggleMusicPlay}
+                    onRestartMusic={() => {
+                      const audio = document.getElementById('wedding-audio') as HTMLAudioElement | null;
+                      if (audio) {
+                        audio.currentTime = 0;
+                        audio.play().catch(() => {});
+                        setIsPlayingMusic(true);
+                      }
+                    }}
+                    onToggleLanguage={onToggleLanguage}
+                    onOpenDesignTab={onOpenDesignTab}
+                    onSaveAnniversaryInfo={onSaveAnniversaryInfo}
+                    allowQuickEdit={allowQuickEdit}
+                    onRequireAdminAuth={onRequireAdminAuth}
+                    onSelectFromDropbox={handleSelectFromDropbox}
+                    onOpenAddGuestModal={onOpenAddGuestModal}
+                    onUpdateGuestName={onUpdateGuestName}
+                    onOpenInvitation={handleOpenInvitation}
+                  />
+                ) : isWeddingStyle ? (
+                  isModernWedding ? (
+                    <div className="relative z-20 w-full h-full flex flex-col justify-between items-center">
+                      {/* Top Right Floating Controls: Next Track & Audio Toggle & Quick Design Editor */}
+                      <div className="absolute top-2 right-2 z-30 flex items-center gap-1.5">
+                        {onToggleLanguage && (
+                          <button
+                            type="button"
+                            onClick={onToggleLanguage}
+                            className="px-2 py-0.5 rounded-full bg-white/90 hover:bg-white text-[11px] font-khmer font-bold flex items-center gap-1 shadow-sm backdrop-blur-sm border cursor-pointer text-amber-900 border-amber-300"
+                            title={language === 'kh' ? 'ប្តូរទៅអង់គ្លេស / Switch to English' : 'Switch to Khmer / ប្តូរទៅខ្មែរ'}
+                          >
+                            <Globe className="w-3 h-3" />
+                            <span>{language === 'kh' ? 'ខ្មែរ | EN' : 'EN | ខ្មែរ'}</span>
+                          </button>
+                        )}
+                        {isAdmin && onOpenDesignTab && (
+                          <button
+                            type="button"
+                            onClick={onOpenDesignTab}
+                            className="px-2 py-0.5 rounded-full bg-white/90 hover:bg-white text-[11px] font-khmer font-bold flex items-center gap-1 shadow-sm backdrop-blur-sm border cursor-pointer text-amber-900 border-amber-300"
+                            title={language === 'kh' ? 'កែពណ៌សំបុត្រក្នុង "ការរចនា"' : 'Edit Color in "Design" Tab'}
+                          >
+                            <span
+                              className="w-2.5 h-2.5 rounded-full border border-white shadow-xs shrink-0"
+                              style={{ backgroundColor: activeEnvelopeColor || '#f59e0b' }}
+                            />
+                            <span>{language === 'kh' ? 'កែ' : 'Edit'}</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const audio = document.getElementById('wedding-audio') as HTMLAudioElement | null;
+                            if (audio) {
+                              audio.currentTime = 0;
+                              audio.play().catch(() => {});
+                              setIsPlayingMusic(true);
+                            }
+                          }}
+                          className="w-7 h-7 rounded-full bg-white/90 hover:bg-white flex items-center justify-center shadow-sm backdrop-blur-sm border cursor-pointer text-amber-900 border-amber-300"
+                          title="Replay / Restart Music"
+                        >
+                          <SkipForward className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={toggleMusicPlay}
+                          className="w-7 h-7 rounded-full bg-white/90 hover:bg-white flex items-center justify-center shadow-md backdrop-blur-sm border cursor-pointer text-amber-900 border-amber-300"
+                          title={isPlayingMusic ? 'Mute' : 'Play'}
+                        >
+                          {isPlayingMusic ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+
+                      <KhmerRoyalModernWeddingCover
+                        groom={groom}
+                        bride={bride}
+                        groomEn={groomEn}
+                        brideEn={brideEn}
+                        subtitleKh={subtitleKh}
+                        guestName={guestName && guestName !== 'Your Name' ? guestName : (language === 'kh' ? 'លោក រ៉ូហ្សា\nនិងភរិយាព្រមទាំងបុត្រ' : 'Honored Guest')}
+                        titleShape={titleTextShape}
+                        language={language}
+                        onOpenInvitation={handleOpenInvitation}
+                        isOpening={isOpening}
+                        isAdmin={isAdmin}
+                        savedGuestsList={savedGuestsList}
+                        onSelectFromDropbox={handleSelectFromDropbox}
+                        onOpenAddGuestModal={onOpenAddGuestModal}
+                        onUpdateGuestName={onUpdateGuestName}
+                      />
+                    </div>
+                  ) : (
+                    <div className="relative z-20 w-full h-full flex flex-col justify-between items-center">
+                      {/* Top Right Floating Controls: Next Track & Audio Toggle & Quick Design Editor */}
+                      <div className="absolute top-2 right-2 z-30 flex items-center gap-1.5">
+                        {onToggleLanguage && (
+                          <button
+                            type="button"
+                            onClick={onToggleLanguage}
+                            className="px-2 py-0.5 rounded-full bg-white/90 hover:bg-white text-[11px] font-khmer font-bold flex items-center gap-1 shadow-sm backdrop-blur-sm border cursor-pointer text-[#ad8b55] border-[#ad8b55]/40"
+                            title={language === 'kh' ? 'ប្តូរទៅអង់គ្លេស / Switch to English' : 'Switch to Khmer / ប្តូរទៅខ្មែរ'}
+                          >
+                            <Globe className="w-3 h-3" />
+                            <span>{language === 'kh' ? 'ខ្មែរ | EN' : 'EN | ខ្មែរ'}</span>
+                          </button>
+                        )}
+                        {isAdmin && onOpenDesignTab && (
+                          <button
+                            type="button"
+                            onClick={onOpenDesignTab}
+                            className="px-2 py-0.5 rounded-full bg-white/90 hover:bg-white text-[11px] font-khmer font-bold flex items-center gap-1 shadow-sm backdrop-blur-sm border cursor-pointer text-[#ad8b55] border-[#ad8b55]/40"
+                            title={language === 'kh' ? 'កែពណ៌សំបុត្រក្នុង "ការរចនា"' : 'Edit Color in "Design" Tab'}
+                          >
+                            <span
+                              className="w-2.5 h-2.5 rounded-full border border-white shadow-xs shrink-0"
+                              style={{ backgroundColor: activeEnvelopeColor || '#ad8b55' }}
+                            />
+                            <span>{language === 'kh' ? 'កែ' : 'Edit'}</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const audio = document.getElementById('wedding-audio') as HTMLAudioElement | null;
+                            if (audio) {
+                              audio.currentTime = 0;
+                              audio.play().catch(() => {});
+                              setIsPlayingMusic(true);
+                            }
+                          }}
+                          className="w-7 h-7 rounded-full bg-white/90 hover:bg-white flex items-center justify-center shadow-sm backdrop-blur-sm border cursor-pointer text-[#ad8b55] border-[#ad8b55]/40"
+                          title="Replay / Restart Music"
+                        >
+                          <SkipForward className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={toggleMusicPlay}
+                          className="w-7 h-7 rounded-full bg-white/90 hover:bg-white flex items-center justify-center shadow-md backdrop-blur-sm border cursor-pointer text-[#ad8b55] border-[#ad8b55]/40"
+                          title={isPlayingMusic ? 'Mute' : 'Play'}
+                        >
+                          {isPlayingMusic ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+
+                      <TheapKhmerTemplate15Cover
+                        groom={groom}
+                        bride={bride}
+                        groomEn={groomEn}
+                        brideEn={brideEn}
+                        subtitleKh={subtitleKh}
+                        guestName={guestName && guestName !== 'Your Name' ? guestName : (language === 'kh' ? 'លោក វ៉ាន់ សុខា' : 'Honored Guest')}
+                        language={language}
+                        onOpenInvitation={handleOpenInvitation}
+                        isOpening={isOpening}
+                        isAdmin={isAdmin}
+                        savedGuestsList={savedGuestsList}
+                        onSelectFromDropbox={handleSelectFromDropbox}
+                        onOpenAddGuestModal={onOpenAddGuestModal}
+                        onUpdateGuestName={onUpdateGuestName}
+                        guestNameFontFamily={guestNameFontFamily}
+                        guestNameColor={guestNameColor}
+                        guestNameFontSize={guestNameFontSize}
+                      />
+                    </div>
+                  )
+                ) : isBirthday ? (
+                  /* Premium Luxury Midnight Teal & Champagne Gold Birthday Party Invitation */
+                  <div className="relative z-10 w-full max-w-[360px] sm:max-w-[395px] md:max-w-[420px] mx-auto my-auto self-center h-full min-h-[600px] sm:min-h-[650px] flex flex-col justify-between items-center text-center px-3.5 sm:px-5 py-4 sm:py-5 overflow-hidden rounded-[28px] bg-gradient-to-b from-[#072d36]/90 via-[#0a3843]/80 to-[#02181d]/95 backdrop-blur-2xl text-white shadow-[0_20px_60px_rgba(1,14,18,0.9),inset_0_1px_2px_rgba(255,255,255,0.25)] select-none border border-[#2dd4bf]/40">
+                    {/* Inner Beveled Double Gold Hairline Border */}
+                    <div className="absolute inset-2 sm:inset-2.5 rounded-[22px] border border-[#fde047]/30 pointer-events-none z-10" />
+                    <div className="absolute inset-3 sm:inset-3.5 rounded-[20px] border border-[#2dd4bf]/20 pointer-events-none z-10" />
+
+                    {/* Ambient Glass Reflections & Glows */}
+                    <div className="pointer-events-none absolute -top-16 -left-16 w-56 h-56 rounded-full bg-gradient-to-br from-white/20 via-[#2dd4bf]/15 to-transparent blur-2xl" />
+                    <div className="pointer-events-none absolute -bottom-16 -right-16 w-56 h-56 rounded-full bg-gradient-to-tl from-[#fde047]/20 via-[#0d9488]/15 to-transparent blur-2xl" />
+
+                    {/* Floating Metallic Balloons, Streamers & Sparkles SVG Layer */}
+                    <svg
+                      viewBox="0 0 380 660"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="pointer-events-none absolute inset-0 w-full h-full z-0 opacity-80"
+                    >
+                      <defs>
+                        <radialGradient id="goldBalloonGrad" cx="35%" cy="35%" r="65%">
+                          <stop offset="0%" stopColor="#fef08a" />
+                          <stop offset="45%" stopColor="#fde047" />
+                          <stop offset="85%" stopColor="#ca8a04" />
+                          <stop offset="100%" stopColor="#854d0e" />
+                        </radialGradient>
+                        <radialGradient id="tealBalloonGrad" cx="35%" cy="35%" r="65%">
+                          <stop offset="0%" stopColor="#99f6e4" />
+                          <stop offset="45%" stopColor="#2dd4bf" />
+                          <stop offset="85%" stopColor="#0d9488" />
+                          <stop offset="100%" stopColor="#042f2e" />
+                        </radialGradient>
+                      </defs>
+
+                      {/* Top Left Floating Stars */}
+                      <polygon points="32,28 35,37 44,37 37,42 40,51 32,46 24,51 27,42 20,37 29,37" fill="#fde047" opacity="0.9" />
+                      <polygon points="58,62 60,67 66,67 61,71 63,77 58,73 53,77 55,71 50,67 56,67" fill="#2dd4bf" opacity="0.8" />
+                      <polygon points="345,35 347,41 354,41 349,45 351,52 345,48 339,52 341,45 336,41 343,41" fill="#fde047" opacity="0.85" />
+                      <polygon points="322,78 324,83 330,83 325,87 327,93 322,89 317,93 319,87 314,83 320,83" fill="#2dd4bf" opacity="0.75" />
+
+                      {/* Golden Twisting Streamers */}
+                      <path d="M 14 75 Q 26 84 18 100 T 30 125" stroke="#fde047" strokeWidth="2.2" strokeLinecap="round" opacity="0.75" />
+                      <path d="M 8 112 Q 22 120 14 136 T 24 160" stroke="#2dd4bf" strokeWidth="2" strokeLinecap="round" opacity="0.65" />
+                      <path d="M 358 110 Q 344 122 352 140 T 340 168" stroke="#fde047" strokeWidth="2.2" strokeLinecap="round" opacity="0.7" />
+
+                      {/* Floating Confetti Circles */}
+                      <circle cx="28" cy="180" r="2.5" fill="#fde047" opacity="0.8" />
+                      <circle cx="48" cy="220" r="2" fill="#5eead4" opacity="0.7" />
+                      <circle cx="340" cy="205" r="2.5" fill="#fde047" opacity="0.75" />
+                      <circle cx="355" cy="260" r="3" fill="#2dd4bf" opacity="0.8" />
+                      <circle cx="30" cy="440" r="2.5" fill="#fde047" opacity="0.7" />
+
+                      {/* Top-Right Decorative Balloon (Teal) */}
+                      <ellipse cx="348" cy="98" rx="16" ry="21" fill="url(#tealBalloonGrad)" opacity="0.85" />
+                      <polygon points="348,118 345,122 351,122" fill="#0d9488" opacity="0.85" />
+                      <path d="M 342,90 A 6,10 0 0,1 346,85" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none" opacity="0.6" />
+                      <path d="M 348,122 Q 352,136 349,152" stroke="#2dd4bf" strokeWidth="1.2" strokeLinecap="round" fill="none" opacity="0.6" />
+
+                      {/* Bottom-Right Luxury Gold & Teal Balloons */}
+                      <ellipse cx="342" cy="528" rx="19" ry="25" fill="url(#goldBalloonGrad)" opacity="0.9" />
+                      <polygon points="342,552 338,557 346,557" fill="#ca8a04" opacity="0.9" />
+                      <path d="M 334,516 A 8,12 0 0,1 340,510" stroke="white" strokeWidth="2" strokeLinecap="round" fill="none" opacity="0.7" />
+                      <path d="M 342,557 Q 346,575 342,598" stroke="#ca8a04" strokeWidth="1.3" strokeLinecap="round" fill="none" opacity="0.7" />
+
+                      <ellipse cx="316" cy="558" rx="16" ry="21" fill="url(#tealBalloonGrad)" opacity="0.85" />
+                      <polygon points="316,578 313,582 319,582" fill="#0d9488" opacity="0.85" />
+                      <path d="M 310,548 A 6,10 0 0,1 314,544" stroke="white" strokeWidth="1.5" strokeLinecap="round" fill="none" opacity="0.6" />
+                      <path d="M 316,582 Q 320,596 318,615" stroke="#2dd4bf" strokeWidth="1.2" strokeLinecap="round" fill="none" opacity="0.6" />
+                    </svg>
+
+                    {/* Top Controls Bar: Language Toggle + Design + Surprise Gift Box + Music Toggle */}
+                    <div className="relative z-20 w-full flex items-center justify-between px-2 pt-1">
+                      <div className="flex items-center gap-1.5">
+                        {onToggleLanguage && (
+                          <button
+                            type="button"
+                            onClick={onToggleLanguage}
+                            className="px-2 py-1 rounded-lg bg-[#04242b]/90 hover:bg-[#063842] text-[11px] font-khmer font-bold flex items-center gap-1 shadow-sm backdrop-blur-md border border-[#2dd4bf]/40 text-teal-200 cursor-pointer"
+                            title={language === 'kh' ? 'ប្តូរទៅអង់គ្លេស / Switch to English' : 'Switch to Khmer / ប្តូរទៅខ្មែរ'}
+                          >
+                            <Globe className="w-3.5 h-3.5" />
+                            <span>{language === 'kh' ? 'ខ្មែរ | EN' : 'EN | ខ្មែរ'}</span>
+                          </button>
+                        )}
+                        {isAdmin && onOpenDesignTab && (
+                          <button
+                            type="button"
+                            onClick={onOpenDesignTab}
+                            className="px-2 py-1 rounded-lg bg-[#04242b]/90 hover:bg-[#063842] text-[11px] font-khmer font-bold flex items-center gap-1 shadow-sm backdrop-blur-md border border-[#2dd4bf]/40 text-teal-200 cursor-pointer"
+                            title={language === 'kh' ? 'កែរចនា' : 'Design'}
+                          >
+                            <Palette className="w-3.5 h-3.5 text-[#fde047]" />
+                            <span>{language === 'kh' ? 'កែរចនា' : 'Design'}</span>
+                          </button>
+                        )}
+                        {/* Surprise Gift Button */}
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={handleGiftClick}
+                            title="Click for birthday surprise!"
+                            className="group flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gradient-to-r from-[#fde047]/20 via-[#2dd4bf]/20 to-[#fde047]/10 border border-[#fde047]/50 hover:border-[#fde047] text-[#fef08a] hover:text-white transition-all duration-300 shadow-sm hover:scale-105 active:scale-95 cursor-pointer backdrop-blur-md"
+                          >
+                            <Gift className="w-4 h-4 text-[#fde047] animate-bounce shrink-0" />
+                            <span className="text-[11px] font-bold tracking-wide">
+                              {language === 'kh' ? 'កាដូ' : 'Gift'}
+                            </span>
+                          </button>
+
+                          {/* Interactive Surprise Toast */}
+                          <AnimatePresence>
+                            {isGiftSurpriseOpen && (
+                              <motion.div
+                                initial={{ opacity: 0, y: -10, scale: 0.9 }}
+                                animate={{ opacity: 1, y: 0, scale: 1 }}
+                                exit={{ opacity: 0, y: -8, scale: 0.9 }}
+                                className="absolute top-9 left-0 z-30 w-52 p-2.5 rounded-xl bg-gradient-to-r from-[#0d9488] via-[#0f766e] to-[#042f2e] text-white text-xs font-semibold shadow-xl border border-[#fde047]/60 text-center"
+                              >
+                                <div className="flex items-center justify-center gap-1 text-[#fde047] mb-1 font-bold">
+                                  <Sparkles className="w-3.5 h-3.5" />
+                                  <span>{language === 'kh' ? 'រីករាយថ្ងៃខួបកំណើត!' : 'Happy Birthday!'}</span>
+                                </div>
+                                <p className="text-[11px] text-teal-100 leading-tight">
+                                  {language === 'kh'
+                                    ? 'សូមជូនពរសុខភាពល្អ សុភមង្គល និងជោគជ័យគ្រប់ភារកិច្ច! ✨'
+                                    : 'Wishing you abundant joy, good health, and wonderful success! ✨'}
+                                </p>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const audio = document.getElementById('wedding-audio') as HTMLAudioElement | null;
+                            if (audio) {
+                              audio.currentTime = 0;
+                              audio.play().catch(() => {});
+                              setIsPlayingMusic(true);
+                            }
+                          }}
+                          className="w-7 h-7 rounded-full bg-[#04242b]/90 hover:bg-[#063842] flex items-center justify-center shadow-sm backdrop-blur-md border border-[#2dd4bf]/40 text-teal-200 cursor-pointer"
+                          title="Replay Music"
+                        >
+                          <SkipForward className="w-3.5 h-3.5" />
+                        </button>
+                        {/* Music Player Button */}
+                        <button
+                          type="button"
+                          onClick={toggleMusicPlay}
+                          title={isPlayingMusic ? 'Pause Music' : 'Play Music'}
+                          className={`w-7 h-7 rounded-full border transition-all duration-300 cursor-pointer backdrop-blur-md flex items-center justify-center ${
+                            isPlayingMusic
+                              ? 'bg-[#2dd4bf]/25 border-[#2dd4bf] text-[#5eead4] shadow-[0_0_12px_rgba(45,212,191,0.5)]'
+                              : 'bg-[#04242b]/90 border-[#2dd4bf]/40 text-teal-200 hover:text-white'
+                          }`}
+                        >
+                          {isPlayingMusic ? (
+                            <Volume2 className="w-4 h-4 animate-pulse text-[#5eead4]" />
+                          ) : (
+                            <VolumeX className="w-4 h-4" />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Main Headline: Bold & Highly Readable Khmer Headline */}
+                    <div className="relative z-10 flex flex-col items-center justify-center mt-1 mb-0.5 px-2">
+                      <h1
+                        className="tracking-wide font-bold font-moul bg-gradient-to-r from-[#fef08a] via-[#fde047] to-[#2dd4bf] bg-clip-text text-transparent drop-shadow-[0_2px_12px_rgba(253,224,71,0.4)]"
+                        style={{
+                          fontFamily: "'Moul', serif",
+                          fontSize: '26px',
+                          lineHeight: '46px',
+                        }}
+                      >
+                        {language === 'kh' 
+                          ? (subtitleKh || 'រីករាយពិធីខួបកំណើត') 
+                          : (subtitleEn || 'HAPPY BIRTHDAY PARTY')}
+                      </h1>
+                      {(anniversaryMilestone?.trim() || anniversaryMilestoneEn?.trim()) ? (
+                        <span
+                          className="mt-0.5 px-3 py-0.5 rounded-full bg-[#fde047]/15 border border-[#fde047]/45 text-xs sm:text-[13px] font-bold text-[#fef08a] tracking-wide drop-shadow-sm"
+                          style={{ fontFamily: "'Noto Serif Khmer', 'Playfair Display', serif" }}
+                        >
+                          {language === 'kh'
+                            ? (anniversaryMilestone?.trim() || anniversaryMilestoneEn?.trim())
+                            : (anniversaryMilestoneEn?.trim() || anniversaryMilestone?.trim())}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] sm:text-[11px] font-bold tracking-[0.25em] text-[#5eead4] uppercase mt-0.5 drop-shadow-sm">
+                          CELEBRATING LIFE &amp; JOY
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Celebrant / Host Name */}
+                    <div className="relative z-10 flex flex-col items-center my-0.5">
+                      {(singlePerson ? groom : (groom || bride)) && (
+                        <span
+                          className="text-[#99f6e4] tracking-wide mb-0.5 drop-shadow-[0_1px_4px_rgba(0,0,0,0.5)]"
+                          style={{
+                            fontFamily: "'Khmer OS Bokor', 'Bokor', display",
+                            fontSize: '22px',
+                            lineHeight: '30px',
+                          }}
+                        >
+                          {singlePerson ? groom : (groom || bride)}
+                        </span>
+                      )}
+                      <h2
+                        className="tracking-wider text-white py-0.5 drop-shadow-[0_2px_10px_rgba(45,212,191,0.6)] font-bold"
+                        style={{
+                          fontFamily: "'Dancing Script', cursive",
+                          fontSize: '30px',
+                          lineHeight: '36px',
+                        }}
+                      >
+                        {(singlePerson ? (groomEn || groom) : (groomEn || groom)) || 'SAMARA'}
+                      </h2>
+                    </div>
+
+                    {/* Date, Time & Venue Badge (Centerpiece) */}
+                    <div className="relative z-10 w-full max-w-[290px] sm:max-w-[330px] mx-auto my-1 px-3 py-2 rounded-2xl bg-[#04242b]/75 border border-[#2dd4bf]/40 shadow-[0_8px_25px_rgba(0,0,0,0.45)] backdrop-blur-md">
+                      {/* Month Label with Gold Stars */}
+                      <div className="text-[11px] sm:text-[12px] font-extrabold tracking-[0.26em] text-[#fde047] uppercase mb-1 flex items-center justify-center gap-2">
+                        <Star className="w-2.5 h-2.5 fill-[#fde047] text-[#fde047]" />
+                        <span>
+                          {(() => {
+                            if (eventDate) {
+                              const d = new Date(eventDate);
+                              if (!isNaN(d.getTime())) {
+                                return d.toLocaleString('en-US', { month: 'long' }).toUpperCase();
+                              }
+                            }
+                            return 'DECEMBER';
+                          })()}
+                        </span>
+                        <Star className="w-2.5 h-2.5 fill-[#fde047] text-[#fde047]" />
+                      </div>
+
+                      {/* Day, Date & Time Row */}
+                      <div className="w-full border-t border-b border-[#2dd4bf]/50 py-1.5 flex items-center justify-between px-2 text-white">
+                        <span className="font-bold tracking-wider uppercase text-[12px] sm:text-[13px] text-teal-100">
+                          {(() => {
+                            if (eventDate) {
+                              const d = new Date(eventDate);
+                              if (!isNaN(d.getTime())) {
+                                return d.toLocaleString('en-US', { weekday: 'long' }).toUpperCase();
+                              }
+                            }
+                            return 'SATURDAY';
+                          })()}
+                        </span>
+                        <span className="text-3xl sm:text-4xl font-black text-[#fde047] leading-none px-2 drop-shadow-[0_0_12px_rgba(253,224,71,0.6)]">
+                          {(() => {
+                            if (eventDate) {
+                              const d = new Date(eventDate);
+                              if (!isNaN(d.getTime())) {
+                                return String(d.getDate());
+                              }
+                              const m = eventDate.match(/(\d{1,2})/);
+                              if (m) return m[1];
+                            }
+                            return '12';
+                          })()}
+                        </span>
+                        <span className="font-bold tracking-wider uppercase text-[12px] sm:text-[13px] text-teal-100">
+                          {eventTime || '06:30 PM'}
+                        </span>
+                      </div>
+
+                      {/* Expandable Location Section */}
+                      <div className="mt-1.5 flex flex-col items-center">
+                        <button
+                          type="button"
+                          onClick={() => setIsLocationExpanded(!isLocationExpanded)}
+                          className="flex items-center justify-center gap-1.5 text-[10px] sm:text-[11px] font-semibold tracking-wider text-[#5eead4] hover:text-[#fde047] transition-colors cursor-pointer max-w-full"
+                        >
+                          <MapPin className="w-3 h-3 text-[#fde047] shrink-0" />
+                          <span className="truncate max-w-[210px] sm:max-w-[240px]">
+                            {eventLocation || 'Suon Monorom Sky Lounge & Restaurant (Koh Pich)'}
+                          </span>
+                          <ChevronDown
+                            className={`w-3 h-3 transition-transform duration-200 shrink-0 ${
+                              isLocationExpanded ? 'rotate-180' : ''
+                            }`}
+                          />
+                        </button>
+
+                        <AnimatePresence>
+                          {isLocationExpanded && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              className="w-full mt-2 pt-2 border-t border-[#2dd4bf]/20 text-center"
+                            >
+                              <p className="text-[11px] text-teal-100 font-medium mb-1.5">
+                                {eventLocation || 'Suon Monorom Sky Lounge & Restaurant, Koh Pich, Phnom Penh'}
+                              </p>
+                              <a
+                                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                                  eventLocation || 'Suon Monorom Sky Lounge Koh Pich Phnom Penh'
+                                )}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-[#0d9488]/80 hover:bg-[#0d9488] text-white text-[10px] font-bold border border-[#5eead4]/50 shadow-sm transition-all"
+                              >
+                                <MapPin className="w-3 h-3 text-[#fde047]" />
+                                <span>{language === 'kh' ? 'មើលទីតាំងលើផែនទី Google Maps' : 'View on Google Maps'}</span>
+                              </a>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+
+                    {/* Real Birthday Cake Image with Golden Glow Border */}
+                    <div className="relative z-10 my-1 flex justify-center">
+                      <div className="relative group p-1 rounded-2xl bg-gradient-to-tr from-[#2dd4bf]/50 via-[#fde047]/40 to-[#0d9488]/60 shadow-[0_8px_25px_rgba(0,0,0,0.5)]">
+                        <img
+                          src="/assets/images/real_birthday_cake.jpg"
+                          alt="Birthday Celebration Cake"
+                          onError={(e) => {
+                            // Fallback to secondary asset or high-res cake image if needed
+                            const target = e.currentTarget;
+                            if (!target.src.includes('real_birthday_cake_1790740588590')) {
+                              target.src = '/src/assets/images/real_birthday_cake_1790740588590.jpg';
+                            } else {
+                              target.src = 'https://images.unsplash.com/photo-1535141192574-5d4897c13136?q=80&w=600&auto=format&fit=crop';
+                            }
+                          }}
+                          className="w-22 h-22 sm:w-26 sm:h-26 object-cover rounded-xl border border-white/40 shadow-inner group-hover:scale-105 transition-transform duration-300"
+                        />
+                        <div className="absolute -top-1.5 -right-1.5 bg-[#fde047] text-neutral-900 rounded-full p-1 shadow-md">
+                          <Sparkles className="w-3 h-3 text-[#854d0e]" />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Guest Selection Drop Box & Honored Guest Plaque */}
+                    <div className="relative z-10 w-full max-w-[290px] sm:max-w-[330px] flex flex-col items-center my-0.5">
+                      {savedGuestsList.length > 0 && (
+                        <div className="w-full mb-1.5">
+                          <select
+                            id="guest-database-dropbox-select"
+                            value={savedGuestsList.some((g) => g.name === guestName) ? guestName : ''}
+                            onChange={(e) => handleSelectFromDropbox(e.target.value)}
+                            className="w-full px-3 py-1.5 rounded-xl bg-[#04242b]/90 text-teal-100 font-khmer text-xs border border-[#2dd4bf]/40 shadow-sm focus:outline-none focus:ring-2 focus:ring-[#2dd4bf]/50 cursor-pointer backdrop-blur-md"
+                          >
+                            <option value="" disabled className="bg-[#031d23] text-teal-200">
+                              {language === 'kh' ? '▼ ជ្រើសរើសឈ្មោះភ្ញៀវពីបញ្ជី (Drop box)...' : '▼ Select Guest from Database (Drop box)...'}
+                            </option>
+                            {savedGuestsList.map((g, idx) => (
+                              <option key={g.id ? `${g.id}-${idx}` : `db-guest-${idx}`} value={g.name} className="bg-[#031d23] text-white py-1">
+                                {g.name} {g.categoryLabelKh ? `(${language === 'kh' ? g.categoryLabelKh : (g.categoryLabelEn || g.categoryLabelKh)})` : ''}
+                              </option>
+                            ))}
+                            {isAdmin && (
+                              <option value="__ADD_NEW__" className="bg-[#0d9488] text-white font-bold">
+                                + {language === 'kh' ? 'បន្ថែមភ្ញៀវថ្មី / Add Guest...' : '+ Add New Guest...'}
+                              </option>
+                            )}
+                          </select>
+                        </div>
+                      )}
+
+                      {/* Guest Card: Premium Glassmorphism Plaque */}
+                      <div className="w-full px-4 py-2 rounded-2xl bg-gradient-to-r from-[#032026]/90 via-[#073642]/85 to-[#032026]/90 border border-[#2dd4bf]/40 shadow-[0_6px_20px_rgba(0,0,0,0.4)] backdrop-blur-md flex flex-col items-center">
+                        <span className="text-[10px] sm:text-[11px] font-bold tracking-widest text-[#fde047] uppercase">
+                          {ribbonLabel || (language === 'kh' ? 'សូមគោរពអញ្ជើញ' : 'Cordially Invited')}
+                        </span>
+                        <span
+                          className="font-bold tracking-wide truncate max-w-[260px] mt-0.5 text-center text-white drop-shadow-[0_2px_8px_rgba(45,212,191,0.5)]"
+                          style={{
+                            fontFamily: guestNameFontFamily || "'Moul', serif",
+                            fontSize: guestNameFontSize ? `${guestNameFontSize}px` : '16px',
+                            lineHeight: '28px',
+                          }}
+                        >
+                          {guestName && guestName !== 'Your Name' ? guestName : (language === 'kh' ? 'ភ្ញៀវកិត្តិយស' : 'Honored Guest')}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Main Glowing Open Birthday Button */}
+                    <div className="relative z-20 w-full flex justify-center pt-1 pb-1">
+                      <motion.button
+                        id="open-invitation-btn"
+                        onClick={handleOpenInvitation}
+                        disabled={isOpening}
+                        whileHover={{ scale: 1.04, y: -2 }}
+                        whileTap={{ scale: 0.96 }}
+                        className="relative group w-auto max-w-[260px] sm:max-w-[280px] mx-auto py-2.5 sm:py-3 px-6 sm:px-8 rounded-full text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-[#0d9488] via-[#14b8a6] to-[#0f766e] hover:from-[#14b8a6] hover:to-[#0d9488] shadow-[0_8px_25px_rgba(20,184,166,0.55),0_0_20px_rgba(253,224,71,0.3)] border-2 border-[#fde047]/80 flex items-center justify-center gap-2.5 transition-all duration-300 overflow-hidden cursor-pointer"
+                      >
+                        {/* Golden Shimmer Sweep */}
+                        <div className="pointer-events-none absolute inset-0 z-[1] -translate-x-[100%] bg-gradient-to-r from-transparent via-[#fde047]/40 to-transparent transition-transform duration-1000 group-hover:translate-x-[100%]" />
+
+                        <div className="relative z-[2] flex items-center justify-center gap-2">
+                          <Cake className="w-4 h-4 text-[#fde047] animate-bounce shrink-0" />
+                          <span
+                            className="tracking-wider text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.5)] font-bold text-xs sm:text-sm"
+                            style={{ fontFamily: "'Noto Serif Khmer', serif" }}
+                          >
+                            {isOpening
+                              ? (language === 'kh' ? 'កំពុងបើកធៀប...' : 'Opening Invitation...')
+                              : (language === 'kh' ? 'សូមចុចបើកធៀប' : 'Open Birthday Invitation')}
+                          </span>
+                          <Sparkles className="w-3.5 h-3.5 text-[#fde047] shrink-0" />
+                        </div>
+                      </motion.button>
+                    </div>
+                  </div>
+                ) : isHousewarming ? (
+                  <KhmerNatureHousewarmingCover
+                    groom={groom}
+                    bride={bride}
+                    groomEn={groomEn}
+                    brideEn={brideEn}
+                    singlePerson={singlePerson}
+                    subtitleKh={subtitleKh}
+                    subtitleEn={subtitleEn}
+                    ribbonLabel={ribbonLabel}
+                    guestName={guestName}
+                    language={language}
+                    theme={theme}
+                    isOpening={isOpening}
+                    isAdmin={isAdmin}
+                    savedGuestsList={savedGuestsList}
+                    eventDate={eventDate}
+                    eventTime={eventTime}
+                    eventLocation={eventLocation}
+                    coverBackground={coverBackground}
+                    primaryColor={primaryColor}
+                    coverEnNameColor={coverEnNameColor}
+                    coverEnFontFamily={coverEnFontFamily}
+                    guestNameFontFamily={guestNameFontFamily}
+                    guestNameFontSize={guestNameFontSize}
+                    activeEnvelopeColor={activeEnvelopeColor}
+                    isPlayingMusic={isPlayingMusic}
+                    onToggleMusic={toggleMusicPlay}
+                    onRestartMusic={() => {
+                      const audio = document.getElementById('wedding-audio') as HTMLAudioElement | null;
+                      if (audio) {
+                        audio.currentTime = 0;
+                        audio.play().catch(() => {});
+                        setIsPlayingMusic(true);
+                      }
+                    }}
+                    onToggleLanguage={onToggleLanguage}
+                    onOpenDesignTab={onOpenDesignTab}
+                    onSelectFromDropbox={handleSelectFromDropbox}
+                    onOpenAddGuestModal={onOpenAddGuestModal}
+                    onUpdateGuestName={onUpdateGuestName}
+                    onOpenInvitation={handleOpenInvitation}
+                  />
+                ) : (
+                  <>
+                    {/* Refined Balanced Contrast Gradient Scrim */}
+                    <div
+                      className={`absolute inset-0 pointer-events-none transition-opacity ${
+                        theme === 'light'
+                          ? 'bg-gradient-to-b from-white/40 via-amber-50/20 to-white/50'
+                          : 'bg-gradient-to-b from-black/45 via-black/25 to-black/60'
+                      }`}
+                    />
+
+                    {/* Inner Beveled Double Gold Hairline Border */}
+                    <div className="absolute inset-2.5 sm:inset-3.5 rounded-[22px] border border-amber-400/40 pointer-events-none z-10" />
+                    <div className="absolute inset-3 sm:inset-4 rounded-[20px] border border-amber-300/20 pointer-events-none z-10" />
+
+                    {/* Khmer Royal Traditional Corner Filigrees (Kbach Phni Tes) */}
+                    <div className="absolute top-2 left-2 z-10">
+                      <KhmerCornerKbach position="top-left" className="w-12 h-12 sm:w-14 sm:h-14" />
+                    </div>
+                    <div className="absolute top-2 right-2 z-10">
+                      <KhmerCornerKbach position="top-right" className="w-12 h-12 sm:w-14 sm:h-14" />
+                    </div>
+                    <div className="absolute bottom-2 left-2 z-10">
+                      <KhmerCornerKbach position="bottom-left" className="w-12 h-12 sm:w-14 sm:h-14" />
+                    </div>
+                    <div className="absolute bottom-2 right-2 z-10">
+                      <KhmerCornerKbach position="bottom-right" className="w-12 h-12 sm:w-14 sm:h-14" />
+                    </div>
+
+                    {/* Floating Animations */}
+                    {isBirthday ? (
+                      <FloatingBalloonsAndGifts />
+                    ) : (
+                      <FloatingEngagementRingsAndSparkles />
+                    )}
+
+                    {/* Top Section */}
+                    <motion.div
+                      initial={{ opacity: 0, y: 24 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.8, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
+                      className="flex flex-col items-center relative z-10 pt-2"
+                    >
+                      {/* Curved Heading with Shimmer Animation */}
+                      <motion.div
+                        initial={{ opacity: 0, y: -8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.8 }}
+                        className="flex justify-center -mt-2 mb-1 select-none w-full drop-shadow-[0_4px_10px_rgba(0,0,0,0.35)]"
+                      >
+                        <motion.svg
+                          viewBox="0 0 340 90"
+                          animate={{
+                            y: [0, -4, 0, 3, 0],
+                            scale: [1, 1.02, 1, 1.015, 1],
+                          }}
+                          transition={{
+                            duration: 4.2,
+                            repeat: Infinity,
+                            ease: 'easeInOut',
+                          }}
+                          className="w-full max-w-[340px] h-auto overflow-visible"
+                        >
+                          <defs>
+                            <linearGradient id="curveGoldGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                              <stop offset="0%" stopColor="#d4af37" />
+                              <stop offset="25%" stopColor="#fff8db" />
+                              <stop offset="50%" stopColor="#f5b80f" />
+                              <stop offset="75%" stopColor="#fff8db" />
+                              <stop offset="100%" stopColor="#d4af37" />
+                            </linearGradient>
+                          </defs>
+                          <path
+                            id="subtitleCurve"
+                            d="M 20,78 Q 170,20 320,78"
+                            fill="transparent"
+                          />
+                          <text
+                            style={{
+                              fill: 'url(#curveGoldGradient)',
+                              fontFamily: language === 'kh' ? 'Moul, Moulpali, serif' : 'Norican, cursive',
+                              fontSize: '24px',
+                              letterSpacing: '0.12em',
+                              fontWeight: 'bold',
+                            }}
+                          >
+                            <textPath href="#subtitleCurve" startOffset="50%" textAnchor="middle">
+                              {language === 'kh' ? subtitleKh : subtitleEn}
+                            </textPath>
+                          </text>
+                        </motion.svg>
+                      </motion.div>
+
+                      {/* Couple / Host Names */}
+                      <div className="space-y-0.5 my-1 flex flex-col items-center">
+                        <motion.h1
+                          style={{
+                            color: primaryColor || '#f5b80f',
+                            fontSize: '24px',
+                            fontWeight: 'normal',
+                            fontFamily: "'Moul', serif",
+                            lineHeight: '35px',
+                          }}
+                          className="font-moul text-[24px] py-0.5 tracking-wide drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)]"
+                        >
+                          <span>{singlePerson ? groom : (bride ? `${groom} & ${bride}` : groom)}</span>
+                        </motion.h1>
+
+                        {/* English Name Below */}
+                        <motion.p
+                          initial={{ opacity: 0, y: 3 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.6, delay: 0.15 }}
+                          style={{
+                            color: coverEnNameColor || '#fde047',
+                            fontFamily: coverEnFontFamily || "'Norican', cursive",
+                            fontSize: '20px',
+                            lineHeight: '28px',
+                            letterSpacing: '0.06em',
+                          }}
+                          className="font-norican text-[20px] drop-shadow-[0_1px_3px_rgba(0,0,0,0.4)] capitalize tracking-wider select-none"
+                        >
+                          <span>{singlePerson ? (groomEn || groom) : (brideEn ? `${groomEn || groom} & ${brideEn}` : (groomEn || (bride ? `${groom} & ${bride}` : groom)))}</span>
+                        </motion.p>
+                      </div>
+
+                      <KhmerDividerKbach className="w-52 sm:w-64 h-5 my-3" color={primaryColor} />
+                    </motion.div>
+
+                    {/* Middle Section: Guest */}
+                    <motion.div
+                      initial={{ opacity: 0, y: 24 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.8, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                      className="relative z-10 my-3 sm:my-5 text-center w-full flex flex-col items-center"
+                    >
+                      {/* Database Guests Drop Box */}
+                      {savedGuestsList.length > 0 && (
+                        <div className="w-full max-w-[280px] sm:max-w-[320px] mb-2.5 flex items-center justify-center">
+                          <select
+                            id="guest-database-dropbox-select"
+                            value={savedGuestsList.some((g) => g.name === guestName) ? guestName : ''}
+                            onChange={(e) => handleSelectFromDropbox(e.target.value)}
+                            style={{
+                              borderColor: primaryColor || '#f5b80f',
+                              color: '#854d0e',
+                            }}
+                            className="w-full px-3 py-1.5 rounded-xl bg-white/95 text-amber-950 font-khmer text-xs border-2 shadow-md focus:outline-none focus:ring-2 focus:ring-amber-400 cursor-pointer backdrop-blur-sm transition-all"
+                          >
+                            <option value="" disabled>
+                              {language === 'kh' ? '▼ ជ្រើសរើសឈ្មោះភ្ញៀវពីបញ្ជី (Drop box)...' : '▼ Select Guest from Database (Drop box)...'}
+                            </option>
+                            {savedGuestsList.map((g, idx) => (
+                              <option key={g.id ? `${g.id}-${idx}` : `db-guest-${idx}`} value={g.name} className="bg-white text-neutral-800 py-1">
+                                {g.name} {g.categoryLabelKh ? `(${language === 'kh' ? g.categoryLabelKh : (g.categoryLabelEn || g.categoryLabelKh)})` : ''}
+                              </option>
+                            ))}
+                            <option value="__ADD_NEW__" className="bg-amber-50 text-amber-900 font-bold">
+                              + {language === 'kh' ? 'បន្ថែមភ្ញៀវថ្មី / Add Guest...' : '+ Add New Guest...'}
+                            </option>
+                          </select>
+                        </div>
+                      )}
+
+                      <RoyalGoldRibbonBanner className="hover:scale-[1.02] transition-transform duration-300">
+                        <span className="block text-[11px] sm:text-xs md:text-sm font-khmer font-semibold text-[#854d0e] mb-1 tracking-wide">
+                          {ribbonLabel}
+                        </span>
+                        <div className="text-lg sm:text-xl md:text-2xl font-moul text-[#172554] tracking-wide flex items-center justify-center">
+                          <span
+                            className="truncate max-w-[280px]"
+                            style={{
+                              fontFamily: "'Moul', serif",
+                              fontSize: '20px',
+                              lineHeight: '35px',
+                            }}
+                          >
+                            {guestName && guestName !== 'Your Name' ? guestName : (language === 'kh' ? 'ភ្ញៀវកិត្តិយស' : 'Honored Guest')}
+                          </span>
+                        </div>
+                      </RoyalGoldRibbonBanner>
+                    </motion.div>
+
+                    {/* Bottom Action Button - Slide Right Button for Housewarming, Short Pill for Birthday, Royal Kbach for Wedding */}
+                    <div className="relative z-10 w-full flex flex-col items-center">
+                      {isHousewarming ? (
+                        <div className="relative w-full max-w-[320px] sm:max-w-[340px] mx-auto select-none">
+                          {/* Slide Track Container */}
+                          <div
+                            id="open-invitation-btn"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => {
+                              if (!isOpening) handleOpenInvitation();
+                            }}
+                            className="relative w-full h-14 sm:h-16 rounded-full bg-gradient-to-r from-emerald-950/95 via-teal-900/90 to-amber-950/95 border-2 border-amber-300/80 shadow-[0_10px_30px_rgba(5,150,105,0.4),inset_0_2px_6px_rgba(255,255,255,0.2)] p-1.5 flex items-center justify-between overflow-hidden cursor-pointer backdrop-blur-md group"
+                          >
+                            {/* Animated Background Shimmer Glow */}
+                            <div className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-r from-emerald-500/15 via-amber-400/25 to-emerald-500/15 animate-pulse" />
+
+                            {/* Centered Guide Text with Moving Chevrons */}
+                            <div className="absolute inset-0 z-[1] flex items-center justify-center pl-10 pr-4 pointer-events-none">
+                              <span
+                                className="text-xs sm:text-sm font-bold text-amber-100 flex items-center gap-1.5 drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]"
+                                style={{ fontFamily: "'Noto Serif Khmer', serif" }}
+                              >
+                                <span>{isOpening ? (language === 'kh' ? 'កំពុងបើក...' : 'Opening...') : (language === 'kh' ? 'អូសទៅស្តាំដើម្បីបើកធៀប' : 'Slide right to open')}</span>
+                                <motion.span
+                                  animate={{ x: [0, 6, 0] }}
+                                  transition={{ duration: 1.4, repeat: Infinity, ease: 'easeInOut' }}
+                                  className="text-amber-300 font-bold flex items-center"
+                                >
+                                  <ChevronsRight className="w-4 h-4 sm:w-5 sm:h-5 text-amber-300" />
+                                </motion.span>
+                              </span>
+                            </div>
+
+                            {/* Draggable Golden Housewarming Knob */}
+                            <motion.div
+                              drag="x"
+                              dragConstraints={{ left: 0, right: 230 }}
+                              dragElastic={0.15}
+                              dragMomentum={false}
+                              onDragEnd={(_, info) => {
+                                if (info.offset.x > 110 || info.velocity.x > 250) {
+                                  handleOpenInvitation();
+                                }
+                              }}
+                              whileHover={{ scale: 1.06 }}
+                              whileTap={{ scale: 0.96 }}
+                              className="relative z-[2] w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-gradient-to-br from-[#fff7d1] via-[#f5b80f] to-[#b47d10] border-2 border-white shadow-[0_4px_15px_rgba(0,0,0,0.4),0_0_12px_rgba(245,184,15,0.6)] flex items-center justify-center cursor-grab active:cursor-grabbing shrink-0"
+                            >
+                              <Home className="w-5 h-5 sm:w-6 sm:h-6 text-amber-950 filter drop-shadow-xs" />
+                            </motion.div>
+
+                            {/* Right End Target Icon */}
+                            <div className="relative z-[1] w-11 h-11 sm:w-13 sm:h-13 rounded-full bg-white/10 border border-amber-300/40 flex items-center justify-center shrink-0">
+                              <Sparkles className="w-4 h-4 sm:w-5 sm:h-5 text-amber-300 animate-spin" style={{ animationDuration: '8s' }} />
+                            </div>
+                          </div>
+                        </div>
+                      ) : isBirthday ? (
+                        <motion.button
+                          id="open-invitation-btn"
+                          onClick={handleOpenInvitation}
+                          disabled={isOpening}
+                          whileHover={{ scale: 1.05, y: -2 }}
+                          whileTap={{ scale: 0.95 }}
+                          className="relative group w-auto max-w-[220px] sm:max-w-[240px] mx-auto py-2.5 sm:py-3 px-5 sm:px-6 rounded-full text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-fuchsia-600 via-purple-600 to-indigo-600 shadow-[0_10px_25px_rgba(168,85,247,0.5),0_0_20px_rgba(236,72,153,0.35)] border-2 border-pink-300/80 flex items-center justify-center gap-2.5 transition-all duration-300 overflow-hidden cursor-pointer"
+                        >
+                          {/* Shimmer sweep */}
+                          <div className="pointer-events-none absolute inset-0 z-[1] -translate-x-[100%] bg-gradient-to-r from-transparent via-white/50 to-transparent transition-transform duration-1000 group-hover:translate-x-[100%]" />
+
+                          <div className="relative z-[2] flex items-center justify-center gap-2">
+                            <Cake className="w-4 h-4 text-yellow-300 animate-bounce shrink-0" />
+                            <span
+                              className="tracking-wide text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.5)] font-bold text-xs sm:text-sm"
+                              style={{ fontFamily: "'Noto Serif Khmer', serif" }}
+                            >
+                              {isOpening
+                                ? (language === 'kh' ? 'កំពុងបើក...' : 'Opening...')
+                                : (language === 'kh' ? 'បើកធៀបខួបកំណើត' : 'Open Birthday Card')}
+                            </span>
+                            <Sparkles className="w-3.5 h-3.5 text-yellow-300 shrink-0" />
+                          </div>
+                        </motion.button>
+                      ) : (
+                        <motion.button
+                          id="open-invitation-btn"
+                          onClick={handleOpenInvitation}
+                          disabled={isOpening}
+                          whileHover={{ scale: 1.02, y: -2 }}
+                          whileTap={{ scale: 0.97 }}
+                          className="relative group w-full py-3.5 sm:py-4 px-5 sm:px-6 rounded-2xl font-bold bg-gradient-to-r from-[#fff3b0] via-[#ffd24d] to-[#f5b80f] hover:from-[#fff7d1] hover:via-[#ffe066] hover:to-[#f5b80f] text-amber-950 shadow-[0_12px_32px_rgba(245,158,11,0.45),0_0_20px_rgba(255,234,167,0.35)] border-2 border-white/90 flex items-center justify-between gap-3 transition-all duration-300 overflow-hidden cursor-pointer select-none backdrop-blur-md"
+                        >
+                          {/* Modern Ambient Glow & Shimmer sweep */}
+                          <div className="pointer-events-none absolute inset-0 z-0 bg-gradient-to-r from-amber-400/20 via-yellow-200/40 to-amber-400/20 animate-pulse" />
+                          <div className="pointer-events-none absolute inset-0 z-[1] -translate-x-[100%] bg-gradient-to-r from-transparent via-white/80 to-transparent transition-transform duration-1000 group-hover:translate-x-[100%]" />
+
+                          {/* Left Icon Badge */}
+                          <div className="relative z-[2] w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-br from-amber-950 to-[#451a03] text-amber-300 flex items-center justify-center shadow-md shrink-0 group-hover:scale-105 transition-transform">
+                            <MailOpen className="w-5 h-5 sm:w-5.5 sm:h-5.5 text-amber-200 drop-shadow-xs" />
+                          </div>
+
+                          {/* Center Text Hierarchy */}
+                          <div className="relative z-[2] flex flex-col items-center justify-center flex-1 px-1">
+                            <span
+                              className="text-amber-950 font-bold tracking-wide text-sm sm:text-base leading-tight drop-shadow-xs"
+                              style={{ fontFamily: "'Noto Serif Khmer', serif" }}
+                            >
+                              {isOpening
+                                ? (language === 'kh' ? 'កំពុងបើកសំបុត្រ...' : 'Opening Invitation...')
+                                : (language === 'kh' ? 'បើកសំបុត្រអញ្ជើញ' : 'Open Invitation')}
+                            </span>
+                            <span className="text-[10px] sm:text-[11px] font-semibold text-amber-900/80 tracking-wider uppercase font-sans mt-0.5">
+                              {language === 'kh' ? 'ចុចដើម្បីទស្សនាធៀប' : 'Click to view invitation'}
+                            </span>
+                          </div>
+
+                          {/* Right Sparkle / Action Indicator */}
+                          <div className="relative z-[2] w-8 h-8 rounded-lg bg-amber-950/10 border border-amber-950/15 flex items-center justify-center text-amber-950 group-hover:bg-amber-950/20 group-hover:scale-110 transition-all shrink-0">
+                            <Sparkles className="w-4 h-4 text-amber-900 animate-spin" style={{ animationDuration: '6s' }} />
+                          </div>
+                        </motion.button>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}

@@ -1,0 +1,8 @@
+{
+  "name": "Invitation online",
+  "description": "លិខិតអញ្ជើញអាពាហ៍ពិពាហ៍/Plan Essential Digital Invitation",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

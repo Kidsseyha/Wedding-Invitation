@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="km">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+      (function() {
+        function isIgnored(msg) {
+          if (!msg) return false;
+          var str = String(msg).toLowerCase();
+          return (
+            str.indexOf('$$typeof') !== -1 ||
+            str.indexOf('cross-origin') !== -1 ||
+            str.indexOf('blocked a frame') !== -1 ||
+            str.indexOf('should not already be working') !== -1 ||
+            str.indexOf('securityerror') !== -1 ||
+            str.indexOf('websocket') !== -1 ||
+            str.indexOf('failed to connect to websocket') !== -1 ||
+            str.indexOf('closed without opened') !== -1 ||
+            str.indexOf('fetch') !== -1
+          );
+        }
+
+        // 1. Native window.onerror returns true to suppress uncaught exceptions in browser
+        var origOnError = window.onerror;
+        window.onerror = function(message, source, lineno, colno, error) {
+          if (isIgnored(message) || (error && isIgnored(error.message))) {
+            return true;
+          }
+          if (typeof origOnError === 'function') {
+            return origOnError.apply(this, arguments);
+          }
+          return false;
+        };
+
+        // 2. Capture phase error listener to cancel unhandled errors
+        window.addEventListener(
+          'error',
+          function(event) {
+            if (isIgnored(event.message) || (event.error && isIgnored(event.error.message))) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              return true;
+            }
+          },
+          true
+        );
+
+        // 3. Unhandled promise rejection listener
+        window.addEventListener(
+          'unhandledrejection',
+          function(event) {
+            var msg = event.reason ? (event.reason.message || String(event.reason)) : '';
+            if (isIgnored(msg)) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+            }
+          },
+          true
+        );
+
+        // 4. Safe fallback for $$typeof on window prototype
+        try {
+          if (typeof Window !== 'undefined' && Window.prototype) {
+            Object.defineProperty(Window.prototype, '$$typeof', {
+              get: function() { return undefined; },
+              set: function() {},
+              configurable: true,
+              enumerable: false
+            });
+          }
+        } catch (e) {}
+
+        // 5. Safe getter & setter for fetch on window and Window.prototype to prevent "Cannot set property fetch of #<Window> which has only a getter"
+        try {
+          var currentFetch = typeof window !== 'undefined' && typeof window.fetch === 'function' ? window.fetch.bind(window) : null;
+          var customFetch = currentFetch;
+          var fetchDescriptor = {
+            get: function() {
+              return customFetch || function() { return Promise.reject(new Error('fetch not available')); };
+            },
+            set: function(fn) {
+              customFetch = fn;
+            },
+            configurable: true,
+            enumerable: true
+          };
+          Object.defineProperty(window, 'fetch', fetchDescriptor);
+          if (typeof Window !== 'undefined' && Window.prototype) {
+            Object.defineProperty(Window.prototype, 'fetch', fetchDescriptor);
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <title>លិខិតអញ្ជើញឌីជីថល (Digital Invitation)</title>
+    <meta name="description" content="សូមគោរពអញ្ជើញភ្ញៀវកិត្តិយស - លិខិតអញ្ជើញកម្មវិធីសិរីមង្គលតាមប្រព័ន្ធឌីជីថល (Digital Invitation)" />
+    <meta property="og:title" content="លិខិតអញ្ជើញឌីជីថល (Digital Invitation)" />
+    <meta property="og:description" content="សូមគោរពអញ្ជើញភ្ញៀវកិត្តិយស - លិខិតអញ្ជើញកម្មវិធីសិរីមង្គលតាមប្រព័ន្ធឌីជីថល (Digital Invitation)" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="" />
+    <meta property="og:url" content="/" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="លិខិតអញ្ជើញឌីជីថល (Digital Invitation)" />
+    <meta name="twitter:description" content="សូមគោរពអញ្ជើញភ្ញៀវកិត្តិយស - លិខិតអញ្ជើញកម្មវិធីសិរីមង្គលតាមប្រព័ន្ធឌីជីថល (Digital Invitation)" />
+    <meta name="twitter:image" content="" />
+    <script>
+      (function() {
+        try {
+          var params = new URLSearchParams(window.location.search || '');
+          var id = params.get('id') || '';
+          var rawType = (params.get('type') || params.get('category') || '').toLowerCase().trim();
+          var guest = (params.get('name') || params.get('i') || params.get('guest') || params.get('to') || '').trim();
+          if (guest === 'Your Name') guest = '';
+
+          var CATEGORY_PRESETS = {
+            wedding: {
+              title: 'អាពាហ៍ពិពាហ៍ រ៉ូ ម៉ាឡេ & អួម វល្ខ័ក',
+              phrase: 'ក្នុងពិធីមង្គលការរវាង រ៉ូ ម៉ាឡេ & អួម វល្ខ័ក',
+              date: 'ថ្ងៃសុក្រ ទី២៥ ខែកញ្ញា ឆ្នាំ២០២៦',
+              location: 'សាលមហោស្រពវិមានសិរីមង្គល់ (ចំការដូង)',
+              image: '/assets/images/white_arch_columns_wedding_cover_1790394461049.jpg'
+            },
+            engagement: {
+              title: 'ពិធីភ្ជាប់ពាក្យ ចាន់ សុខា & ហេង ចិន្តា',
+              phrase: 'ក្នុងពិធីភ្ជាប់ពាក្យ ចាន់ សុខា & ហេង ចិន្តា',
+              date: 'ថ្ងៃអាទិត្យ ទី១៨ ខែតុលា ឆ្នាំ២០២៦',
+              location: 'គេហដ្ឋានខាងស្រី (បុរីប៉េងហួត បឹងស្នោ)',
+              image: '/assets/aistudio/image_6e49a03a.png'
+            },
+            housewarming: {
+              title: 'ពិធីឡើងគេហដ្ឋានថ្មី លោក សំ ភារម្យ',
+              phrase: 'ក្នុងពិធីឡើងគេហដ្ឋានថ្មី លោក សំ ភារម្យ',
+              date: 'ថ្ងៃអាទិត្យ ទី០៨ ខែវិច្ឆិកា ឆ្នាំ២០២៦',
+              location: 'គេហដ្ឋានថ្មី (បុរី ជីបម៉ុង លែន ផ្លូវ៦០ម៉ែត្រ)',
+              image: '/assets/images/khmer_housewarming_villa_emblem_1794537020715.jpg'
+            },
+            birthday: {
+              title: 'ពិធីខួបកំណើត កញ្ញា សុខ លីណា',
+              phrase: 'ក្នុងពិធីខួបកំណើត កញ្ញា សុខ លីណា',
+              date: 'ថ្ងៃសៅរ៍ ទី១២ ខែធ្នូ ឆ្នាំ២០២៦',
+              location: 'ភោជនីយដ្ឋាន សួនមនោរម្យ (កោះពេជ្រ)',
+              image: 'https://images.unsplash.com/photo-1513151233558-d860c5398176?q=80&w=1200&auto=format&fit=crop'
+            },
+            anniversary: {
+              title: 'ពិធីខួបអាពាហ៍ពិពាហ៍ ហេង ពិសិដ្ឋ & ផែ រក្សា',
+              phrase: 'ក្នុងពិធីខួបអាពាហ៍ពិពាហ៍ ហេង ពិសិដ្ឋ & ផែ រក្សា',
+              date: 'ថ្ងៃសៅរ៍ ទី២៦ ខែធ្នូ ឆ្នាំ២០២៦',
+              location: 'សណ្ឋាគារ រ៉ូសវូដ ភ្នំពេញ (Rosewood Phnom Penh)',
+              image: 'https://images.unsplash.com/photo-1510076857177-7470076d4098?q=80&w=1200&auto=format&fit=crop'
+            }
+          };
+
+          function detectCategory(str) {
+            if (!str) return null;
+            var s = String(str).toLowerCase();
+            if (s === 'anniversary' || s.indexOf('anniversary') !== -1 || s.indexOf('ខួបអាពាហ៍ពិពាហ៍') !== -1) return 'anniversary';
+            if (s === 'birthday' || s.indexOf('birthday') !== -1 || s.indexOf('ខួបកំណើត') !== -1) return 'birthday';
+            if (s === 'housewarming' || s.indexOf('housewarming') !== -1 || s.indexOf('ឡើងផ្ទះ') !== -1 || s.indexOf('house') !== -1) return 'housewarming';
+            if (s === 'engagement' || s.indexOf('engagement') !== -1 || s.indexOf('ភ្ជាប់ពាក្យ') !== -1 || s.indexOf('engage') !== -1) return 'engagement';
+            if (s === 'wedding' || s.indexOf('wedding') !== -1 || s.indexOf('មង្គលការ') !== -1 || s.indexOf('អាពាហ៍ពិពាហ៍') !== -1) return 'wedding';
+            return null;
+          }
+
+          function isWeddingCoverUrl(url) {
+            if (!url) return false;
+            return (
+              url.indexOf('491657278') !== -1 ||
+              url.indexOf('white_arch_columns_wedding_cover') !== -1 ||
+              url.indexOf('khmer_royal_gold_wedding_cover') !== -1
+            );
+          }
+
+          var detectedUrlCat = detectCategory(rawType) || detectCategory(id);
+          var lastStoredCat = '';
+          try { lastStoredCat = localStorage.getItem('wedding_last_template_type') || ''; } catch (e0) {}
+
+          var storedEvent = null;
+          try {
+            var keys = [];
+            if (id) keys.push('wedding_template_saved_' + id);
+            if (rawType) keys.push('wedding_template_type_' + rawType);
+            if (detectedUrlCat) keys.push('wedding_template_type_' + detectedUrlCat);
+            if (!id && !rawType) {
+              keys.push('wedding_custom_event_data');
+              if (lastStoredCat) keys.push('wedding_template_type_' + lastStoredCat);
+            }
+            for (var k = 0; k < keys.length; k++) {
+              var raw = localStorage.getItem(keys[k]);
+              if (raw) {
+                storedEvent = JSON.parse(raw);
+                break;
+              }
+            }
+          } catch (err) {}
+
+          var cat =
+            detectCategory(rawType) ||
+            detectCategory(storedEvent && storedEvent.eventType) ||
+            detectCategory(id) ||
+            detectCategory(storedEvent && storedEvent.name) ||
+            detectCategory(lastStoredCat) ||
+            'wedding';
+
+          var preset = CATEGORY_PRESETS[cat] || CATEGORY_PRESETS.wedding;
+          var baseTitle = preset.title;
+          var desc = 'សូមគោរពអញ្ជើញ ' + (guest || 'ភ្ញៀវកិត្តិយស') + ' ចូលរួមជាអធិបតី និងប្រសិទ្ធពរជ័យ ' + preset.phrase + ' នៅថ្ងៃទី ' + preset.date + ' ទីតាំង៖ ' + preset.location;
+          var img = preset.image;
+
+          if (storedEvent && (!rawType || detectCategory(storedEvent.eventType || storedEvent.id || storedEvent.name) === cat)) {
+            if (cat === 'birthday' && storedEvent.groom) baseTitle = 'ពិធីខួបកំណើត ' + storedEvent.groom;
+            else if (cat === 'housewarming' && storedEvent.groom) baseTitle = 'ពិធីឡើងគេហដ្ឋានថ្មី ' + storedEvent.groom;
+            else if (cat === 'engagement' && storedEvent.groom && storedEvent.bride) baseTitle = 'ពិធីភ្ជាប់ពាក្យ ' + storedEvent.groom + ' & ' + storedEvent.bride;
+            else if (cat === 'anniversary' && storedEvent.groom && storedEvent.bride) baseTitle = 'ពិធីខួបអាពាហ៍ពិពាហ៍ ' + storedEvent.groom + ' & ' + storedEvent.bride;
+            else if (storedEvent.groom && storedEvent.bride && !storedEvent.singlePerson) baseTitle = 'អាពាហ៍ពិពាហ៍ ' + storedEvent.groom + ' & ' + storedEvent.bride;
+            else if (storedEvent.name) baseTitle = storedEvent.name;
+
+            var candidateImg = storedEvent.cover_image || storedEvent.image || (storedEvent.config && storedEvent.config.image);
+            if (candidateImg && candidateImg.indexOf('data:') !== 0 && !(cat !== 'wedding' && isWeddingCoverUrl(candidateImg))) {
+              img = candidateImg;
+            }
+          }
+
+          var fullTitle = guest ? (baseTitle + ' - សូមគោរពអញ្ជើញ ' + guest) : baseTitle;
+          var absImg = img && img.indexOf('http') === 0 ? img : (window.location.origin + (img.charAt(0) === '/' ? img : '/' + img));
+
+          document.title = fullTitle;
+          var updates = [
+            ['name', 'description', desc],
+            ['property', 'og:title', fullTitle],
+            ['property', 'og:description', desc],
+            ['property', 'og:image', absImg],
+            ['property', 'og:url', window.location.href],
+            ['name', 'twitter:title', fullTitle],
+            ['name', 'twitter:description', desc],
+            ['name', 'twitter:image', absImg]
+          ];
+          for (var u = 0; u < updates.length; u++) {
+            var el = document.querySelector('meta[' + updates[u][0] + '="' + updates[u][1] + '"]');
+            if (el) el.setAttribute('content', updates[u][2]);
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Alex+Brush&family=Angkor&family=Battambang:wght@400;700;900&family=Bokor&family=Cinzel:wght@500;700&family=Content:wght@400;700&family=Dancing+Script:wght@400;500;600;700&family=Dangrek&family=Fasthand&family=Freehand&family=Great+Vibes&family=Kantumruy+Pro:ital,wght@0,300..700;1,300..700&family=Khmer&family=Konkhmer+Sleokchher&family=Moul&family=Moulpali&family=Norican&family=Noto+Sans+Khmer:wght@300;400;500;600;700;800;900&family=Noto+Serif+Khmer:wght@300;400;500;600;700;800;900&family=Parisienne&family=Playfair+Display:ital,wght@0,600;1,600&family=Satisfy&family=Siemreap&family=Taprom&display=swap" rel="stylesheet" />
+  </head>
+  <body class="bg-[#121110] text-[#364153] antialiased selection:bg-amber-200 selection:text-amber-900">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
