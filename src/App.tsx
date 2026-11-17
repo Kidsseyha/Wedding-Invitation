@@ -790,7 +790,15 @@ export default function App() {
       }
     } catch (err: any) {
       console.warn('Google verification error:', err);
-      if (err.code !== 'auth/popup-closed-by-user') {
+      if (err.code === 'auth/unauthorized-domain') {
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
+        setEmailCheckState({
+          status: 'invalid',
+          messageKh: `Domain (${host}) មិនទាន់បានបន្ថែមក្នុង Firebase Console > Authentication > Authorized domains ទេ។`,
+          messageEn: `Domain (${host}) is not added in Firebase Console > Authentication > Authorized domains.`,
+          isGoogle: false,
+        });
+      } else if (err.code !== 'auth/popup-closed-by-user') {
         setEmailCheckState({
           status: 'invalid',
           messageKh: 'ការផ្ទៀងផ្ទាត់ Google មិនជោគជ័យ សូមព្យាយាមម្តងទៀត',
@@ -1181,7 +1189,10 @@ export default function App() {
       if (popupErr.code === 'auth/popup-closed-by-user') {
         setGoogleAuthError('ការចូលត្រូវបានបោះបង់ (Sign-in popup closed).');
       } else if (popupErr.code === 'auth/unauthorized-domain') {
-        setGoogleAuthError('Domain នេះមិនទាន់បាន add ក្នុង Firebase Console ទេ។ សូមប្រើលេខសម្ងាត់ love2222 ខាងលើ។');
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
+        setGoogleAuthError(
+          `Domain "${host}" មិនទាន់បាន add ក្នុង Firebase Console (Authentication → Settings → Authorized domains) ទេ។ សូមបន្ថែម domain នេះ ឬប្រើលេខសម្ងាត់ love2222 ខាងលើ។`
+        );
       } else {
         setGoogleAuthError(popupErr.message || 'មានបញ្ហាក្នុងការចូលតាម Google');
       }
