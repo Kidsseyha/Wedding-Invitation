@@ -13,6 +13,12 @@ import {
   saveShortLinkToFirestoreRest,
   normalizeCategoryString,
 } from './src/utils/shareMeta';
+import {
+  getEmailDatabaseId,
+  resolveRecordDatabaseId,
+  type UserDatabaseRecord,
+} from './src/lib/userDatabase';
+import { GUEST_PUBLIC_SCOPE } from './src/lib/userScope';
 import rawFirebaseConfig from './firebase-applet-config.json';
 
 // Guard against unhandled errors terminating process
@@ -132,6 +138,7 @@ app.use(express.static(path.join(process.cwd(), 'public')));
 
 // Ensure data directory exists for persistent server storage
 const DATA_DIR = path.join(process.cwd(), 'data');
+const USER_DATABASES_DIR = path.join(DATA_DIR, 'user_databases');
 const EVENTS_FILE = path.join(DATA_DIR, 'saved_events.json');
 const WISHES_FILE = path.join(DATA_DIR, 'saved_wishes.json');
 const RSVPS_FILE = path.join(DATA_DIR, 'saved_rsvps.json');
@@ -140,6 +147,161 @@ const SHORT_LINKS_FILE = path.join(DATA_DIR, 'saved_short_links.json');
 const SYSTEM_USERS_FILE = path.join(DATA_DIR, 'saved_system_users.json');
 const NOTIFICATIONS_FILE = path.join(DATA_DIR, 'saved_notifications.json');
 const PUBLIC_APP_URL = (process.env.APP_URL || 'https://ais-pre-oi572nxogafsw6nsowqaaj-935767504529.asia-southeast1.run.app').replace('ais-dev-', 'ais-pre-');
+
+function getSafeUserDbDir(dbId: string): string | null {
+  const cleanId = (dbId || '').trim();
+  if (!cleanId || cleanId === GUEST_PUBLIC_SCOPE || !/^[a-zA-Z0-9_-]{1,128}$/.test(cleanId)) {
+    return null;
+  }
+  return path.join(USER_DATABASES_DIR, cleanId);
+}
+
+function readUserDbJson<T>(dbId: string, filename: string, fallback: T): T {
+  const dir = getSafeUserDbDir(dbId);
+  if (!dir) return fallback;
+  const filePath = path.join(dir, filename);
+  try {
+    if (fs.existsSync(filePath)) {
+      return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as T;
+    }
+  } catch (err) {
+    console.error(`Error reading user DB file ${filePath}:`, err);
+  }
+  return fallback;
+}
+
+function writeUserDbJson<T>(dbId: string, filename: string, data: T): void {
+  const dir = getSafeUserDbDir(dbId);
+  if (!dir) return;
+  try {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    fs.writeFileSync(path.join(dir, filename), JSON.stringify(data, null, 2), 'utf-8');
+  } catch (err) {
+    console.error(`Error writing user DB file ${filename} for ${dbId}:`, err);
+  }
+}
+
+function ensureUserDatabaseOnDisk(account: {
+  email?: string;
+  name?: string;
+  displayName?: string;
+  role?: string;
+  uid?: string;
+  scopeId?: string;
+}): UserDatabaseRecord | null {
+  const cleanEmail = (account.email || '').trim().toLowerCase();
+  const dbId = getEmailDatabaseId(account.scopeId || cleanEmail || account.uid || account.name);
+  const dir = getSafeUserDbDir(dbId);
+  if (!dir) return null;
+
+  const now = new Date().toISOString();
+  const isFirstInit = !fs.existsSync(path.join(dir, 'profile.json'));
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  const existingProfile = readUserDbJson<Partial<UserDatabaseRecord>>(dbId, 'profile.json', {});
+  const profile: UserDatabaseRecord = {
+    id: dbId,
+    email: cleanEmail || existingProfile.email || '',
+    displayName: (account.displayName || account.name || existingProfile.displayName || cleanEmail.split('@')[0] || 'User').trim(),
+    role: account.role || existingProfile.role || (cleanEmail === 'seyhayoeurn2017@gmail.com' ? 'owner' : cleanEmail === 'yoeurn.seyha@diu.edu.kh' ? 'admin' : 'user'),
+    ownerId: dbId,
+    uid: account.uid || existingProfile.uid || '',
+    status: 'active',
+    createdAt: existingProfile.createdAt || now,
+    updatedAt: now,
+  };
+
+  if (isFirstInit) {
+    // Migrate any pre-existing records from legacy shared files matching this user's dbId
+    const allEvents = getSavedEvents();
+    const userEvents: Record<string, any> = {};
+    for (const [k, evt] of Object.entries(allEvents)) {
+      if (evt && (evt.ownerId === dbId || (cleanEmail && String(evt.ownerEmail || '').toLowerCase() === cleanEmail))) {
+        userEvents[k] = evt;
+      }
+    }
+    writeUserDbJson(dbId, 'events.json', userEvents);
+
+    const userGuests = getSavedGuests().filter((g: any) => g && g.ownerId === dbId);
+    writeUserDbJson(dbId, 'guests.json', userGuests);
+
+    const userWishes = getSavedWishes().filter(
+      (w: any) => w && (w.ownerId === dbId || resolveRecordDatabaseId({ ownerId: w.ownerId, eventId: w.eventId }) === dbId)
+    );
+    writeUserDbJson(dbId, 'wishes.json', userWishes);
+
+    const userRsvps = getSavedRSVPs().filter(
+      (r: any) => r && (r.ownerId === dbId || resolveRecordDatabaseId({ ownerId: r.ownerId, eventId: r.eventId }) === dbId)
+    );
+    writeUserDbJson(dbId, 'rsvps.json', userRsvps);
+
+    const userNotifs = getSavedNotifications().filter(
+      (n: any) => n && (n.ownerId === dbId || resolveRecordDatabaseId({ ownerId: n.ownerId, eventId: n.eventId }) === dbId)
+    );
+    writeUserDbJson(dbId, 'notifications.json', userNotifs);
+  }
+
+  const eventsObj = readUserDbJson<Record<string, any>>(dbId, 'events.json', {});
+  const eventCount = Object.keys(eventsObj).filter(k => !k.startsWith('type_') && !k.startsWith('user_')).length;
+  const guestCount = readUserDbJson<any[]>(dbId, 'guests.json', []).length;
+  const wishCount = readUserDbJson<any[]>(dbId, 'wishes.json', []).length;
+  const rsvpCount = readUserDbJson<any[]>(dbId, 'rsvps.json', []).length;
+  const notificationCount = readUserDbJson<any[]>(dbId, 'notifications.json', []).length;
+
+  const fullProfile: UserDatabaseRecord = {
+    ...profile,
+    eventCount,
+    guestCount,
+    wishCount,
+    rsvpCount,
+    notificationCount,
+  };
+  writeUserDbJson(dbId, 'profile.json', fullProfile);
+  return fullProfile;
+}
+
+function listUserDatabasesOnDisk(): UserDatabaseRecord[] {
+  const registered = getSavedSystemUsers();
+  const results = new Map<string, UserDatabaseRecord>();
+
+  for (const u of registered) {
+    if (u && (u.email || u.name)) {
+      const dbRec = ensureUserDatabaseOnDisk({
+        email: u.email,
+        name: u.name,
+        role: u.role,
+        uid: u.uid,
+      });
+      if (dbRec) results.set(dbRec.id, dbRec);
+    }
+  }
+
+  try {
+    if (fs.existsSync(USER_DATABASES_DIR)) {
+      for (const entry of fs.readdirSync(USER_DATABASES_DIR, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const dbId = entry.name;
+        const existing = readUserDbJson<Partial<UserDatabaseRecord>>(dbId, 'profile.json', {});
+        const dbRec = ensureUserDatabaseOnDisk({
+          scopeId: dbId,
+          email: existing.email || '',
+          displayName: existing.displayName || dbId,
+          role: existing.role || 'user',
+          uid: existing.uid,
+        });
+        if (dbRec) results.set(dbRec.id, dbRec);
+      }
+    }
+  } catch (err) {
+    console.error('Error listing user databases on disk:', err);
+  }
+
+  return Array.from(results.values());
+}
 
 function getSavedNotifications(): any[] {
   try {
@@ -215,6 +377,12 @@ function saveSystemUser(user: any) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
     fs.writeFileSync(SYSTEM_USERS_FILE, JSON.stringify(users, null, 2), 'utf-8');
+    ensureUserDatabaseOnDisk({
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      uid: user.uid,
+    });
   } catch (err) {
     console.error('Error writing system users file:', err);
   }
@@ -493,10 +661,13 @@ app.get('/api/health', (req, res) => {
 
 const DEFAULT_PRESET_ID = 'cmgrawhnk0003le0434762j7n';
 
-// Wishes API
+// Wishes API (scoped per-email DB + mirrored fallback)
 app.get('/api/wishes', (req, res) => {
   const eventId = (req.query.eventId as string | undefined)?.trim();
-  const wishes = getSavedWishes();
+  const ownerId = (req.query.ownerId as string | undefined)?.trim();
+  const dbId = resolveRecordDatabaseId({ ownerId, eventId });
+  const dbWishes = dbId ? readUserDbJson<any[]>(dbId, 'wishes.json', []) : [];
+  const wishes = dbWishes.length > 0 ? dbWishes : getSavedWishes();
   if (!eventId) {
     return res.json({ success: true, wishes });
   }
@@ -514,6 +685,14 @@ app.post('/api/wishes', (req, res) => {
   if (!wish || !wish.id) {
     return res.status(400).json({ error: 'Invalid wish data' });
   }
+  const dbId = resolveRecordDatabaseId({ ownerId: wish.ownerId, eventId: wish.eventId });
+  if (dbId) {
+    const dbWishes = readUserDbJson<any[]>(dbId, 'wishes.json', []);
+    const idx = dbWishes.findIndex((w: any) => w.id === wish.id);
+    if (idx >= 0) dbWishes[idx] = wish;
+    else dbWishes.unshift(wish);
+    writeUserDbJson(dbId, 'wishes.json', dbWishes);
+  }
   const wishes = getSavedWishes();
   const existingIdx = wishes.findIndex((w: any) => w.id === wish.id);
   if (existingIdx >= 0) {
@@ -529,8 +708,19 @@ app.post('/api/wishes', (req, res) => {
 app.delete('/api/wishes/:id', (req, res) => {
   const { id } = req.params;
   const eventId = (req.query.eventId as string | undefined)?.trim();
+  const ownerId = (req.query.ownerId as string | undefined)?.trim();
   if (!id) {
     return res.status(400).json({ error: 'Invalid wish ID' });
+  }
+  const dbId = resolveRecordDatabaseId({ ownerId, eventId });
+  if (dbId) {
+    const dbWishes = readUserDbJson<any[]>(dbId, 'wishes.json', []);
+    const nextDbWishes = dbWishes.filter((w: any) => {
+      if (w.id !== id) return true;
+      if (eventId && w.eventId && w.eventId !== eventId) return true;
+      return false;
+    });
+    writeUserDbJson(dbId, 'wishes.json', nextDbWishes);
   }
   let wishes = getSavedWishes();
   const initialLength = wishes.length;
@@ -544,11 +734,13 @@ app.delete('/api/wishes/:id', (req, res) => {
   res.json({ success: true, deleted: wishes.length < initialLength, id });
 });
 
-// RSVPs API
+// RSVPs API (scoped per-email DB + mirrored fallback)
 app.get('/api/rsvps', (req, res) => {
   const eventId = (req.query.eventId as string | undefined)?.trim();
   const ownerId = (req.query.ownerId as string | undefined)?.trim();
-  const rsvps = getSavedRSVPs().filter((r: any) => {
+  const dbId = resolveRecordDatabaseId({ ownerId, eventId });
+  const source = dbId ? readUserDbJson<any[]>(dbId, 'rsvps.json', []) : getSavedRSVPs();
+  const rsvps = (source.length > 0 ? source : getSavedRSVPs()).filter((r: any) => {
     if (eventId && r.eventId !== eventId) return false;
     if (ownerId && r.ownerId !== ownerId) return false;
     return true;
@@ -561,6 +753,12 @@ app.post('/api/rsvps', (req, res) => {
   if (!rsvp) {
     return res.status(400).json({ error: 'Invalid rsvp data' });
   }
+  const dbId = resolveRecordDatabaseId({ ownerId: rsvp.ownerId, eventId: rsvp.eventId });
+  if (dbId) {
+    const dbRsvps = readUserDbJson<any[]>(dbId, 'rsvps.json', []);
+    dbRsvps.push(rsvp);
+    writeUserDbJson(dbId, 'rsvps.json', dbRsvps);
+  }
   const rsvps = getSavedRSVPs();
   rsvps.push(rsvp);
   saveRSVPs(rsvps);
@@ -568,11 +766,13 @@ app.post('/api/rsvps', (req, res) => {
   res.json({ success: true, rsvp });
 });
 
-// Notifications API (Owner Dashboard Alert & Email Trigger)
+// Notifications API (Owner Dashboard Alert & Email Trigger, scoped per-email DB)
 app.get('/api/notifications', (req, res) => {
   const eventId = (req.query.eventId as string | undefined)?.trim();
   const ownerId = (req.query.ownerId as string | undefined)?.trim();
-  const notifications = getSavedNotifications().filter((n: any) => {
+  const dbId = resolveRecordDatabaseId({ ownerId, eventId });
+  const source = dbId ? readUserDbJson<any[]>(dbId, 'notifications.json', []) : getSavedNotifications();
+  const notifications = (source.length > 0 ? source : getSavedNotifications()).filter((n: any) => {
     if (eventId && n.eventId !== eventId) return false;
     if (ownerId && n.ownerId !== ownerId) return false;
     return true;
@@ -585,19 +785,34 @@ app.post('/api/notifications', (req, res) => {
   if (!notif || !notif.id) {
     return res.status(400).json({ error: 'Invalid notification data' });
   }
+  const dbId = resolveRecordDatabaseId({ ownerId: notif.ownerId, eventId: notif.eventId });
+  if (dbId) {
+    const dbNotifs = readUserDbJson<any[]>(dbId, 'notifications.json', []);
+    dbNotifs.unshift(notif);
+    writeUserDbJson(dbId, 'notifications.json', dbNotifs);
+  }
   const notifications = getSavedNotifications();
   notifications.unshift(notif);
   saveNotifications(notifications);
   res.json({ success: true, notification: notif });
 });
 
-// Guests API
+// Guests API (strictly isolated in each user's personal database directory)
 app.get('/api/guests', (req, res) => {
   const ownerId = (req.query.ownerId as string | undefined)?.trim();
+  if (ownerId && ownerId !== GUEST_PUBLIC_SCOPE) {
+    const dbGuests = readUserDbJson<any[]>(ownerId, 'guests.json', []);
+    if (dbGuests.length > 0) {
+      return res.json({ success: true, guests: dbGuests });
+    }
+    const legacyGuests = getSavedGuests().filter((g: any) => g.ownerId === ownerId);
+    if (legacyGuests.length > 0) {
+      writeUserDbJson(ownerId, 'guests.json', legacyGuests);
+    }
+    return res.json({ success: true, guests: legacyGuests });
+  }
   const allGuests = getSavedGuests();
-  const guests = ownerId
-    ? allGuests.filter((g: any) => g.ownerId === ownerId)
-    : allGuests;
+  const guests = ownerId ? allGuests.filter((g: any) => g.ownerId === ownerId) : allGuests;
   res.json({ success: true, guests });
 });
 
@@ -605,6 +820,14 @@ app.post('/api/guests', (req, res) => {
   const guest = req.body;
   if (!guest || !guest.id) {
     return res.status(400).json({ error: 'Invalid guest data' });
+  }
+  const ownerId = typeof guest.ownerId === 'string' ? guest.ownerId.trim() : '';
+  if (ownerId && ownerId !== GUEST_PUBLIC_SCOPE) {
+    const dbGuests = readUserDbJson<any[]>(ownerId, 'guests.json', []);
+    const dbIdx = dbGuests.findIndex((g: any) => g.id === guest.id);
+    if (dbIdx >= 0) dbGuests[dbIdx] = guest;
+    else dbGuests.push(guest);
+    writeUserDbJson(ownerId, 'guests.json', dbGuests);
   }
   const guests = getSavedGuests();
   const existingIdx = guests.findIndex((g: any) => g.id === guest.id);
@@ -624,6 +847,9 @@ app.delete('/api/guests', (req, res) => {
   let guests = getSavedGuests();
 
   if (clearAll && ownerId) {
+    if (ownerId !== GUEST_PUBLIC_SCOPE) {
+      writeUserDbJson(ownerId, 'guests.json', []);
+    }
     guests = guests.filter((g: any) => g.ownerId !== ownerId);
     saveGuests(guests);
     return res.json({ success: true, cleared: true });
@@ -631,6 +857,11 @@ app.delete('/api/guests', (req, res) => {
 
   if (!id) {
     return res.status(400).json({ error: 'Missing guest id' });
+  }
+
+  if (ownerId && ownerId !== GUEST_PUBLIC_SCOPE) {
+    const dbGuests = readUserDbJson<any[]>(ownerId, 'guests.json', []);
+    writeUserDbJson(ownerId, 'guests.json', dbGuests.filter((g: any) => g.id !== id));
   }
 
   guests = guests.filter((g: any) => {
@@ -642,15 +873,21 @@ app.delete('/api/guests', (req, res) => {
   res.json({ success: true });
 });
 
-// Get Event by ID, Type, or ownerId (strictly isolated across users)
+// Get Event by ID, Type, or ownerId (strictly isolated across per-email DBs)
 app.get('/api/event', (req, res) => {
   const eventId = (req.query.id as string | undefined)?.trim();
   const eventType = (req.query.type as string | undefined)?.trim();
   const ownerId = (req.query.ownerId as string | undefined)?.trim();
-  const events = getSavedEvents();
+  const dbId = resolveRecordDatabaseId({ ownerId, eventId });
+  const userDbEvents = dbId ? readUserDbJson<Record<string, any>>(dbId, 'events.json', {}) : {};
+  const globalEvents = getSavedEvents();
+  const events = dbId ? { ...globalEvents, ...userDbEvents } : globalEvents;
 
   // If specific ID is requested
   if (eventId) {
+    if (userDbEvents[eventId]) {
+      return res.json({ success: true, event: userDbEvents[eventId], source: 'server', requestedId: eventId });
+    }
     if (events[eventId]) {
       return res.json({ success: true, event: events[eventId], source: 'server', requestedId: eventId });
     }
@@ -731,23 +968,66 @@ app.get('/api/event', (req, res) => {
   return res.json({ success: true, event: null, source: 'default' });
 });
 
-// List all saved template IDs on server (strictly filtered by ownerId when provided)
+// List all saved template IDs on server (strictly filtered by ownerId & reading from per-email DB)
 app.get('/api/templates', (req, res) => {
   const ownerId = (req.query.ownerId as string | undefined)?.trim();
-  const events = getSavedEvents();
-  const list = Object.keys(events)
+  const userDbEvents = ownerId && ownerId !== GUEST_PUBLIC_SCOPE
+    ? readUserDbJson<Record<string, any>>(ownerId, 'events.json', {})
+    : {};
+  const globalEvents = getSavedEvents();
+  const mergedEvents = ownerId ? { ...globalEvents, ...userDbEvents } : globalEvents;
+
+  const list = Object.keys(mergedEvents)
     .filter(key => !key.startsWith('type_') && !key.startsWith('user_') && key !== 'default')
-    .filter(key => (ownerId ? events[key]?.ownerId === ownerId : true))
+    .filter(key => (ownerId ? mergedEvents[key]?.ownerId === ownerId : true))
     .map(key => ({
       key,
-      id: events[key]?.id,
-      name: events[key]?.name,
-      eventType: events[key]?.eventType,
-      ownerId: events[key]?.ownerId,
-      updatedAt: events[key]?.updatedAt,
-      event: events[key],
+      id: mergedEvents[key]?.id,
+      name: mergedEvents[key]?.name,
+      eventType: mergedEvents[key]?.eventType,
+      ownerId: mergedEvents[key]?.ownerId,
+      updatedAt: mergedEvents[key]?.updatedAt,
+      event: mergedEvents[key],
     }));
   res.json({ success: true, templates: list });
+});
+
+// Per-Email Personal Database Registry & Provisioning Endpoints
+app.get('/api/user-databases', (req, res) => {
+  const databases = listUserDatabasesOnDisk();
+  res.json({ success: true, databases });
+});
+
+app.post('/api/user-databases/provision', (req, res) => {
+  const body = req.body || {};
+  if (Array.isArray(body.users)) {
+    const provisioned = body.users
+      .map((u: any) =>
+        ensureUserDatabaseOnDisk({
+          email: u?.email,
+          name: u?.name || u?.displayName,
+          role: u?.role,
+          uid: u?.uid,
+          scopeId: u?.scopeId,
+        })
+      )
+      .filter(Boolean);
+    return res.json({ success: true, provisioned, databases: listUserDatabasesOnDisk() });
+  }
+
+  const database = ensureUserDatabaseOnDisk({
+    email: body.email,
+    name: body.name || body.displayName,
+    role: body.role,
+    uid: body.uid,
+    scopeId: body.scopeId,
+  });
+
+  if (!database) {
+    return res.status(400).json({ success: false, error: 'Valid email or scopeId is required' });
+  }
+
+  res.json({ success: true, database });
 });
 
 app.get('/api/system-users', (req, res) => {
@@ -759,7 +1039,13 @@ app.post('/api/system-users', (req, res) => {
   const user = req.body;
   if (user && (user.email || user.name)) {
     saveSystemUser(user);
-    res.json({ success: true, user });
+    const database = ensureUserDatabaseOnDisk({
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      uid: user.uid,
+    });
+    res.json({ success: true, user, database });
   } else {
     res.status(400).json({ success: false, error: 'Invalid user data' });
   }
@@ -970,7 +1256,7 @@ app.post('/api/verify-email', async (req, res) => {
 });
 
 
-// Save or Update Event (strictly isolated by ownerId when authenticated)
+// Save or Update Event (isolated into per-email database directory + shared share-link index)
 app.post('/api/event', (req, res) => {
   const eventData = req.body;
   if (!eventData || typeof eventData !== 'object') {
@@ -980,11 +1266,12 @@ app.post('/api/event', (req, res) => {
   const eventId = eventData.id || DEFAULT_PRESET_ID;
   const eventType = eventData.eventType;
   const ownerId = typeof eventData.ownerId === 'string' && eventData.ownerId.trim() ? eventData.ownerId.trim() : '';
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail: eventData.ownerEmail, eventId });
   const events = getSavedEvents();
 
   events[eventId] = eventData;
 
-  if (ownerId && ownerId !== 'guest_public') {
+  if (ownerId && ownerId !== GUEST_PUBLIC_SCOPE) {
     if (eventType) {
       events[`user_${ownerId}_type_${eventType}`] = eventData;
     }
@@ -997,12 +1284,28 @@ app.post('/api/event', (req, res) => {
   }
 
   saveEvents(events);
+
+  if (dbId) {
+    ensureUserDatabaseOnDisk({
+      scopeId: dbId,
+      email: eventData.ownerEmail,
+    });
+    const userDbEvents = readUserDbJson<Record<string, any>>(dbId, 'events.json', {});
+    userDbEvents[eventId] = eventData;
+    if (eventType) {
+      userDbEvents[`user_${dbId}_type_${eventType}`] = eventData;
+    }
+    userDbEvents[`user_${dbId}_default`] = eventData;
+    writeUserDbJson(dbId, 'events.json', userDbEvents);
+  }
+
   res.json({ success: true, event: eventData });
 });
 
 app.post('/api/event/reset', (req, res) => {
-  const eventId = req.body.id || DEFAULT_PRESET_ID;
+  const eventId = req.body.eventId || req.body.id || DEFAULT_PRESET_ID;
   const ownerId = typeof req.body.ownerId === 'string' ? req.body.ownerId.trim() : '';
+  const dbId = resolveRecordDatabaseId({ ownerId, eventId });
   const events = getSavedEvents();
   if (events[eventId]) {
     if (!ownerId || !events[eventId].ownerId || events[eventId].ownerId === ownerId) {
@@ -1016,6 +1319,16 @@ app.post('/api/event/reset', (req, res) => {
     delete events['default'];
   }
   saveEvents(events);
+
+  if (dbId) {
+    const userDbEvents = readUserDbJson<Record<string, any>>(dbId, 'events.json', {});
+    delete userDbEvents[eventId];
+    if (userDbEvents[`user_${dbId}_default`]?.id === eventId) {
+      delete userDbEvents[`user_${dbId}_default`];
+    }
+    writeUserDbJson(dbId, 'events.json', userDbEvents);
+  }
+
   res.json({ success: true });
 });
 
@@ -1025,6 +1338,7 @@ app.delete('/api/event', (req, res) => {
   if (!eventId) {
     return res.status(400).json({ error: 'Missing event id' });
   }
+  const dbId = resolveRecordDatabaseId({ ownerId, eventId });
   const events = getSavedEvents();
   let deleted = false;
   if (events[eventId] && (!ownerId || !events[eventId].ownerId || events[eventId].ownerId === ownerId)) {
@@ -1052,6 +1366,23 @@ app.delete('/api/event', (req, res) => {
     }
   }
   saveEvents(events);
+
+  if (dbId) {
+    const userDbEvents = readUserDbJson<Record<string, any>>(dbId, 'events.json', {});
+    if (userDbEvents[eventId]) {
+      delete userDbEvents[eventId];
+      deleted = true;
+    }
+    if (userDbEvents[`user_${dbId}_type_${eventId}`]) {
+      delete userDbEvents[`user_${dbId}_type_${eventId}`];
+      deleted = true;
+    }
+    if (userDbEvents[`user_${dbId}_default`]?.id === eventId) {
+      delete userDbEvents[`user_${dbId}_default`];
+    }
+    writeUserDbJson(dbId, 'events.json', userDbEvents);
+  }
+
   res.json({ success: true, deleted, id: eventId });
 });
 
@@ -1061,6 +1392,7 @@ app.delete('/api/templates/:id', (req, res) => {
   if (!id) {
     return res.status(400).json({ error: 'Missing template id' });
   }
+  const dbId = resolveRecordDatabaseId({ ownerId, eventId: id });
   const events = getSavedEvents();
   let deleted = false;
   if (events[id] && (!ownerId || !events[id].ownerId || events[id].ownerId === ownerId)) {
@@ -1075,6 +1407,20 @@ app.delete('/api/templates/:id', (req, res) => {
     deleted = true;
   }
   saveEvents(events);
+
+  if (dbId) {
+    const userDbEvents = readUserDbJson<Record<string, any>>(dbId, 'events.json', {});
+    if (userDbEvents[id]) {
+      delete userDbEvents[id];
+      deleted = true;
+    }
+    if (userDbEvents[`user_${dbId}_type_${id}`]) {
+      delete userDbEvents[`user_${dbId}_type_${id}`];
+      deleted = true;
+    }
+    writeUserDbJson(dbId, 'events.json', userDbEvents);
+  }
+
   res.json({ success: true, deleted, id });
 });
 

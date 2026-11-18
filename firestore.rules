@@ -147,6 +147,32 @@ service cloud.firestore {
         && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64));
     }
 
+    function isValidUserDatabase(dbId, data) {
+      return data.keys().hasAll(['id', 'ownerId', 'status'])
+        && data.keys().hasOnly(['id', 'email', 'displayName', 'role', 'ownerId', 'uid', 'status', 'createdAt', 'updatedAt'])
+        && data.id is string
+        && data.id == dbId
+        && data.id.size() <= 128
+        && data.ownerId is string
+        && data.ownerId == dbId
+        && data.ownerId.size() <= 128
+        && data.status is string
+        && data.status == 'active'
+        && data.status.size() <= 32
+        && (!('email' in data) || (data.email is string && data.email.size() <= 256))
+        && (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 256))
+        && (!('role' in data) || (data.role is string && data.role.size() <= 50))
+        && (!('uid' in data) || (data.uid is string && data.uid.size() <= 128))
+        && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64))
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function hasActiveUserDatabase(dbId) {
+      return isValidId(dbId)
+        && exists(/databases/$(database)/documents/user_databases/$(dbId))
+        && get(/databases/$(database)/documents/user_databases/$(dbId)).data.ownerId == dbId;
+    }
+
     // Default deny catch-all
     match /{document=**} {
       allow read, write: if false;
@@ -176,6 +202,90 @@ service cloud.firestore {
                   && request.auth.token.email == 'yoeurn.seyha@diu.edu.kh')))
       );
       allow delete: if isVerifiedOwner();
+    }
+
+    // Per-Email Personal Databases registry & isolated subcollections
+    match /user_databases/{dbId} {
+      allow get: if isValidId(dbId);
+      allow list: if existing().id is string && existing().ownerId is string && existing().status == 'active';
+      allow create: if isValidId(dbId) && isValidUserDatabase(dbId, incoming());
+      allow update: if isValidId(dbId)
+        && isValidUserDatabase(dbId, incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().id == existing().id;
+      allow delete: if isVerifiedOwner();
+
+      match /events/{eventId} {
+        allow get: if isValidId(dbId) && isValidId(eventId);
+        allow list: if existing().name is string && existing().ownerId == dbId;
+        allow create: if isValidId(eventId)
+          && isValidWeddingEvent(incoming())
+          && hasActiveUserDatabase(dbId)
+          && incoming().ownerId == dbId;
+        allow update: if isValidId(eventId)
+          && isValidWeddingEvent(incoming())
+          && hasActiveUserDatabase(dbId)
+          && incoming().ownerId == dbId
+          && (!('ownerId' in existing()) || existing().ownerId == '' || incoming().ownerId == existing().ownerId || isVerifiedAdmin());
+        allow delete: if isValidId(eventId)
+          && hasActiveUserDatabase(dbId)
+          && (!isGlobalPresetId(eventId) || isVerifiedOwner());
+      }
+
+      match /guests/{guestId} {
+        allow get: if isValidId(dbId) && isValidId(guestId);
+        allow list: if existing().name is string && existing().ownerId == dbId;
+        allow create: if isValidId(guestId)
+          && isValidGuest(incoming())
+          && hasActiveUserDatabase(dbId)
+          && incoming().ownerId == dbId;
+        allow update: if isValidId(guestId)
+          && isValidGuest(incoming())
+          && hasActiveUserDatabase(dbId)
+          && incoming().ownerId == dbId
+          && (!('ownerId' in existing()) || existing().ownerId == '' || incoming().ownerId == existing().ownerId || isVerifiedAdmin());
+        allow delete: if isValidId(guestId) && hasActiveUserDatabase(dbId);
+      }
+
+      match /wishes/{wishId} {
+        allow get: if isValidId(dbId) && isValidId(wishId);
+        allow list: if existing().name is string && existing().message is string && existing().ownerId == dbId;
+        allow create: if isValidId(wishId)
+          && isValidWish(incoming())
+          && hasActiveUserDatabase(dbId)
+          && incoming().ownerId == dbId;
+        allow update: if isValidId(wishId)
+          && isValidWish(incoming())
+          && hasActiveUserDatabase(dbId)
+          && incoming().diff(existing()).affectedKeys().hasOnly(['likes'])
+          && incoming().likes is number;
+        allow delete: if isValidId(wishId) && hasActiveUserDatabase(dbId);
+      }
+
+      match /rsvps/{rsvpId} {
+        allow get: if isValidId(dbId) && isValidId(rsvpId);
+        allow list: if existing().name is string && existing().attending is string && existing().ownerId == dbId;
+        allow create: if isValidId(rsvpId)
+          && isValidRSVP(incoming())
+          && hasActiveUserDatabase(dbId)
+          && incoming().ownerId == dbId;
+        allow update: if isValidId(rsvpId)
+          && isValidRSVP(incoming())
+          && hasActiveUserDatabase(dbId)
+          && incoming().ownerId == dbId
+          && (!('ownerId' in existing()) || existing().ownerId == '' || incoming().ownerId == existing().ownerId || isVerifiedAdmin());
+        allow delete: if false;
+      }
+
+      match /notifications/{notificationId} {
+        allow get: if isValidId(dbId) && isValidId(notificationId);
+        allow list: if existing().title is string && existing().message is string && existing().ownerId == dbId;
+        allow create, update: if isValidId(notificationId)
+          && isValidNotification(incoming())
+          && hasActiveUserDatabase(dbId)
+          && incoming().ownerId == dbId;
+        allow delete: if isValidId(notificationId) && hasActiveUserDatabase(dbId);
+      }
     }
 
     // Guests collection: Per-user isolated wedding guest list presets and attendees

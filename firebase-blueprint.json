@@ -131,6 +131,23 @@
         "createdAt": { "type": "string", "description": "ISO timestamp of creation", "maxLength": 64 }
       },
       "required": ["code", "url"]
+    },
+    "UserDatabase": {
+      "title": "UserDatabase",
+      "description": "Dedicated per-email personal database registry record isolating each user's events, guests, wishes, RSVPs, and notifications",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Canonical deterministic email database ID (u_<slug>_<hash>)", "maxLength": 128 },
+        "email": { "type": "string", "description": "Normalized user email address owning this personal database", "maxLength": 256 },
+        "displayName": { "type": "string", "description": "Display name of the database owner", "maxLength": 256 },
+        "role": { "type": "string", "description": "User role (owner, admin, editor, user)", "maxLength": 50 },
+        "ownerId": { "type": "string", "description": "Canonical ownerId matching dbId", "maxLength": 128 },
+        "uid": { "type": "string", "description": "Optional Firebase Auth UID", "maxLength": 128 },
+        "status": { "type": "string", "description": "Provisioning status (active)", "maxLength": 32 },
+        "createdAt": { "type": "string", "description": "ISO timestamp of personal database creation", "maxLength": 64 },
+        "updatedAt": { "type": "string", "description": "ISO timestamp of last database sync", "maxLength": 64 }
+      },
+      "required": ["id", "ownerId", "status"]
     }
   },
   "firestore": {
@@ -165,6 +182,30 @@
     "/short_links/{code}": {
       "schema": { "$ref": "#/entities/ShortLink" },
       "description": "Short link mappings for Vercel and social sharing"
+    },
+    "/user_databases/{dbId}": {
+      "schema": { "$ref": "#/entities/UserDatabase" },
+      "description": "Per-email personal database root documents"
+    },
+    "/user_databases/{dbId}/events/{eventId}": {
+      "schema": { "$ref": "#/entities/WeddingEvent" },
+      "description": "Personal database wedding/event invitations owned by dbId"
+    },
+    "/user_databases/{dbId}/guests/{guestId}": {
+      "schema": { "$ref": "#/entities/Guest" },
+      "description": "Personal database guest presets and attendees owned by dbId"
+    },
+    "/user_databases/{dbId}/wishes/{wishId}": {
+      "schema": { "$ref": "#/entities/Wish" },
+      "description": "Personal database guestbook wishes and blessings for dbId"
+    },
+    "/user_databases/{dbId}/rsvps/{rsvpId}": {
+      "schema": { "$ref": "#/entities/RSVP" },
+      "description": "Personal database RSVP confirmations for dbId"
+    },
+    "/user_databases/{dbId}/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Personal database owner alerts and RSVP notifications for dbId"
     }
   }
 }

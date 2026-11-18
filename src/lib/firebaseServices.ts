@@ -11,13 +11,198 @@ import {
 } from 'firebase/firestore';
 import { db, auth, IS_FIRESTORE_WRITE_DISABLED, handleFirestoreError, OperationType } from './firebase';
 import type { WeddingEvent } from '../types';
-import { DEFAULT_PRESET_EVENT_ID, extractScopeFromEventId, isGlobalSharedPresetId } from './userScope';
+import { DEFAULT_PRESET_EVENT_ID, GUEST_PUBLIC_SCOPE, extractScopeFromEventId, isGlobalSharedPresetId } from './userScope';
+import { getEmailDatabaseId, resolveRecordDatabaseId, type UserDatabaseRecord } from './userDatabase';
 import { compressBase64String } from '../utils/imageCompressor';
 import {
   shouldSkipImageRecompression,
   needsFirestoreCompaction,
   raceWithTimeout,
 } from '../utils/saveHelpers';
+
+const USER_DATABASES_COLLECTION = 'user_databases';
+const provisionedDbIds = new Set<string>();
+
+/**
+ * Ensures a dedicated personal database exists for a user account (keyed by email -> u_<slug>_<hash>)
+ * in both Firestore `/user_databases/{dbId}` and the Express server directory `data/user_databases/{dbId}/`.
+ */
+export async function ensureUserDatabaseInFirebase(account: {
+  email?: string | null;
+  name?: string | null;
+  displayName?: string | null;
+  role?: string;
+  uid?: string;
+  scopeId?: string;
+  forceSync?: boolean;
+  skipRestApi?: boolean;
+}): Promise<UserDatabaseRecord | null> {
+  const cleanEmail = (account.email || '').trim().toLowerCase();
+  const dbId = getEmailDatabaseId(account.scopeId || cleanEmail || account.uid || account.name);
+  if (!dbId || dbId === GUEST_PUBLIC_SCOPE) return null;
+
+  const now = new Date().toISOString();
+  const resolvedRole =
+    account.role ||
+    (cleanEmail === 'seyhayoeurn2017@gmail.com'
+      ? 'owner'
+      : cleanEmail === 'yoeurn.seyha@diu.edu.kh'
+      ? 'admin'
+      : 'user');
+  const resolvedName = (account.displayName || account.name || cleanEmail.split('@')[0] || 'User').trim();
+
+  const record: UserDatabaseRecord = {
+    id: dbId,
+    email: cleanEmail,
+    displayName: resolvedName,
+    role: resolvedRole,
+    ownerId: dbId,
+    ...(account.uid ? { uid: account.uid } : {}),
+    status: 'active',
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  let serverDbRecord: UserDatabaseRecord | null = null;
+  if (!account.skipRestApi) {
+    try {
+      const res = await fetch('/api/user-databases/provision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          name: resolvedName,
+          displayName: resolvedName,
+          role: resolvedRole,
+          uid: account.uid,
+          scopeId: dbId,
+        }),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.success && json.database) {
+          serverDbRecord = json.database as UserDatabaseRecord;
+        }
+      }
+    } catch {
+      // ignore offline/network errors
+    }
+  }
+
+  if (!IS_FIRESTORE_WRITE_DISABLED && (!provisionedDbIds.has(dbId) || account.forceSync)) {
+    try {
+      const dbRef = doc(db, USER_DATABASES_COLLECTION, dbId);
+      const firestorePayload: Record<string, any> = {
+        id: dbId,
+        ownerId: dbId,
+        status: 'active',
+        updatedAt: now,
+      };
+      if (cleanEmail) firestorePayload.email = cleanEmail;
+      if (resolvedName) firestorePayload.displayName = resolvedName;
+      if (resolvedRole) firestorePayload.role = resolvedRole;
+      if (account.uid) firestorePayload.uid = account.uid;
+      if (!provisionedDbIds.has(dbId)) {
+        firestorePayload.createdAt = serverDbRecord?.createdAt || now;
+      }
+      await setDoc(dbRef, firestorePayload, { merge: true });
+      provisionedDbIds.add(dbId);
+    } catch (error) {
+      console.warn(`Firestore user_databases write notice (${dbId}):`, error);
+    }
+  } else {
+    provisionedDbIds.add(dbId);
+  }
+
+  return serverDbRecord || record;
+}
+
+/**
+ * Batch provisions personal databases for all registered email accounts
+ */
+export async function provisionAllEmailDatabases(
+  users: Array<{ email?: string; name?: string; displayName?: string; role?: string; uid?: string; scopeId?: string }>
+): Promise<UserDatabaseRecord[]> {
+  if (!Array.isArray(users) || users.length === 0) return [];
+  let serverDatabases: UserDatabaseRecord[] = [];
+  try {
+    const res = await fetch('/api/user-databases/provision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ users }),
+    });
+    if (res.ok) {
+      const json = await res.json();
+      if (json?.success && Array.isArray(json.databases)) {
+        serverDatabases = json.databases;
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  if (!IS_FIRESTORE_WRITE_DISABLED) {
+    await Promise.allSettled(
+      users
+        .filter((u) => u && (u.email || u.scopeId))
+        .map((u) =>
+          ensureUserDatabaseInFirebase({
+            email: u.email,
+            name: u.name,
+            displayName: u.displayName,
+            role: u.role,
+            uid: u.uid,
+            scopeId: u.scopeId,
+            skipRestApi: true,
+          })
+        )
+    );
+  }
+
+  return serverDatabases;
+}
+
+/**
+ * Fetches all per-email personal database records with live collection counts
+ */
+export async function fetchUserDatabasesFromFirebase(): Promise<UserDatabaseRecord[]> {
+  const apiPromise = fetch('/api/user-databases')
+    .then(async (res) => (res.ok ? ((await res.json())?.databases || []) : []))
+    .catch(() => []);
+
+  const firestorePromise = !IS_FIRESTORE_WRITE_DISABLED
+    ? getDocs(collection(db, USER_DATABASES_COLLECTION))
+        .then((snap) => {
+          const list: UserDatabaseRecord[] = [];
+          snap.forEach((docSnap) => {
+            const data = docSnap.data() as UserDatabaseRecord;
+            if (data && docSnap.id) {
+              list.push({ ...data, id: data.id || docSnap.id });
+            }
+          });
+          return list;
+        })
+        .catch(() => [])
+    : Promise.resolve([]);
+
+  const [apiList, fsResult] = await Promise.all([
+    apiPromise,
+    raceWithTimeout(firestorePromise, 1500, [] as UserDatabaseRecord[]),
+  ]);
+  const fsList = Array.isArray(fsResult?.value) ? fsResult.value : [];
+
+  const byId = new Map<string, UserDatabaseRecord>();
+  for (const item of fsList) {
+    if (item?.id) byId.set(item.id, item);
+  }
+  for (const item of apiList) {
+    if (item?.id) {
+      const prev = byId.get(item.id);
+      byId.set(item.id, prev ? { ...prev, ...item } : item);
+    }
+  }
+  return Array.from(byId.values());
+}
 
 export interface RSVPRecord {
   id?: string;
@@ -181,11 +366,18 @@ export async function submitWishToFirebase(wish: {
     console.warn('REST API save wish error:', e);
   }
 
-  // 2. Direct Firestore write
+  // 2. Direct Firestore write (top-level + personal email database subcollection)
   if (!IS_FIRESTORE_WRITE_DISABLED) {
     try {
       const docRef = doc(db, 'wishes', wishId);
       await setDoc(docRef, payload, { merge: true });
+
+      const targetDbId = resolveRecordDatabaseId({ ownerId: effectiveOwnerId, eventId: effectiveEventId });
+      if (targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE) {
+        await ensureUserDatabaseInFirebase({ scopeId: targetDbId, skipRestApi: true });
+        const scopedWishRef = doc(db, USER_DATABASES_COLLECTION, targetDbId, 'wishes', wishId);
+        await setDoc(scopedWishRef, { ...payload, ownerId: targetDbId }, { merge: true });
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `wishes/${wishId}`);
     }
@@ -234,29 +426,73 @@ export async function likeWishInFirebase(wishId: string, eventId?: string) {
     console.warn('REST API like wish error:', e);
   }
 
-  // 2. Sync directly to Firestore
+  // 2. Sync directly to Firestore (top-level + personal email database subcollection)
   if (!IS_FIRESTORE_WRITE_DISABLED) {
     try {
       const docRef = doc(db, 'wishes', wishId);
       const snap = await getDoc(docRef);
+      const resolvedOwner =
+        updatedWish?.ownerId ||
+        (snap.exists() ? snap.data()?.ownerId : '') ||
+        extractScopeFromEventId(updatedWish?.eventId || eventId || '') ||
+        '';
+      let finalLikes = typeof updatedWish?.likes === 'number' ? updatedWish.likes : 1;
+
       if (snap.exists()) {
         const currentData = snap.data();
-        const newLikes = updatedWish && typeof updatedWish.likes === 'number'
-          ? updatedWish.likes
-          : (currentData.likes || 0) + 1;
-        await setDoc(docRef, { likes: newLikes }, { merge: true });
+        finalLikes =
+          updatedWish && typeof updatedWish.likes === 'number'
+            ? updatedWish.likes
+            : (currentData.likes || 0) + 1;
+        await setDoc(docRef, { likes: finalLikes }, { merge: true });
       } else if (updatedWish && updatedWish.name && updatedWish.message) {
         const effectiveEventId = updatedWish.eventId || eventId || DEFAULT_PRESET_EVENT_ID;
-        await setDoc(docRef, {
-          id: updatedWish.id || wishId,
-          eventId: effectiveEventId,
-          ownerId: updatedWish.ownerId || extractScopeFromEventId(effectiveEventId) || '',
-          name: String(updatedWish.name).slice(0, 200),
-          relationship: String(updatedWish.relationship || updatedWish.relation || ''),
-          message: String(updatedWish.message).slice(0, 2000),
-          likes: typeof updatedWish.likes === 'number' ? updatedWish.likes : 1,
-          createdAt: updatedWish.createdAt || updatedWish.timestamp || new Date().toISOString(),
-        }, { merge: true });
+        await setDoc(
+          docRef,
+          {
+            id: updatedWish.id || wishId,
+            eventId: effectiveEventId,
+            ownerId: resolvedOwner,
+            name: String(updatedWish.name).slice(0, 200),
+            relationship: String(updatedWish.relationship || updatedWish.relation || ''),
+            message: String(updatedWish.message).slice(0, 2000),
+            likes: finalLikes,
+            createdAt: updatedWish.createdAt || updatedWish.timestamp || new Date().toISOString(),
+          },
+          { merge: true }
+        );
+      }
+
+      const targetDbId = resolveRecordDatabaseId({
+        ownerId: resolvedOwner,
+        eventId: updatedWish?.eventId || eventId,
+      });
+      if (targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE) {
+        try {
+          const scopedWishRef = doc(db, USER_DATABASES_COLLECTION, targetDbId, 'wishes', wishId);
+          const scopedSnap = await getDoc(scopedWishRef);
+          if (scopedSnap.exists()) {
+            await setDoc(scopedWishRef, { likes: finalLikes }, { merge: true });
+          } else if (updatedWish && updatedWish.name && updatedWish.message) {
+            await ensureUserDatabaseInFirebase({ scopeId: targetDbId, skipRestApi: true });
+            await setDoc(
+              scopedWishRef,
+              {
+                id: updatedWish.id || wishId,
+                eventId: updatedWish.eventId || eventId || DEFAULT_PRESET_EVENT_ID,
+                ownerId: targetDbId,
+                name: String(updatedWish.name).slice(0, 200),
+                relationship: String(updatedWish.relationship || updatedWish.relation || ''),
+                message: String(updatedWish.message).slice(0, 2000),
+                likes: finalLikes,
+                createdAt: updatedWish.createdAt || updatedWish.timestamp || new Date().toISOString(),
+              },
+              { merge: true }
+            );
+          }
+        } catch {
+          // ignore subcollection like mirror failures
+        }
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `wishes/${wishId}`);
@@ -265,9 +501,9 @@ export async function likeWishInFirebase(wishId: string, eventId?: string) {
 }
 
 /**
- * Delete a wish from both server and Firestore
+ * Delete a wish from both server and Firestore (top-level + personal email database)
  */
-export async function deleteWishInFirebase(wishId: string, eventId?: string): Promise<void> {
+export async function deleteWishInFirebase(wishId: string, eventId?: string, ownerId?: string): Promise<void> {
   const querySuffix = eventId ? `?eventId=${encodeURIComponent(eventId)}` : '';
   // 1. Delete from REST API
   try {
@@ -283,6 +519,14 @@ export async function deleteWishInFirebase(wishId: string, eventId?: string): Pr
     try {
       const docRef = doc(db, 'wishes', wishId);
       await deleteDoc(docRef);
+      const targetDbId = resolveRecordDatabaseId({ ownerId, eventId });
+      if (targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE) {
+        try {
+          await deleteDoc(doc(db, USER_DATABASES_COLLECTION, targetDbId, 'wishes', wishId));
+        } catch {
+          // ignore
+        }
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `wishes/${wishId}`);
     }
@@ -316,11 +560,21 @@ export async function saveRSVPToFirebase(rsvp: RSVPRecord) {
     console.warn('REST API save RSVP error:', e);
   }
 
-  // 2. Sync with Firestore
+  // 2. Sync with Firestore (top-level + personal email database subcollection)
+  const targetDbId = resolveRecordDatabaseId({ ownerId: effectiveOwnerId, eventId: effectiveEventId });
   if (!IS_FIRESTORE_WRITE_DISABLED) {
     try {
       const docRef = doc(db, 'rsvps', rsvpId);
       await setDoc(docRef, payload, { merge: true });
+
+      if (targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE) {
+        await ensureUserDatabaseInFirebase({ scopeId: targetDbId, skipRestApi: true });
+        await setDoc(
+          doc(db, USER_DATABASES_COLLECTION, targetDbId, 'rsvps', rsvpId),
+          { ...payload, ownerId: targetDbId },
+          { merge: true }
+        );
+      }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `rsvps/${rsvpId}`);
     }
@@ -349,6 +603,14 @@ export async function saveRSVPToFirebase(rsvp: RSVPRecord) {
     if (!IS_FIRESTORE_WRITE_DISABLED) {
       const notifRef = doc(db, 'notifications', notificationId);
       await setDoc(notifRef, notifPayload, { merge: true });
+      if (targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE) {
+        await ensureUserDatabaseInFirebase({ scopeId: targetDbId, skipRestApi: true });
+        await setDoc(
+          doc(db, USER_DATABASES_COLLECTION, targetDbId, 'notifications', notificationId),
+          { ...notifPayload, ownerId: targetDbId },
+          { merge: true }
+        );
+      }
     }
   } catch (e) {
     console.warn('Owner RSVP notification trigger error:', e);
@@ -358,20 +620,21 @@ export async function saveRSVPToFirebase(rsvp: RSVPRecord) {
 }
 
 /**
- * Sync user profile to Firestore `/users/{userId}` database collection
+ * Sync user profile to Firestore `/users/{userId}` and provision their personal `/user_databases/{dbId}`
  */
 export async function syncUserProfile(
   user: { uid: string; email?: string | null; displayName?: string | null; photoURL?: string | null },
   activeEventId?: string
 ) {
   if (!user || !user.uid) return null;
+  const userRole = user.email?.toLowerCase() === 'seyhayoeurn2017@gmail.com' ? 'owner' : (user.email === 'yoeurn.seyha@diu.edu.kh' ? 'admin' : 'editor');
   const userProfile = {
     uid: user.uid,
     email: user.email || '',
     displayName: user.displayName || '',
     photoURL: user.photoURL || '',
     activeEventId: activeEventId || `event_${user.uid}`,
-    role: user.email?.toLowerCase() === 'seyhayoeurn2017@gmail.com' ? 'owner' : (user.email === 'yoeurn.seyha@diu.edu.kh' ? 'admin' : 'editor'),
+    role: userRole,
     lastLoginAt: new Date().toISOString(),
   };
 
@@ -384,6 +647,14 @@ export async function syncUserProfile(
       handleFirestoreError(error, OperationType.WRITE, `users/${user.uid}`);
     }
   }
+
+  // Ensure dedicated personal database exists for this user's email
+  await ensureUserDatabaseInFirebase({
+    email: user.email,
+    displayName: user.displayName,
+    role: userRole,
+    uid: user.uid,
+  });
 
   return userProfile;
 }
@@ -401,9 +672,22 @@ export async function fetchUserEvent(userId: string): Promise<WeddingEvent | nul
  */
 export async function fetchEventFromFirebase(eventId: string, ownerId?: string): Promise<WeddingEvent | null> {
   const targetId = eventId || DEFAULT_PRESET_EVENT_ID;
+  const targetDbId = resolveRecordDatabaseId({ ownerId, eventId: targetId });
 
-  // Try fetching from Firestore first
+  // Try fetching from user's personal database subcollection first, then top-level `/events`
   if (!IS_FIRESTORE_WRITE_DISABLED) {
+    if (targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE) {
+      try {
+        const scopedDocRef = doc(db, USER_DATABASES_COLLECTION, targetDbId, 'events', targetId);
+        const scopedSnap = await getDoc(scopedDocRef);
+        if (scopedSnap.exists()) {
+          return scopedSnap.data() as WeddingEvent;
+        }
+      } catch {
+        // fallback to top-level events
+      }
+    }
+
     try {
       const docRef = doc(db, 'events', targetId);
       const docSnap = await getDoc(docRef);
@@ -430,11 +714,12 @@ export async function fetchEventFromFirebase(eventId: string, ownerId?: string):
 }
 
 /**
- * Fetch all saved/custom events belonging strictly to a specific ownerId
+ * Fetch all saved/custom events belonging strictly to a specific ownerId (from personal DB + top-level)
  */
 export async function fetchUserTemplatesFromFirebase(ownerId: string): Promise<WeddingEvent[]> {
-  if (!ownerId || ownerId === 'guest_public') return [];
+  if (!ownerId || ownerId === GUEST_PUBLIC_SCOPE) return [];
   const results = new Map<string, WeddingEvent>();
+  const targetDbId = resolveRecordDatabaseId({ ownerId });
 
   // 1. REST API templates owned by this user
   try {
@@ -454,14 +739,29 @@ export async function fetchUserTemplatesFromFirebase(ownerId: string): Promise<W
     // ignore
   }
 
-  // 2. Firestore events query where('ownerId', '==', ownerId)
+  // 2. Personal Firestore database subcollection `/user_databases/{dbId}/events`
+  if (!IS_FIRESTORE_WRITE_DISABLED && targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE) {
+    try {
+      const subSnap = await getDocs(collection(db, USER_DATABASES_COLLECTION, targetDbId, 'events'));
+      subSnap.forEach((docSnap) => {
+        const evt = docSnap.data() as WeddingEvent;
+        if (evt && docSnap.id && !isGlobalSharedPresetId(docSnap.id)) {
+          results.set(docSnap.id, { ...evt, id: evt.id || docSnap.id });
+        }
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  // 3. Top-level Firestore events query where('ownerId', '==', ownerId)
   if (!IS_FIRESTORE_WRITE_DISABLED) {
     try {
       const q = query(collection(db, 'events'), where('ownerId', '==', ownerId));
       const snap = await getDocs(q);
       snap.forEach((docSnap) => {
         const evt = docSnap.data() as WeddingEvent;
-        if (evt && docSnap.id && !isGlobalSharedPresetId(docSnap.id)) {
+        if (evt && docSnap.id && !isGlobalSharedPresetId(docSnap.id) && !results.has(docSnap.id)) {
           results.set(docSnap.id, { ...evt, id: evt.id || docSnap.id });
         }
       });
@@ -505,11 +805,25 @@ export async function saveEventToFirebase(
     }
   }
 
-  // 2. Sync with Firestore safely with bounded wait so offline/reconnecting SDK never stalls Save UI
+  // 2. Sync with Firestore safely with bounded wait (writes to both personal /user_databases/{dbId}/events & /events)
   if (!IS_FIRESTORE_WRITE_DISABLED) {
     const writePromise = (async () => {
       try {
         const firestorePayload = await prepareFirestorePayload(serverPayload);
+        const targetDbId = resolveRecordDatabaseId({
+          ownerId: serverPayload.ownerId,
+          ownerEmail: serverPayload.ownerEmail,
+          eventId,
+        });
+        if (targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE) {
+          await ensureUserDatabaseInFirebase({
+            scopeId: targetDbId,
+            email: serverPayload.ownerEmail,
+            skipRestApi: true,
+          });
+          const scopedRef = doc(db, USER_DATABASES_COLLECTION, targetDbId, 'events', eventId);
+          await setDoc(scopedRef, { ...firestorePayload, ownerId: firestorePayload.ownerId || targetDbId }, { merge: true });
+        }
         const docRef = doc(db, 'events', eventId);
         await setDoc(docRef, firestorePayload, { merge: true });
       } catch (error) {
@@ -526,14 +840,15 @@ export async function saveEventToFirebase(
 }
 
 /**
- * Delete wedding event / template from both server REST API and Firestore
+ * Delete wedding event / template from both server REST API and Firestore (top-level + personal email database)
  */
-export async function deleteEventFromFirebase(eventId: string): Promise<void> {
+export async function deleteEventFromFirebase(eventId: string, ownerId?: string): Promise<void> {
   if (!eventId) return;
+  const ownerQuery = ownerId ? `&ownerId=${encodeURIComponent(ownerId)}` : '';
 
   // 1. Delete from REST API
   try {
-    await fetch(`/api/event?id=${encodeURIComponent(eventId)}`, {
+    await fetch(`/api/event?id=${encodeURIComponent(eventId)}${ownerQuery}`, {
       method: 'DELETE',
     });
   } catch (e) {
@@ -543,6 +858,14 @@ export async function deleteEventFromFirebase(eventId: string): Promise<void> {
   // 2. Delete from Firestore
   if (!IS_FIRESTORE_WRITE_DISABLED) {
     try {
+      const targetDbId = resolveRecordDatabaseId({ ownerId, eventId });
+      if (targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE) {
+        try {
+          await deleteDoc(doc(db, USER_DATABASES_COLLECTION, targetDbId, 'events', eventId));
+        } catch {
+          // ignore
+        }
+      }
       const docRef = doc(db, 'events', eventId);
       await deleteDoc(docRef);
     } catch (error) {
@@ -654,9 +977,9 @@ export function subscribeToWishes(
 }
 
 /**
- * Register or update system user in Firestore and REST API for Security Verification
+ * Register or update system user in Firestore, REST API, and provision their dedicated personal database
  */
-export async function registerSystemUserInFirebase(userRecord: { name: string; email: string; passcode: string }) {
+export async function registerSystemUserInFirebase(userRecord: { name: string; email: string; passcode: string; role?: string }) {
   const userId = 'user-' + (userRecord.email || userRecord.name).toLowerCase().replace(/[^a-z0-9]/g, '_');
   const payload = {
     ...userRecord,
@@ -684,6 +1007,14 @@ export async function registerSystemUserInFirebase(userRecord: { name: string; e
       console.warn('Firestore system user write error:', error);
     }
   }
+
+  // 3. Auto-provision dedicated per-email database
+  await ensureUserDatabaseInFirebase({
+    email: userRecord.email,
+    name: userRecord.name,
+    role: userRecord.role,
+  });
+
   return payload;
 }
 

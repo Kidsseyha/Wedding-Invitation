@@ -10,13 +10,27 @@ import {
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, IS_FIRESTORE_WRITE_DISABLED } from '../lib/firebase';
 import { getScopedDefaultGuests, GuestPreset } from '../data/guests';
-import { getScopedGuestId, getUserStorageKey, resolveUserScope } from './userScope';
+import { GUEST_PUBLIC_SCOPE, getScopedGuestId, getUserStorageKey, resolveUserScope } from './userScope';
+import { ensureUserDatabaseInFirebase } from './firebaseServices';
 
 const GUESTS_COLLECTION = 'guests';
+const USER_DATABASES_COLLECTION = 'user_databases';
 const LOCAL_STORAGE_KEY = 'wedding_saved_guest_list_v1';
 
 function resolveOwnerId(ownerId?: string): string {
   return (ownerId && ownerId.trim()) || resolveUserScope().scopeId;
+}
+
+function getScopedGuestsCollection(effectiveOwner: string) {
+  return effectiveOwner && effectiveOwner !== GUEST_PUBLIC_SCOPE
+    ? collection(db, USER_DATABASES_COLLECTION, effectiveOwner, GUESTS_COLLECTION)
+    : collection(db, GUESTS_COLLECTION);
+}
+
+function getScopedGuestDoc(effectiveOwner: string, guestId: string) {
+  return effectiveOwner && effectiveOwner !== GUEST_PUBLIC_SCOPE
+    ? doc(db, USER_DATABASES_COLLECTION, effectiveOwner, GUESTS_COLLECTION, guestId)
+    : doc(db, GUESTS_COLLECTION, guestId);
 }
 
 function getOwnerStorageKey(ownerId?: string): string {
@@ -58,6 +72,27 @@ export async function fetchGuestsFromFirebase(ownerId?: string): Promise<GuestPr
     }
   } catch {
     // ignore
+  }
+
+  // Check personal database subcollection `/user_databases/{effectiveOwner}/guests` first, then `/guests`
+  if (!IS_FIRESTORE_WRITE_DISABLED && effectiveOwner !== GUEST_PUBLIC_SCOPE) {
+    try {
+      const subSnap = await getDocs(getScopedGuestsCollection(effectiveOwner));
+      if (!subSnap.empty) {
+        const guests: GuestPreset[] = [];
+        subSnap.forEach(docSnap => {
+          guests.push(mapDocToGuest(docSnap.id, docSnap.data() as GuestPreset, effectiveOwner));
+        });
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(guests));
+        } catch {
+          // ignore
+        }
+        return guests;
+      }
+    } catch {
+      // fallback to top-level /guests
+    }
   }
 
   try {
@@ -133,17 +168,20 @@ export async function seedDefaultGuestsToFirebase(ownerId?: string) {
     return;
   }
   try {
+    if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
+      await ensureUserDatabaseInFirebase({ scopeId: effectiveOwner, skipRestApi: true });
+    }
     for (const preset of defaults) {
+      const presetPayload = {
+        ...preset,
+        ownerId: effectiveOwner,
+        updatedAt: new Date().toISOString(),
+      };
+      if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
+        await setDoc(getScopedGuestDoc(effectiveOwner, preset.id), presetPayload, { merge: true });
+      }
       const docRef = doc(db, GUESTS_COLLECTION, preset.id);
-      await setDoc(
-        docRef,
-        {
-          ...preset,
-          ownerId: effectiveOwner,
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true }
-      );
+      await setDoc(docRef, presetPayload, { merge: true });
     }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, GUESTS_COLLECTION);
@@ -183,7 +221,10 @@ export function subscribeToGuests(callback: (guests: GuestPreset[]) => void, own
   };
 
   try {
-    const q = query(collection(db, GUESTS_COLLECTION), where('ownerId', '==', effectiveOwner));
+    const q =
+      effectiveOwner !== GUEST_PUBLIC_SCOPE
+        ? getScopedGuestsCollection(effectiveOwner)
+        : query(collection(db, GUESTS_COLLECTION), where('ownerId', '==', effectiveOwner));
     return onSnapshot(
       q,
       snapshot => {
@@ -267,9 +308,12 @@ export async function saveGuestToFirebase(guest: GuestPreset | Omit<GuestPreset,
     return payload as GuestPreset;
   }
 
-  const docRef = doc(db, GUESTS_COLLECTION, guestId);
-
   try {
+    if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
+      await ensureUserDatabaseInFirebase({ scopeId: effectiveOwner, skipRestApi: true });
+      await setDoc(getScopedGuestDoc(effectiveOwner, guestId), payload, { merge: true });
+    }
+    const docRef = doc(db, GUESTS_COLLECTION, guestId);
     await setDoc(docRef, payload, { merge: true });
     return payload as GuestPreset;
   } catch (error) {
@@ -311,6 +355,13 @@ export async function deleteGuestFromFirebase(id: string, ownerId?: string) {
   }
 
   try {
+    if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
+      try {
+        await deleteDoc(getScopedGuestDoc(effectiveOwner, id));
+      } catch {
+        // ignore
+      }
+    }
     const docRef = doc(db, GUESTS_COLLECTION, id);
     await deleteDoc(docRef);
   } catch (error) {
@@ -344,6 +395,14 @@ export async function clearAllGuestsFromFirebase(ownerId?: string) {
   }
 
   try {
+    if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
+      try {
+        const subSnap = await getDocs(getScopedGuestsCollection(effectiveOwner));
+        await Promise.all(subSnap.docs.map(docSnap => deleteDoc(getScopedGuestDoc(effectiveOwner, docSnap.id))));
+      } catch {
+        // ignore
+      }
+    }
     const q = query(collection(db, GUESTS_COLLECTION), where('ownerId', '==', effectiveOwner));
     const querySnapshot = await getDocs(q);
     const deletePromises = querySnapshot.docs.map(docSnap =>

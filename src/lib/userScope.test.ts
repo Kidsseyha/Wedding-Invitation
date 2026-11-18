@@ -14,6 +14,7 @@ import {
 import { readShareTemplatesStorageState, buildAllShareTemplates } from '../utils/shareMeta';
 import { EVENT_PRESETS } from '../data/eventTemplates';
 import { getSavedGuests, getScopedDefaultGuests, saveGuestToList } from '../data/guests';
+import { getEmailDatabaseId, resolveRecordDatabaseId } from './userDatabase';
 
 function installMockLocalStorage() {
   const store = new Map<string, string>();
@@ -151,4 +152,23 @@ test('readShareTemplatesStorageState and buildAllShareTemplates isolate custom t
   assert.ok(aliceTemplates.some(t => t.templateId === getScopedEventId('custom-alice-1', userA) || t.eventId === getScopedEventId('custom-alice-1', userA)));
   assert.equal(bobTemplates.some(t => t.event?.name === 'Alice Custom Wedding'), false);
   assert.equal(bobTemplates.some(t => t.templateId === getScopedEventId('custom-alice-1', userA) || t.eventId === getScopedEventId('custom-alice-1', userA)), false);
+});
+
+test('getEmailDatabaseId and resolveRecordDatabaseId deterministically map each Email to its own personal database ID', () => {
+  const dbOwnerLower = getEmailDatabaseId('seyhayoeurn2017@gmail.com');
+  const dbOwnerUpper = getEmailDatabaseId('  SeyhaYoeurn2017@GMAIL.com ');
+  const dbAdmin = getEmailDatabaseId('yoeurn.seyha@diu.edu.kh');
+  const dbPublic = getEmailDatabaseId('');
+
+  assert.ok(dbOwnerLower.startsWith('u_'));
+  assert.match(dbOwnerLower, /^[a-zA-Z0-9_-]{1,128}$/);
+  assert.equal(dbOwnerLower, dbOwnerUpper);
+  assert.equal(getEmailDatabaseId(dbOwnerLower), dbOwnerLower);
+  assert.notEqual(dbOwnerLower, dbAdmin);
+  assert.equal(dbPublic, GUEST_PUBLIC_SCOPE);
+
+  const scopedEventId = getScopedEventId(DEFAULT_PRESET_EVENT_ID, dbOwnerLower);
+  assert.equal(resolveRecordDatabaseId({ eventId: scopedEventId }), dbOwnerLower);
+  assert.equal(resolveRecordDatabaseId({ ownerEmail: 'yoeurn.seyha@diu.edu.kh' }), dbAdmin);
+  assert.equal(resolveRecordDatabaseId({ ownerId: GUEST_PUBLIC_SCOPE, eventId: DEFAULT_PRESET_EVENT_ID }), '');
 });

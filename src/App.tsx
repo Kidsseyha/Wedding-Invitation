@@ -48,6 +48,7 @@ import {
   Globe,
   Moon,
   Sun,
+  Database,
 } from 'lucide-react';
 import { WEDDING_EVENT } from './data/weddingData';
 import { sanitizeWeddingEvent, VERIFIED_WEDDING_COVER } from './utils/sanitizeEvent';
@@ -59,7 +60,20 @@ import { formatKhmerDate, formatEnDate } from './utils/khmerHelpers';
 import { testFirestoreConnection, auth, db } from './lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, User } from 'firebase/auth';
-import { saveEventToFirebase, fetchEventFromFirebase, fetchUserTemplatesFromFirebase, subscribeToEvent, syncUserProfile, registerSystemUserInFirebase, fetchSystemUsersFromFirebase, deleteSystemUserFromFirebase } from './lib/firebaseServices';
+import {
+  saveEventToFirebase,
+  fetchEventFromFirebase,
+  fetchUserTemplatesFromFirebase,
+  subscribeToEvent,
+  syncUserProfile,
+  registerSystemUserInFirebase,
+  fetchSystemUsersFromFirebase,
+  deleteSystemUserFromFirebase,
+  ensureUserDatabaseInFirebase,
+  provisionAllEmailDatabases,
+  fetchUserDatabasesFromFirebase,
+} from './lib/firebaseServices';
+import { getEmailDatabaseId, type UserDatabaseRecord } from './lib/userDatabase';
 import {
   DEFAULT_PRESET_EVENT_ID,
   GUEST_PUBLIC_SCOPE,
@@ -282,7 +296,26 @@ export default function App() {
     return localStorage.getItem('wedding_logged_in_identifier') || '';
   });
 
+  const [userDatabasesMap, setUserDatabasesMap] = useState<Record<string, UserDatabaseRecord>>({});
+  const [isProvisioningAllDbs, setIsProvisioningAllDbs] = useState(false);
+
   const activeUserScope = resolveUserScope(authUser, loggedInIdentifier);
+
+  useEffect(() => {
+    if (activeUserScope.isAuthenticated && activeUserScope.scopeId !== GUEST_PUBLIC_SCOPE) {
+      ensureUserDatabaseInFirebase({
+        email: activeUserScope.ownerEmail || (loggedInIdentifier.includes('@') ? loggedInIdentifier : ''),
+        displayName: authUser?.displayName || activeUserScope.ownerEmail?.split('@')[0] || loggedInIdentifier,
+        scopeId: activeUserScope.scopeId,
+      })
+        .then((dbRec) => {
+          if (dbRec) {
+            setUserDatabasesMap(prev => ({ ...prev, [dbRec.id]: dbRec }));
+          }
+        })
+        .catch(() => {});
+    }
+  }, [activeUserScope.isAuthenticated, activeUserScope.scopeId, activeUserScope.ownerEmail, loggedInIdentifier, authUser?.displayName]);
 
   useEffect(() => {
     testFirestoreConnection();
@@ -492,7 +525,7 @@ export default function App() {
     }
     setDbUsersList(initial);
 
-    // 2. Query Firebase & backend in background to merge all remote users
+    // 2. Query Firebase & backend in background to merge all remote users & auto-provision per-email personal DBs
     try {
       const users = await fetchSystemUsersFromFirebase();
       const merged = [...initial];
@@ -508,6 +541,17 @@ export default function App() {
         merged.unshift(ownerItem);
       }
       setDbUsersList(merged);
+
+      // Provision personal database for every email in system users & refresh registry counts
+      const provisioned = await provisionAllEmailDatabases(merged);
+      const registry = provisioned.length > 0 ? provisioned : await fetchUserDatabasesFromFirebase();
+      if (registry.length > 0) {
+        const nextMap: Record<string, UserDatabaseRecord> = {};
+        for (const dbRec of registry) {
+          if (dbRec?.id) nextMap[dbRec.id] = dbRec;
+        }
+        setUserDatabasesMap(nextMap);
+      }
     } catch (err) {
       // already populated
     }
@@ -1018,9 +1062,18 @@ export default function App() {
 
     const newUser = { name: signupName, email: signupEmail, passcode: signupPasscode, role: 'user', createdAt: new Date().toISOString() };
     
-    // 1. Insert into database (Firestore & REST API) for Security Verification
+    // 1. Insert into database (Firestore & REST API) + auto-provision personal Email DB
     try {
       await registerSystemUserInFirebase(newUser);
+      const dbRec = await ensureUserDatabaseInFirebase({
+        email: signupEmail.trim(),
+        name: signupName.trim(),
+        role: 'user',
+        forceSync: true,
+      });
+      if (dbRec) {
+        setUserDatabasesMap(prev => ({ ...prev, [dbRec.id]: dbRec }));
+      }
     } catch (err) {
       console.warn('Error saving system user to database:', err);
     }
@@ -1043,7 +1096,7 @@ export default function App() {
     setSignupPasscode('');
     setSignupMessage('');
     setEmailCheckState({ status: 'idle', messageKh: '', messageEn: '' });
-    alert(language === 'kh' ? 'ចុះឈ្មោះ និងបញ្ចូលក្នុងមូលដ្ឋានទិន្នន័យបានជោគជ័យ!' : 'Sign up successful & saved to database for security verification!');
+    alert(language === 'kh' ? 'ចុះឈ្មោះ និងបង្កើត Database ផ្ទាល់ខ្លួនសម្រាប់អ៊ីមែលបានជោគជ័យ!' : 'Sign up successful & personal email database created!');
     if (pendingCallback) {
       pendingCallback();
       setPendingCallback(null);
@@ -1206,6 +1259,13 @@ export default function App() {
               createdAt: new Date().toISOString()
             };
             await registerSystemUserInFirebase(googleSystemUser);
+            await ensureUserDatabaseInFirebase({
+              email: result.user.email,
+              displayName: googleSystemUser.name,
+              role: userRole,
+              uid: result.user.uid,
+              forceSync: true,
+            });
 
             const existingUsers = JSON.parse(localStorage.getItem('wedding_registered_users') || '[]');
             if (result.user.email && !existingUsers.some((u: any) => u.email?.toLowerCase() === result.user.email?.toLowerCase())) {
@@ -2409,7 +2469,7 @@ export default function App() {
           <div
             id="authenticated-user-badge"
             className="group relative flex items-center gap-2 px-3 py-1.5 rounded-full border border-amber-400/70 bg-gradient-to-r from-black/95 via-neutral-900/95 to-black/95 text-amber-200 text-xs shadow-[0_4px_22px_rgba(0,0,0,0.65)] backdrop-blur-md ring-1 ring-amber-400/40 hover:border-amber-300 transition-all duration-300 select-none"
-            title={`Signed in as ${authUser.email} | Personal Database: event_${authUser.uid.slice(0, 8)}...`}
+            title={`Signed in as ${authUser.email} | Personal Database: ${activeUserScope.scopeId}`}
           >
             <div className="relative shrink-0">
               {authUser.photoURL ? (
@@ -4023,14 +4083,41 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Live Search Input Filter */}
-                <div className="w-full sm:w-64">
+                {/* Live Search Input Filter + Batch Provision Email Databases */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    disabled={isProvisioningAllDbs}
+                    onClick={async () => {
+                      setIsProvisioningAllDbs(true);
+                      try {
+                        const provisioned = await provisionAllEmailDatabases(dbUsersList);
+                        const registry = provisioned.length > 0 ? provisioned : await fetchUserDatabasesFromFirebase();
+                        const nextMap: Record<string, UserDatabaseRecord> = {};
+                        for (const dbRec of registry) {
+                          if (dbRec?.id) nextMap[dbRec.id] = dbRec;
+                        }
+                        setUserDatabasesMap(nextMap);
+                      } finally {
+                        setIsProvisioningAllDbs(false);
+                      }
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-[11px] font-khmer font-semibold border transition-all flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer ${
+                      theme === 'light'
+                        ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
+                        : 'bg-emerald-500/15 border-emerald-400/40 text-emerald-300 hover:bg-emerald-500/25'
+                    } ${isProvisioningAllDbs ? 'opacity-60 cursor-wait' : ''}`}
+                    title={language === 'kh' ? 'បង្កើត ឬ ធ្វើសមកាលកម្ម Database ផ្ទាល់ខ្លួនសម្រាប់គ្រប់ Email' : 'Create or sync personal database for all emails'}
+                  >
+                    <Database className="w-3.5 h-3.5" />
+                    <span>{isProvisioningAllDbs ? (language === 'kh' ? 'កំពុងបង្កើត...' : 'Syncing...') : (language === 'kh' ? 'Sync Email DBs' : 'Sync Email DBs')}</span>
+                  </button>
                   <input
                     type="text"
                     value={userSearchQuery}
                     onChange={(e) => setUserSearchQuery(e.target.value)}
                     placeholder={language === 'kh' ? '🔍 ស្វែងរកឈ្មោះ ឬ អ៊ីមែល...' : '🔍 Search name or email...'}
-                    className={`w-full px-3.5 py-1.5 rounded-xl text-xs border ${
+                    className={`w-full sm:w-56 px-3.5 py-1.5 rounded-xl text-xs border ${
                       theme === 'light'
                         ? 'bg-neutral-100 border-neutral-300 text-neutral-900 focus:border-amber-500'
                         : 'bg-black/70 border-amber-500/40 text-amber-200 placeholder-neutral-500 focus:border-amber-400'
@@ -4046,8 +4133,9 @@ export default function App() {
                     const q = userSearchQuery.toLowerCase().trim();
                     const name = (u.name || '').toLowerCase();
                     const email = (u.email || '').toLowerCase();
+                    const dbId = getEmailDatabaseId(u.email || u.name || '').toLowerCase();
                     const role = isTargetUserOwner(u) ? 'owner' : isTargetUserAdmin(u) ? 'admin' : 'user';
-                    return name.includes(q) || email.includes(q) || role.includes(q);
+                    return name.includes(q) || email.includes(q) || dbId.includes(q) || role.includes(q);
                   });
 
                   if (filteredList.length === 0) {
@@ -4067,6 +4155,8 @@ export default function App() {
                     const rawIndex = dbUsersList.findIndex((u: any) => u.email === user.email);
                     const safeIdx = rawIndex !== -1 ? rawIndex : listIdx;
                     const isGoogleUser = user.email?.toLowerCase().endsWith('@gmail.com') || (user.passcode && user.passcode.includes('Google'));
+                    const userDbId = getEmailDatabaseId(user.email || user.name || '');
+                    const userDbInfo = userDbId ? userDatabasesMap[userDbId] : undefined;
 
                     return (
                     <div
@@ -4114,6 +4204,49 @@ export default function App() {
                           )}
                         </div>
                         <p className={`text-xs ${theme === 'light' ? 'text-neutral-600' : 'text-neutral-300'}`}>📧 <span className={theme === 'light' ? 'text-neutral-900 font-medium' : 'text-amber-200'}>{user.email}</span></p>
+                        {userDbId && userDbId !== GUEST_PUBLIC_SCOPE && (
+                          <div className={`text-[11px] flex flex-wrap items-center gap-1.5 font-khmer ${theme === 'light' ? 'text-neutral-600' : 'text-neutral-300'}`}>
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md border font-mono text-[10px] ${
+                              theme === 'light'
+                                ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
+                                : 'bg-emerald-500/10 border-emerald-400/35 text-emerald-300'
+                            }`}>
+                              <Database className="w-3 h-3 text-emerald-400" />
+                              <span>DB: {userDbId}</span>
+                            </span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-md border ${
+                              theme === 'light'
+                                ? 'bg-neutral-100 border-neutral-300 text-neutral-700'
+                                : 'bg-white/5 border-white/10 text-neutral-300'
+                            }`}>
+                              {language === 'kh'
+                                ? `ធៀបការ ${userDbInfo?.eventCount ?? 0} • ភ្ញៀវ ${userDbInfo?.guestCount ?? 0} • ជូនពរ ${userDbInfo?.wishCount ?? 0} • RSVP ${userDbInfo?.rsvpCount ?? 0}`
+                                : `Events ${userDbInfo?.eventCount ?? 0} • Guests ${userDbInfo?.guestCount ?? 0} • Wishes ${userDbInfo?.wishCount ?? 0} • RSVP ${userDbInfo?.rsvpCount ?? 0}`}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const dbRec = await ensureUserDatabaseInFirebase({
+                                  email: user.email,
+                                  name: user.name,
+                                  role: user.role,
+                                  forceSync: true,
+                                });
+                                if (dbRec) {
+                                  setUserDatabasesMap(prev => ({ ...prev, [dbRec.id]: dbRec }));
+                                }
+                              }}
+                              className={`p-1 rounded-md border transition-colors cursor-pointer ${
+                                theme === 'light'
+                                  ? 'border-neutral-300 hover:bg-neutral-200 text-neutral-600'
+                                  : 'border-white/15 hover:bg-white/10 text-amber-300'
+                              }`}
+                              title={language === 'kh' ? 'ធ្វើសមកាលកម្ម Database ផ្ទាល់ខ្លួន' : 'Sync Personal DB'}
+                            >
+                              <RefreshCw className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
                         <p className={`text-xs ${theme === 'light' ? 'text-neutral-500' : 'text-neutral-400'} flex items-center gap-1.5`}>
                           <span>🔑 Passcode:</span>
                           {isOwner && !isCurrentActorOwner ? (
