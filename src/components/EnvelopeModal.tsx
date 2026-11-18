@@ -110,6 +110,11 @@ interface EnvelopeModalProps {
   invitationTitleEn?: string;
   coverEnNameColor?: string;
   coverEnFontFamily?: string;
+  coverMonogramGroom?: string;
+  coverMonogramBride?: string;
+  coverMonogramFontFamily?: string;
+  coverMonogramColor?: string;
+  coverMonogramFontSize?: string;
   eventDate?: string;
   eventTime?: string;
   eventLocation?: string;
@@ -176,6 +181,11 @@ export default function EnvelopeModal({
   invitationTitleEn,
   coverEnNameColor,
   coverEnFontFamily,
+  coverMonogramGroom,
+  coverMonogramBride,
+  coverMonogramFontFamily,
+  coverMonogramColor,
+  coverMonogramFontSize,
   eventDate,
   eventTime,
   eventLocation,
@@ -814,7 +824,13 @@ export default function EnvelopeModal({
                         bride={bride}
                         groomEn={groomEn}
                         brideEn={brideEn}
+                        singlePerson={singlePerson}
                         subtitleKh={subtitleKh}
+                        coverMonogramGroom={coverMonogramGroom}
+                        coverMonogramBride={coverMonogramBride}
+                        coverMonogramFontFamily={coverMonogramFontFamily}
+                        coverMonogramColor={coverMonogramColor}
+                        coverMonogramFontSize={coverMonogramFontSize}
                         guestName={guestName && guestName !== 'Your Name' ? guestName : (language === 'kh' ? 'លោក វ៉ាន់ សុខា' : 'Honored Guest')}
                         language={language}
                         onOpenInvitation={handleOpenInvitation}

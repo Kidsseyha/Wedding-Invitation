@@ -45,6 +45,7 @@ import { EVENT_PRESETS, EventTypePreset } from '../data/eventTemplates';
 import ImageUploadInput from './ImageUploadInput';
 import DesignSettingsSection from './DesignSettingsSection';
 import CoverInfoEditor from './CoverInfoEditor';
+import CoverMonogramSettingsCard from './CoverMonogramSettingsCard';
 import ThemeToggle, { ThemeMode } from './ThemeToggle';
 import LanguageToggle from './LanguageToggle';
 import { Language } from '../types';
@@ -1832,6 +1833,11 @@ export default function EventEditorModal({
                     onSave={handleSaveAll}
                     isSaving={isSaving}
                     currentCategory={currentCategory}
+                    groom={formData.groom}
+                    bride={formData.bride}
+                    groomEn={formData.groomEn}
+                    brideEn={formData.brideEn}
+                    singlePerson={formData.singlePerson}
                   >
                     {/* EDITABLE COVER INFORMATION OF INVITATION (Live Preview placed below header) */}
                     <CoverInfoEditor
@@ -1848,7 +1854,18 @@ export default function EventEditorModal({
               {/* TAB 1: COUPLE & GENERAL INFO */}
               {activeTab === 'couple' && (
                 <div className="space-y-4">
-
+                  <CoverMonogramSettingsCard
+                    config={formData.config}
+                    onUpdateConfig={handleUpdateConfig}
+                    groom={formData.groom}
+                    bride={formData.bride}
+                    groomEn={formData.groomEn}
+                    brideEn={formData.brideEn}
+                    singlePerson={formData.singlePerson}
+                    theme={theme}
+                    onSave={handleSaveAll}
+                    isSaving={isSaving}
+                  />
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">

@@ -1,14 +1,21 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { ChevronDown, Check, X } from 'lucide-react';
+import { getFirstNameInitial } from '../utils/monogramHelpers';
 
 interface TheapKhmerTemplate15CoverProps {
   groom?: string;
   bride?: string;
   groomEn?: string;
   brideEn?: string;
+  singlePerson?: boolean;
   subtitleKh?: string;
   subtitleEn?: string;
+  coverMonogramGroom?: string;
+  coverMonogramBride?: string;
+  coverMonogramFontFamily?: string;
+  coverMonogramColor?: string;
+  coverMonogramFontSize?: string;
   guestName?: string;
   language?: string;
   isOpening?: boolean;
@@ -41,30 +48,19 @@ export function TheapKhmerDivider({
   );
 }
 
-function getLatinInitial(nameEn?: string, nameKh?: string, fallback = 'R', useLastWord = false): string {
-  if (nameEn && nameEn.trim()) {
-    const cleaned = nameEn
-      .trim()
-      .replace(/^(mr|mrs|ms|miss|dr)\.?\s+/i, '');
-    const parts = cleaned.split(/\s+/).filter(Boolean);
-    if (parts.length > 0) {
-      const target = useLastWord ? parts[parts.length - 1] : parts[0];
-      return target.charAt(0).toUpperCase();
-    }
-  }
-  if (nameKh && nameKh.trim()) {
-    return nameKh.trim().charAt(0);
-  }
-  return fallback;
-}
-
 export default function TheapKhmerTemplate15Cover({
   groom = 'រ៉ូ ម៉ាឡេ',
   bride = 'អួម វល្ខ័ក',
   groomEn = 'Ro Malay',
   brideEn = 'Uom Volak',
+  singlePerson = false,
   subtitleKh = 'សិរីសួស្តីអាពាហ៍ពិពាហ៍',
   subtitleEn = 'Wedding Celebration',
+  coverMonogramGroom,
+  coverMonogramBride,
+  coverMonogramFontFamily,
+  coverMonogramColor,
+  coverMonogramFontSize,
   guestName = 'លោក វ៉ាន់ សុខា',
   language = 'kh',
   isOpening = false,
@@ -88,8 +84,22 @@ export default function TheapKhmerTemplate15Cover({
       ? 'លោក វ៉ាន់ សុខា'
       : 'Honored Guest';
 
-  const groomInit = getLatinInitial(groomEn, groom, 'R', false);
-  const brideInit = getLatinInitial(brideEn, bride, 'V', true);
+  const isKhmer = language === 'kh';
+  const groomInit =
+    (coverMonogramGroom && coverMonogramGroom.trim()) ||
+    (isKhmer ? getFirstNameInitial(groom, groomEn, 'រ') : getFirstNameInitial(groomEn, groom, 'R'));
+  const brideInit =
+    (coverMonogramBride && coverMonogramBride.trim()) ||
+    (isKhmer ? getFirstNameInitial(bride, brideEn, 'អ') : getFirstNameInitial(brideEn, bride, 'U'));
+  const isLatinMonogram =
+    /^[A-Za-z0-9.\s]+$/.test(groomInit) && (singlePerson || /^[A-Za-z0-9.\s]+$/.test(brideInit));
+  const monogramFontFamily =
+    coverMonogramFontFamily ||
+    (isLatinMonogram
+      ? "'Playfair Display', 'Cinzel', Georgia, serif"
+      : "'Moulpali', 'Moul', 'Noto Serif Khmer', serif");
+  const monogramColor = coverMonogramColor || '#9c732d';
+  const monogramSizePx = parseInt(coverMonogramFontSize || '', 10) || (isLatinMonogram ? 34 : 28);
 
   const handleSaveInline = (e: React.FormEvent) => {
     e.preventDefault();
@@ -155,13 +165,57 @@ export default function TheapKhmerTemplate15Cover({
         transition={{ duration: 0.75, delay: 0.16, ease: 'easeOut' }}
         className="relative z-[10] flex items-center justify-center my-2"
       >
-        <div className="relative w-36 h-36 sm:w-44 sm:h-44 flex items-center justify-center">
+        <div
+          aria-label={singlePerson ? `${groom} monogram (${groomInit})` : `${groom} & ${bride} monogram (${groomInit} & ${brideInit})`}
+          className="relative w-36 h-36 sm:w-44 sm:h-44 flex items-center justify-center"
+        >
           <img
-            src="/assets/template15/monogram.webp"
-            alt={`${groom} and ${bride} wedding monogram`}
+            src="/assets/template15/monogram-frame.webp"
+            alt={`${groom} & ${bride} monogram frame`}
             draggable={false}
-            className="w-full h-full object-contain select-none drop-shadow-[0_4px_10px_rgba(148,110,44,0.2)]"
+            className="w-full h-full object-contain select-none pointer-events-none drop-shadow-[0_4px_12px_rgba(148,110,44,0.22)]"
           />
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none px-5">
+            <div className="flex items-baseline justify-center gap-1 sm:gap-1.5 leading-none">
+              <span
+                className="font-bold leading-none"
+                style={{
+                  fontFamily: monogramFontFamily,
+                  fontSize: `${monogramSizePx}px`,
+                  color: monogramColor,
+                  textShadow: '0 1px 1px rgba(255,255,255,0.92), 0 2px 6px rgba(156,115,45,0.24)',
+                }}
+              >
+                {groomInit}
+              </span>
+              {!singlePerson && (
+                <>
+                  <span
+                    className="font-semibold leading-none opacity-85"
+                    style={{
+                      fontFamily: monogramFontFamily,
+                      fontSize: `${Math.max(15, Math.round(monogramSizePx * 0.56))}px`,
+                      color: monogramColor,
+                      textShadow: '0 1px 1px rgba(255,255,255,0.9)',
+                    }}
+                  >
+                    &amp;
+                  </span>
+                  <span
+                    className="font-bold leading-none"
+                    style={{
+                      fontFamily: monogramFontFamily,
+                      fontSize: `${monogramSizePx}px`,
+                      color: monogramColor,
+                      textShadow: '0 1px 1px rgba(255,255,255,0.92), 0 2px 6px rgba(156,115,45,0.24)',
+                    }}
+                  >
+                    {brideInit}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       </motion.div>
 

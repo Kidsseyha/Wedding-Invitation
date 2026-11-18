@@ -23,6 +23,7 @@ import {
 import { TemplateConfig } from '../types';
 import { FRAME_PRESETS } from '../data/framePresets';
 import { ThemeMode } from './ThemeToggle';
+import CoverMonogramSettingsCard from './CoverMonogramSettingsCard';
 import bgGold from '../assets/images/khmer_bg_gold_1789308973579.jpg';
 import bgCream from '../assets/images/khmer_bg_cream_1789308990200.jpg';
 import bgGreen from '../assets/images/khmer_bg_green_1789309004847.jpg';
@@ -66,6 +67,11 @@ interface DesignSettingsSectionProps {
   isSaving?: boolean;
   children?: React.ReactNode;
   currentCategory?: string;
+  groom?: string;
+  bride?: string;
+  groomEn?: string;
+  brideEn?: string;
+  singlePerson?: boolean;
 }
 
 // Preset Colors for Cover Invitation EN Name
@@ -491,6 +497,11 @@ export default function DesignSettingsSection({
   isSaving = false,
   children,
   currentCategory = 'wedding',
+  groom = '',
+  bride = '',
+  groomEn = '',
+  brideEn = '',
+  singlePerson = false,
 }: DesignSettingsSectionProps) {
   const frontColor = config.primaryColor || '#f5b80f';
   const bottomColor = config.textColor || '#f5b80f';
@@ -1143,6 +1154,21 @@ export default function DesignSettingsSection({
           </div>
         </div>
       </div>
+
+      {/* 2.6. អក្សរកាត់ឈ្មោះកូនប្រុស និងកូនស្រីលើ Cover (Cover Monogram Short Text & Styles) */}
+      <CoverMonogramSettingsCard
+        config={config}
+        onUpdateConfig={onUpdateConfig}
+        groom={groom}
+        bride={bride}
+        groomEn={groomEn}
+        brideEn={brideEn}
+        singlePerson={singlePerson}
+        theme={theme}
+        onSave={onSave ? handleSaveToDatabase : undefined}
+        isSaving={isSaving}
+        justSaved={justSaved}
+      />
 
       {/* 3. រូបថតគូស្នេហ៍ចម្បង (Hero Portrait Photo) */}
       <DesignFilePicker

@@ -2212,6 +2212,11 @@ export default function App() {
           : (config.cover_subtitle_en || config.invitation_en?.subtitle)}
         coverEnNameColor={config.cover_en_name_color}
         coverEnFontFamily={config.cover_en_font_family}
+        coverMonogramGroom={config.cover_monogram_groom}
+        coverMonogramBride={config.cover_monogram_bride}
+        coverMonogramFontFamily={config.cover_monogram_font_family}
+        coverMonogramColor={config.cover_monogram_color}
+        coverMonogramFontSize={config.cover_monogram_font_size}
         eventDate={event.date || config.invitation_en?.date_time || config.invitation_kh?.date_time}
         eventTime={event.eating_time || event.startTime || ''}
         eventLocation={event.location || config.event_location || config.invitation_kh?.location}
