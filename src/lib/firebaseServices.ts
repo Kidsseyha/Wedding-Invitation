@@ -3,6 +3,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  getDocFromServer,
   getDocs,
   deleteDoc,
   onSnapshot,
@@ -695,7 +696,7 @@ export async function fetchUserEvent(userId: string): Promise<WeddingEvent | nul
 export async function fetchEventFromFirebase(
   eventId: string,
   ownerId?: string,
-  options?: { includeServerApi?: boolean; templateType?: string; ownerEmail?: string }
+  options?: { includeServerApi?: boolean; templateType?: string; ownerEmail?: string; forceServer?: boolean }
 ): Promise<WeddingEvent | null> {
   const targetId = eventId || DEFAULT_PRESET_EVENT_ID;
   const targetDbId = resolveRecordDatabaseId({
@@ -704,20 +705,29 @@ export async function fetchEventFromFirebase(
     eventId: targetId,
   });
 
+  const readDocFresh = async (ref: ReturnType<typeof doc>) => {
+    if (options?.forceServer) {
+      try {
+        const serverSnap = await getDocFromServer(ref);
+        return serverSnap.exists() ? (serverSnap.data() as WeddingEvent) : null;
+      } catch {
+        // Fallback to cached getDoc if client is offline
+      }
+    }
+    const snap = await getDoc(ref);
+    return snap.exists() ? (snap.data() as WeddingEvent) : null;
+  };
+
   const scopedFsPromise =
     !IS_FIRESTORE_WRITE_DISABLED && targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE
-      ? getDoc(doc(db, USER_DATABASES_COLLECTION, targetDbId, 'events', targetId))
-          .then((snap) => (snap.exists() ? (snap.data() as WeddingEvent) : null))
-          .catch(() => null)
+      ? readDocFresh(doc(db, USER_DATABASES_COLLECTION, targetDbId, 'events', targetId)).catch(() => null)
       : Promise.resolve(null);
 
   const topFsPromise = !IS_FIRESTORE_WRITE_DISABLED
-    ? getDoc(doc(db, 'events', targetId))
-        .then((snap) => (snap.exists() ? (snap.data() as WeddingEvent) : null))
-        .catch((error) => {
-          handleFirestoreError(error, OperationType.GET, `events/${targetId}`);
-          return null;
-        })
+    ? readDocFresh(doc(db, 'events', targetId)).catch((error) => {
+        handleFirestoreError(error, OperationType.GET, `events/${targetId}`);
+        return null;
+      })
     : Promise.resolve(null);
 
   const includeServerApi = options?.includeServerApi !== false;
@@ -726,7 +736,9 @@ export async function fetchEventFromFirebase(
         try {
           const ownerParam = ownerId && ownerId !== GUEST_PUBLIC_SCOPE ? `&ownerId=${encodeURIComponent(ownerId)}` : '';
           const typeParam = options?.templateType ? `&type=${encodeURIComponent(options.templateType)}` : '';
-          const res = await fetch(`/api/event?id=${encodeURIComponent(targetId)}${typeParam}${ownerParam}`);
+          const cacheBust = options?.forceServer ? `&_t=${Date.now()}` : '';
+          const fetchOpts: RequestInit | undefined = options?.forceServer ? { cache: 'no-store' } : undefined;
+          const res = await fetch(`/api/event?id=${encodeURIComponent(targetId)}${typeParam}${ownerParam}${cacheBust}`, fetchOpts);
           if (res.ok) {
             const json = await res.json();
             if (json?.success && json.event && json.source !== 'preset') {
@@ -735,7 +747,8 @@ export async function fetchEventFromFirebase(
           }
           if (options?.templateType) {
             const typeRes = await fetch(
-              `/api/event?type=${encodeURIComponent(options.templateType)}${ownerParam}`
+              `/api/event?type=${encodeURIComponent(options.templateType)}${ownerParam}${cacheBust}`,
+              fetchOpts
             );
             if (typeRes.ok) {
               const typeJson = await typeRes.json();

@@ -1349,6 +1349,127 @@ export default function App() {
   };
 
   const [refreshValidationFeedback, setRefreshValidationFeedback] = useState<string | null>(null);
+  const [isRefreshingFromDb, setIsRefreshingFromDb] = useState(false);
+
+  const handleRefreshFromDatabase = async () => {
+    if (isRefreshingFromDb) return;
+    setIsRefreshingFromDb(true);
+    setRefreshValidationFeedback(
+      language === 'kh'
+        ? 'កំពុងត្រួតពិនិត្យ និងទាញយកទិន្នន័យពី Database...'
+        : 'Checking information from database...'
+    );
+
+    try {
+      const scopeId = activeUserScope.scopeId;
+      const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+      let urlIdParam = params?.get('id') || null;
+      const urlTypeParam = params?.get('type') || params?.get('category') || null;
+
+      const urlIdOwnerScope = extractScopeFromEventId(urlIdParam);
+      if (activeUserScope.isAuthenticated && !isFromShareLink && urlIdOwnerScope && urlIdOwnerScope !== scopeId) {
+        urlIdParam = null;
+      }
+
+      let fetchId = DEFAULT_PRESET_EVENT_ID;
+      let targetOwnerFilter = '';
+
+      if (isFromShareLink || (!activeUserScope.isAuthenticated && (urlIdParam || urlTypeParam))) {
+        fetchId = urlIdParam || urlTypeParam || event.id || DEFAULT_PRESET_EVENT_ID;
+        targetOwnerFilter = extractScopeFromEventId(fetchId) || event.ownerId || '';
+      } else if (activeUserScope.isAuthenticated) {
+        targetOwnerFilter = scopeId;
+        const activeTemplateId = localStorage.getItem(getUserStorageKey('wedding_last_active_template_id', scopeId));
+        const candidateId = event.id || urlIdParam || urlTypeParam || activeTemplateId || DEFAULT_PRESET_EVENT_ID;
+        fetchId = getScopedEventId(candidateId, scopeId);
+      } else {
+        const activeTemplateId = localStorage.getItem(getUserStorageKey('wedding_last_active_template_id', scopeId));
+        fetchId = event.id || activeTemplateId || DEFAULT_PRESET_EVENT_ID;
+      }
+
+      const templateTypeHint = urlTypeParam || event.eventType || validateCurrentTemplateType(event);
+
+      testFirestoreConnection().catch(() => {});
+
+      let dbEvent = await fetchEventFromFirebase(fetchId, targetOwnerFilter || undefined, {
+        includeServerApi: true,
+        templateType: templateTypeHint || undefined,
+        ownerEmail: activeUserScope.ownerEmail || event.ownerEmail || undefined,
+        forceServer: true,
+      });
+
+      if (!dbEvent && activeUserScope.isAuthenticated && !isFromShareLink && authUser?.uid) {
+        const legacyEvent = await fetchEventFromFirebase(`event_${authUser.uid}`, undefined, {
+          includeServerApi: true,
+          forceServer: true,
+        });
+        if (legacyEvent && (!legacyEvent.ownerId || legacyEvent.ownerId === authUser.uid || legacyEvent.ownerId === scopeId)) {
+          dbEvent = {
+            ...legacyEvent,
+            id: fetchId,
+            ownerId: scopeId,
+            ownerEmail: activeUserScope.ownerEmail || legacyEvent.ownerEmail || '',
+          };
+        }
+      }
+
+      if (!dbEvent && activeUserScope.isAuthenticated && !isFromShareLink && !urlIdParam && !urlTypeParam) {
+        const userTemplates = await fetchUserTemplatesFromFirebase(scopeId);
+        if (userTemplates.length > 0) {
+          userTemplates.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+          dbEvent = userTemplates[0];
+        }
+      }
+
+      if (dbEvent) {
+        const sanitized = sanitizeWeddingEvent({
+          ...dbEvent,
+          id: dbEvent.id || fetchId,
+          ownerId: dbEvent.ownerId || (activeUserScope.isAuthenticated && !isFromShareLink ? scopeId : undefined),
+          ownerEmail: dbEvent.ownerEmail || (activeUserScope.isAuthenticated && !isFromShareLink ? activeUserScope.ownerEmail : undefined),
+        });
+        hasSavedLocallyRef.current = false;
+        lastSavedAtRef.current = getEventTimestampMs(sanitized);
+        setEvent(sanitized);
+
+        if (!isFromShareLink) {
+          try {
+            const rawBaseId = sanitized.templateId || stripScopedEventId(sanitized.id || DEFAULT_PRESET_EVENT_ID);
+            localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(sanitized));
+            localStorage.setItem(getUserStorageKey(`wedding_template_saved_${sanitized.id}`, scopeId), JSON.stringify(sanitized));
+            localStorage.setItem(getUserStorageKey(`wedding_template_saved_${rawBaseId}`, scopeId), JSON.stringify(sanitized));
+            if (sanitized.eventType) {
+              localStorage.setItem(getUserStorageKey(`wedding_template_type_${sanitized.eventType}`, scopeId), JSON.stringify(sanitized));
+            }
+          } catch {}
+        }
+
+        setRefreshValidationFeedback(
+          language === 'kh'
+            ? 'បានត្រួតពិនិត្យ និងបង្ហាញទិន្នន័យចុងក្រោយពី Database រួចរាល់!'
+            : 'Database checked — showing latest saved information!'
+        );
+      } else {
+        setRefreshValidationFeedback(
+          language === 'kh'
+            ? 'បានត្រួតពិនិត្យ Database — មិនទាន់មានទិន្នន័យរក្សាទុកថ្មីទេ'
+            : 'Database checked — no saved updates found yet'
+        );
+      }
+    } catch (err) {
+      console.warn('Database refresh check error:', err);
+      setRefreshValidationFeedback(
+        language === 'kh'
+          ? 'មិនអាចភ្ជាប់ទៅ Database បានទេ សូមព្យាយាមម្តងទៀត'
+          : 'Could not reach database, please try again'
+      );
+    } finally {
+      setIsRefreshingFromDb(false);
+      setTimeout(() => {
+        setRefreshValidationFeedback(null);
+      }, 3000);
+    }
+  };
 
   const handleRefreshWithValidation = async () => {
     const scopeId = activeUserScope.scopeId;
@@ -2465,22 +2586,24 @@ export default function App() {
           </motion.button>
         )}
 
-        {/* Reload / Refresh Button */}
+        {/* Reload / Check Database Button */}
         <motion.button
           id="reload-refresh-btn"
-          onClick={() => {
-            window.location.reload();
-          }}
+          type="button"
+          disabled={isRefreshingFromDb}
+          onClick={handleRefreshFromDatabase}
           whileHover={{ scale: 1.05, y: -2 }}
           whileTap={{ scale: 0.94 }}
-          className="group relative flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full border border-amber-500/60 bg-gradient-to-br from-black/95 via-neutral-900 to-black text-amber-200 shadow-[0_4px_18px_rgba(0,0,0,0.5)] backdrop-blur-md hover:border-amber-400 hover:text-amber-100 hover:shadow-[0_4px_22px_rgba(245,158,11,0.4)] transition-all ring-1 ring-amber-500/30 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-black cursor-pointer"
-          title={language === 'kh' ? 'ផ្ទុកឡើងវិញ / Reload' : 'Reload / Refresh'}
+          className="group relative flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full border border-amber-500/60 bg-gradient-to-br from-black/95 via-neutral-900 to-black text-amber-200 shadow-[0_4px_18px_rgba(0,0,0,0.5)] backdrop-blur-md hover:border-amber-400 hover:text-amber-100 hover:shadow-[0_4px_22px_rgba(245,158,11,0.4)] transition-all ring-1 ring-amber-500/30 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-black cursor-pointer disabled:opacity-70"
+          title={language === 'kh' ? 'ត្រួតពិនិត្យ និងទាញយកទិន្នន័យពី Database / Check Database' : 'Check & Reload from Database'}
         >
           <div className="p-1 rounded-full bg-amber-500/20 group-hover:bg-amber-400/30 transition-colors">
-            <RotateCcw className="w-3.5 h-3.5 text-amber-400 group-hover:rotate-[-45deg] group-hover:text-amber-200 transition-all duration-300" />
+            <RotateCcw className={`w-3.5 h-3.5 text-amber-400 group-hover:text-amber-200 transition-all duration-300 ${isRefreshingFromDb ? 'animate-spin' : 'group-hover:rotate-[-45deg]'}`} />
           </div>
           <span className="text-xs sm:text-[14px] font-khmer font-medium text-neutral-200 group-hover:text-amber-100 transition-colors whitespace-nowrap">
-            {language === 'kh' ? 'ផ្ទុកឡើងវិញ' : 'Reload'}
+            {isRefreshingFromDb
+              ? (language === 'kh' ? 'កំពុងពិនិត្យ DB...' : 'Checking DB...')
+              : (language === 'kh' ? 'ផ្ទុកឡើងវិញ' : 'Reload')}
           </span>
         </motion.button>
 
