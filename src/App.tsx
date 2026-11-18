@@ -1350,9 +1350,15 @@ export default function App() {
 
   const [refreshValidationFeedback, setRefreshValidationFeedback] = useState<string | null>(null);
   const [isRefreshingFromDb, setIsRefreshingFromDb] = useState(false);
+  const refreshToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleRefreshFromDatabase = async () => {
     if (isRefreshingFromDb) return;
+    if (refreshToastTimerRef.current) {
+      clearTimeout(refreshToastTimerRef.current);
+      refreshToastTimerRef.current = null;
+    }
+
     setIsRefreshingFromDb(true);
     setRefreshValidationFeedback(
       language === 'kh'
@@ -1389,44 +1395,12 @@ export default function App() {
 
       const templateTypeHint = urlTypeParam || event.eventType || validateCurrentTemplateType(event);
 
-      testFirestoreConnection().catch(() => {});
-
-      let dbEvent = await fetchEventFromFirebase(fetchId, targetOwnerFilter || undefined, {
-        includeServerApi: true,
-        templateType: templateTypeHint || undefined,
-        ownerEmail: activeUserScope.ownerEmail || event.ownerEmail || undefined,
-        forceServer: true,
-      });
-
-      if (!dbEvent && activeUserScope.isAuthenticated && !isFromShareLink && authUser?.uid) {
-        const legacyEvent = await fetchEventFromFirebase(`event_${authUser.uid}`, undefined, {
-          includeServerApi: true,
-          forceServer: true,
-        });
-        if (legacyEvent && (!legacyEvent.ownerId || legacyEvent.ownerId === authUser.uid || legacyEvent.ownerId === scopeId)) {
-          dbEvent = {
-            ...legacyEvent,
-            id: fetchId,
-            ownerId: scopeId,
-            ownerEmail: activeUserScope.ownerEmail || legacyEvent.ownerEmail || '',
-          };
-        }
-      }
-
-      if (!dbEvent && activeUserScope.isAuthenticated && !isFromShareLink && !urlIdParam && !urlTypeParam) {
-        const userTemplates = await fetchUserTemplatesFromFirebase(scopeId);
-        if (userTemplates.length > 0) {
-          userTemplates.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
-          dbEvent = userTemplates[0];
-        }
-      }
-
-      if (dbEvent) {
+      const applyDbEvent = (rawDbEvent: WeddingEvent) => {
         const sanitized = sanitizeWeddingEvent({
-          ...dbEvent,
-          id: dbEvent.id || fetchId,
-          ownerId: dbEvent.ownerId || (activeUserScope.isAuthenticated && !isFromShareLink ? scopeId : undefined),
-          ownerEmail: dbEvent.ownerEmail || (activeUserScope.isAuthenticated && !isFromShareLink ? activeUserScope.ownerEmail : undefined),
+          ...rawDbEvent,
+          id: rawDbEvent.id || fetchId,
+          ownerId: rawDbEvent.ownerId || (activeUserScope.isAuthenticated && !isFromShareLink ? scopeId : undefined),
+          ownerEmail: rawDbEvent.ownerEmail || (activeUserScope.isAuthenticated && !isFromShareLink ? activeUserScope.ownerEmail : undefined),
         });
         hasSavedLocallyRef.current = false;
         lastSavedAtRef.current = getEventTimestampMs(sanitized);
@@ -1443,13 +1417,57 @@ export default function App() {
             }
           } catch {}
         }
+      };
 
+      let appliedFast = false;
+      let dbEvent = await fetchEventFromFirebase(fetchId, targetOwnerFilter || undefined, {
+        includeServerApi: true,
+        templateType: templateTypeHint || undefined,
+        ownerEmail: activeUserScope.ownerEmail || event.ownerEmail || undefined,
+        forceServer: true,
+        timeoutMs: 1200,
+        onFastResult: (fastEvt) => {
+          appliedFast = true;
+          applyDbEvent(fastEvt);
+        },
+      });
+
+      // Parallelize fallback lookups only if primary ID check returned nothing
+      if (!dbEvent && activeUserScope.isAuthenticated && !isFromShareLink) {
+        const [legacyEvent, userTemplates] = await Promise.all([
+          authUser?.uid
+            ? fetchEventFromFirebase(`event_${authUser.uid}`, undefined, {
+                includeServerApi: true,
+                forceServer: true,
+                timeoutMs: 1100,
+              })
+            : Promise.resolve(null),
+          !urlIdParam && !urlTypeParam
+            ? fetchUserTemplatesFromFirebase(scopeId, { timeoutMs: 1200 })
+            : Promise.resolve([]),
+        ]);
+
+        if (legacyEvent && (!legacyEvent.ownerId || legacyEvent.ownerId === authUser?.uid || legacyEvent.ownerId === scopeId)) {
+          dbEvent = {
+            ...legacyEvent,
+            id: fetchId,
+            ownerId: scopeId,
+            ownerEmail: activeUserScope.ownerEmail || legacyEvent.ownerEmail || '',
+          };
+        } else if (userTemplates.length > 0) {
+          userTemplates.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+          dbEvent = userTemplates[0];
+        }
+      }
+
+      if (dbEvent) {
+        applyDbEvent(dbEvent);
         setRefreshValidationFeedback(
           language === 'kh'
             ? 'បានត្រួតពិនិត្យ និងបង្ហាញទិន្នន័យចុងក្រោយពី Database រួចរាល់!'
             : 'Database checked — showing latest saved information!'
         );
-      } else {
+      } else if (!appliedFast) {
         setRefreshValidationFeedback(
           language === 'kh'
             ? 'បានត្រួតពិនិត្យ Database — មិនទាន់មានទិន្នន័យរក្សាទុកថ្មីទេ'
@@ -1465,9 +1483,9 @@ export default function App() {
       );
     } finally {
       setIsRefreshingFromDb(false);
-      setTimeout(() => {
+      refreshToastTimerRef.current = setTimeout(() => {
         setRefreshValidationFeedback(null);
-      }, 3000);
+      }, 2200);
     }
   };
 

@@ -691,12 +691,19 @@ export async function fetchUserEvent(userId: string): Promise<WeddingEvent | nul
 
 /**
  * Fetch wedding event from Firestore (personal user_databases + top-level events) & Server REST API,
- * returning the newest persisted database record (ignoring untouched presets).
+ * returning the newest persisted database record (ignoring untouched presets) with bounded latency.
  */
 export async function fetchEventFromFirebase(
   eventId: string,
   ownerId?: string,
-  options?: { includeServerApi?: boolean; templateType?: string; ownerEmail?: string; forceServer?: boolean }
+  options?: {
+    includeServerApi?: boolean;
+    templateType?: string;
+    ownerEmail?: string;
+    forceServer?: boolean;
+    timeoutMs?: number;
+    onFastResult?: (event: WeddingEvent) => void;
+  }
 ): Promise<WeddingEvent | null> {
   const targetId = eventId || DEFAULT_PRESET_EVENT_ID;
   const targetDbId = resolveRecordDatabaseId({
@@ -704,64 +711,115 @@ export async function fetchEventFromFirebase(
     ownerEmail: options?.ownerEmail,
     eventId: targetId,
   });
+  const branchTimeoutMs = options?.timeoutMs ?? (options?.forceServer ? 1400 : 2500);
 
-  const readDocFresh = async (ref: ReturnType<typeof doc>) => {
-    if (options?.forceServer) {
-      try {
-        const serverSnap = await getDocFromServer(ref);
-        return serverSnap.exists() ? (serverSnap.data() as WeddingEvent) : null;
-      } catch {
-        // Fallback to cached getDoc if client is offline
-      }
+  let fastBest: WeddingEvent | null = null;
+  const considerFastResult = (cand: WeddingEvent | null) => {
+    if (!cand || !options?.onFastResult) return cand;
+    const picked = pickNewestDatabaseEvent<WeddingEvent>([fastBest, cand]);
+    if (picked && picked !== fastBest) {
+      fastBest = picked;
+      options.onFastResult(picked);
     }
-    const snap = await getDoc(ref);
-    return snap.exists() ? (snap.data() as WeddingEvent) : null;
+    return cand;
   };
 
-  const scopedFsPromise =
+  const readDocFast = async (ref: ReturnType<typeof doc>): Promise<WeddingEvent | null> => {
+    if (options?.forceServer) {
+      let failed = false;
+      const serverRes = await raceWithTimeout(
+        getDocFromServer(ref)
+          .then((snap) => (snap.exists() ? (snap.data() as WeddingEvent) : null))
+          .catch(() => {
+            failed = true;
+            return null;
+          }),
+        Math.min(branchTimeoutMs, 1100),
+        null as WeddingEvent | null
+      );
+      if (!serverRes.timedOut && !failed) {
+        return serverRes.value;
+      }
+      const cacheRes = await raceWithTimeout(
+        getDoc(ref)
+          .then((snap) => (snap.exists() ? (snap.data() as WeddingEvent) : null))
+          .catch(() => null),
+        250,
+        null as WeddingEvent | null
+      );
+      return cacheRes.value;
+    }
+
+    const res = await raceWithTimeout(
+      getDoc(ref)
+        .then((snap) => (snap.exists() ? (snap.data() as WeddingEvent) : null))
+        .catch(() => null),
+      branchTimeoutMs,
+      null as WeddingEvent | null
+    );
+    return res.value;
+  };
+
+  const scopedFsPromise: Promise<WeddingEvent | null> =
     !IS_FIRESTORE_WRITE_DISABLED && targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE
-      ? readDocFresh(doc(db, USER_DATABASES_COLLECTION, targetDbId, 'events', targetId)).catch(() => null)
+      ? readDocFast(doc(db, USER_DATABASES_COLLECTION, targetDbId, 'events', targetId)).then(considerFastResult)
       : Promise.resolve(null);
 
-  const topFsPromise = !IS_FIRESTORE_WRITE_DISABLED
-    ? readDocFresh(doc(db, 'events', targetId)).catch((error) => {
-        handleFirestoreError(error, OperationType.GET, `events/${targetId}`);
-        return null;
-      })
+  const topFsPromise: Promise<WeddingEvent | null> = !IS_FIRESTORE_WRITE_DISABLED
+    ? readDocFast(doc(db, 'events', targetId))
+        .catch((error) => {
+          handleFirestoreError(error, OperationType.GET, `events/${targetId}`);
+          return null;
+        })
+        .then(considerFastResult)
     : Promise.resolve(null);
 
   const includeServerApi = options?.includeServerApi !== false;
   const serverApiPromise: Promise<WeddingEvent | null> = includeServerApi
     ? (async () => {
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timerId = controller ? setTimeout(() => controller.abort(), branchTimeoutMs) : null;
         try {
           const ownerParam = ownerId && ownerId !== GUEST_PUBLIC_SCOPE ? `&ownerId=${encodeURIComponent(ownerId)}` : '';
           const typeParam = options?.templateType ? `&type=${encodeURIComponent(options.templateType)}` : '';
           const cacheBust = options?.forceServer ? `&_t=${Date.now()}` : '';
-          const fetchOpts: RequestInit | undefined = options?.forceServer ? { cache: 'no-store' } : undefined;
-          const res = await fetch(`/api/event?id=${encodeURIComponent(targetId)}${typeParam}${ownerParam}${cacheBust}`, fetchOpts);
+          const fetchOpts: RequestInit = {
+            ...(options?.forceServer ? { cache: 'no-store' as RequestCache } : {}),
+            ...(controller ? { signal: controller.signal } : {}),
+          };
+
+          const res = await fetch(
+            `/api/event?id=${encodeURIComponent(targetId)}${typeParam}${ownerParam}${cacheBust}`,
+            fetchOpts
+          );
           if (res.ok) {
             const json = await res.json();
             if (json?.success && json.event && json.source !== 'preset') {
               return json.event as WeddingEvent;
             }
-          }
-          if (options?.templateType) {
-            const typeRes = await fetch(
-              `/api/event?type=${encodeURIComponent(options.templateType)}${ownerParam}${cacheBust}`,
-              fetchOpts
-            );
-            if (typeRes.ok) {
-              const typeJson = await typeRes.json();
-              if (typeJson?.success && typeJson.event && typeJson.source !== 'preset') {
-                return typeJson.event as WeddingEvent;
+            // Only query ?type= separately if the ID lookup found nothing at all (not_found)
+            if (options?.templateType && json?.source === 'not_found') {
+              const typeRes = await fetch(
+                `/api/event?type=${encodeURIComponent(options.templateType)}${ownerParam}${cacheBust}`,
+                fetchOpts
+              );
+              if (typeRes.ok) {
+                const typeJson = await typeRes.json();
+                if (typeJson?.success && typeJson.event && typeJson.source !== 'preset') {
+                  return typeJson.event as WeddingEvent;
+                }
               }
             }
           }
         } catch (error) {
-          console.warn('REST API fetch event error:', error);
+          if ((error as any)?.name !== 'AbortError') {
+            console.warn('REST API fetch event error:', error);
+          }
+        } finally {
+          if (timerId !== null) clearTimeout(timerId);
         }
         return null;
-      })()
+      })().then(considerFastResult)
     : Promise.resolve(null);
 
   const [scopedDoc, topDoc, apiDoc] = await Promise.all([
@@ -776,57 +834,87 @@ export async function fetchEventFromFirebase(
 /**
  * Fetch all saved/custom events belonging strictly to a specific ownerId (from personal DB + top-level)
  */
-export async function fetchUserTemplatesFromFirebase(ownerId: string): Promise<WeddingEvent[]> {
+export async function fetchUserTemplatesFromFirebase(
+  ownerId: string,
+  options?: { timeoutMs?: number }
+): Promise<WeddingEvent[]> {
   if (!ownerId || ownerId === GUEST_PUBLIC_SCOPE) return [];
   const results = new Map<string, WeddingEvent>();
   const targetDbId = resolveRecordDatabaseId({ ownerId });
+  const timeoutMs = options?.timeoutMs ?? 2000;
 
-  // 1. REST API templates owned by this user
-  try {
-    const res = await fetch(`/api/templates?ownerId=${encodeURIComponent(ownerId)}`);
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.success && Array.isArray(data.templates)) {
-        for (const t of data.templates) {
-          const evt = t?.event || t;
-          if (evt && evt.id && !isGlobalSharedPresetId(evt.id) && evt.ownerId === ownerId) {
-            results.set(evt.id, evt);
-          }
+  const restPromise = (async () => {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timerId = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    try {
+      const res = await fetch(
+        `/api/templates?ownerId=${encodeURIComponent(ownerId)}`,
+        controller ? { signal: controller.signal } : undefined
+      );
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.success && Array.isArray(data.templates)) {
+          return data.templates
+            .map((t: any) => t?.event || t)
+            .filter((evt: any) => evt && evt.id && !isGlobalSharedPresetId(evt.id) && evt.ownerId === ownerId) as WeddingEvent[];
         }
       }
-    }
-  } catch {
-    // ignore
-  }
-
-  // 2. Personal Firestore database subcollection `/user_databases/{dbId}/events`
-  if (!IS_FIRESTORE_WRITE_DISABLED && targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE) {
-    try {
-      const subSnap = await getDocs(collection(db, USER_DATABASES_COLLECTION, targetDbId, 'events'));
-      subSnap.forEach((docSnap) => {
-        const evt = docSnap.data() as WeddingEvent;
-        if (evt && docSnap.id && !isGlobalSharedPresetId(docSnap.id)) {
-          results.set(docSnap.id, { ...evt, id: evt.id || docSnap.id });
-        }
-      });
     } catch {
       // ignore
+    } finally {
+      if (timerId !== null) clearTimeout(timerId);
     }
-  }
+    return [] as WeddingEvent[];
+  })();
 
-  // 3. Top-level Firestore events query where('ownerId', '==', ownerId)
-  if (!IS_FIRESTORE_WRITE_DISABLED) {
-    try {
-      const q = query(collection(db, 'events'), where('ownerId', '==', ownerId));
-      const snap = await getDocs(q);
-      snap.forEach((docSnap) => {
-        const evt = docSnap.data() as WeddingEvent;
-        if (evt && docSnap.id && !isGlobalSharedPresetId(docSnap.id) && !results.has(docSnap.id)) {
-          results.set(docSnap.id, { ...evt, id: evt.id || docSnap.id });
-        }
-      });
-    } catch {
-      // ignore
+  const subFsPromise: Promise<WeddingEvent[]> =
+    !IS_FIRESTORE_WRITE_DISABLED && targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE
+      ? raceWithTimeout(
+          getDocs(collection(db, USER_DATABASES_COLLECTION, targetDbId, 'events'))
+            .then((subSnap) => {
+              const list: WeddingEvent[] = [];
+              subSnap.forEach((docSnap) => {
+                const evt = docSnap.data() as WeddingEvent;
+                if (evt && docSnap.id && !isGlobalSharedPresetId(docSnap.id)) {
+                  list.push({ ...evt, id: evt.id || docSnap.id });
+                }
+              });
+              return list;
+            })
+            .catch(() => [] as WeddingEvent[]),
+          timeoutMs,
+          [] as WeddingEvent[]
+        ).then((r) => r.value)
+      : Promise.resolve([]);
+
+  const topFsPromise: Promise<WeddingEvent[]> = !IS_FIRESTORE_WRITE_DISABLED
+    ? raceWithTimeout(
+        getDocs(query(collection(db, 'events'), where('ownerId', '==', ownerId)))
+          .then((snap) => {
+            const list: WeddingEvent[] = [];
+            snap.forEach((docSnap) => {
+              const evt = docSnap.data() as WeddingEvent;
+              if (evt && docSnap.id && !isGlobalSharedPresetId(docSnap.id)) {
+                list.push({ ...evt, id: evt.id || docSnap.id });
+              }
+            });
+            return list;
+          })
+          .catch(() => [] as WeddingEvent[]),
+        timeoutMs,
+        [] as WeddingEvent[]
+      ).then((r) => r.value)
+    : Promise.resolve([]);
+
+  const [restList, subList, topList] = await Promise.all([restPromise, subFsPromise, topFsPromise]);
+
+  for (const evt of [...topList, ...subList, ...restList]) {
+    const prev = results.get(evt.id);
+    if (!prev) {
+      results.set(evt.id, evt);
+    } else {
+      const picked = pickNewestDatabaseEvent<WeddingEvent>([prev, evt]);
+      if (picked) results.set(evt.id, picked);
     }
   }
 
