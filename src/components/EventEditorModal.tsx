@@ -48,6 +48,12 @@ import CoverInfoEditor from './CoverInfoEditor';
 import ThemeToggle, { ThemeMode } from './ThemeToggle';
 import LanguageToggle from './LanguageToggle';
 import { Language } from '../types';
+import {
+  getScopedEventId,
+  getUserStorageKey,
+  resolveUserScope,
+  stripScopedEventId,
+} from '../lib/userScope';
 
 function generateDayTitlesFromDate(dateStr: string, shiftIndex: number) {
   if (!dateStr) return null;
@@ -142,6 +148,7 @@ interface EventEditorModalProps {
   language?: Language;
   onToggleLanguage?: () => void;
   onChangeTheme?: (theme: ThemeMode) => void;
+  userScope?: string;
 }
 
 export type TabType = 'presets' | 'design' | 'couple' | 'photos' | 'schedule' | 'messages' | 'khqr' | 'music';
@@ -200,10 +207,14 @@ export default function EventEditorModal({
   language = 'kh',
   onToggleLanguage,
   onChangeTheme,
+  userScope,
 }: EventEditorModalProps) {
+  const effectiveScope = (userScope && userScope.trim()) || event?.ownerId || resolveUserScope().scopeId;
+  const activeTabStorageKey = getUserStorageKey('event_editor_active_tab', effectiveScope);
+
   const [activeTab, setActiveTab] = useState<TabType>(() => {
     try {
-      const saved = localStorage.getItem('event_editor_active_tab') as TabType | null;
+      const saved = localStorage.getItem(activeTabStorageKey) as TabType | null;
       if (saved) return saved;
     } catch {
       // ignore
@@ -214,7 +225,7 @@ export default function EventEditorModal({
   const handleSelectTab = (tab: TabType) => {
     setActiveTab(tab);
     try {
-      localStorage.setItem('event_editor_active_tab', tab);
+      localStorage.setItem(activeTabStorageKey, tab);
     } catch {
       // ignore
     }
@@ -293,17 +304,18 @@ export default function EventEditorModal({
 
   // Template Type and Template Metadata
   const currentTemplateId = formData.id || 'cmgrawhnk0003le0434762j7n';
+  const strippedTemplateId = stripScopedEventId(currentTemplateId);
   const currentTemplateType: 'wedding' | 'engagement' | 'housewarming' | 'birthday' | 'anniversary' = (() => {
     if (formData.eventType) return formData.eventType;
-    if (currentTemplateId.includes('anniversary')) return 'anniversary';
-    if (currentTemplateId.includes('housewarming')) return 'housewarming';
-    if (currentTemplateId.includes('engagement')) return 'engagement';
-    if (currentTemplateId.includes('birthday') || formData.singlePerson) return 'birthday';
+    if (strippedTemplateId.includes('anniversary') || currentTemplateId.includes('anniversary')) return 'anniversary';
+    if (strippedTemplateId.includes('housewarming') || currentTemplateId.includes('housewarming')) return 'housewarming';
+    if (strippedTemplateId.includes('engagement') || currentTemplateId.includes('engagement')) return 'engagement';
+    if (strippedTemplateId.includes('birthday') || currentTemplateId.includes('birthday') || formData.singlePerson) return 'birthday';
     return 'wedding';
   })();
 
   const currentTemplatePreset = EVENT_PRESETS.find(
-    p => p.sampleEvent.id === currentTemplateId
+    p => p.sampleEvent.id === currentTemplateId || p.sampleEvent.id === strippedTemplateId || p.id === formData.templateId
   ) || EVENT_PRESETS.find(
     p => p.type === currentTemplateType
   ) || EVENT_PRESETS[0];
@@ -318,9 +330,11 @@ export default function EventEditorModal({
 
   const [savedRetrievedInfo, setSavedRetrievedInfo] = useState<WeddingEvent | null>(() => {
     try {
-      const cached = localStorage.getItem(`wedding_template_saved_${event.id}`) ||
-                     (event.eventType ? localStorage.getItem(`wedding_template_type_${event.eventType}`) : null) ||
-                     localStorage.getItem('wedding_custom_event_data');
+      const scopedEvId = getScopedEventId(event.id, effectiveScope);
+      const cached = localStorage.getItem(getUserStorageKey(`wedding_template_saved_${scopedEvId}`, effectiveScope)) ||
+                     localStorage.getItem(getUserStorageKey(`wedding_template_saved_${event.id}`, effectiveScope)) ||
+                     (event.eventType ? localStorage.getItem(getUserStorageKey(`wedding_template_type_${event.eventType}`, effectiveScope)) : null) ||
+                     localStorage.getItem(getUserStorageKey('wedding_custom_event_data', effectiveScope));
       return cached ? JSON.parse(cached) : event;
     } catch {
       return event;
@@ -345,10 +359,10 @@ export default function EventEditorModal({
     if (isOpen) {
       if (!prevIsOpenRef.current || prevInitialTabRef.current !== initialTab) {
         try {
-          const savedTab = localStorage.getItem('event_editor_active_tab') as TabType | null;
+          const savedTab = localStorage.getItem(activeTabStorageKey) as TabType | null;
           if (initialTab && initialTab !== 'couple') {
             setActiveTab(initialTab);
-            localStorage.setItem('event_editor_active_tab', initialTab);
+            localStorage.setItem(activeTabStorageKey, initialTab);
           } else if (savedTab) {
             setActiveTab(savedTab);
           } else if (initialTab) {
@@ -361,7 +375,7 @@ export default function EventEditorModal({
     }
     prevIsOpenRef.current = isOpen;
     prevInitialTabRef.current = initialTab;
-  }, [isOpen, initialTab]);
+  }, [isOpen, initialTab, activeTabStorageKey]);
 
   // Synchronize event changes into formData without ever disrupting the current active tab
   useEffect(() => {
@@ -1021,15 +1035,23 @@ export default function EventEditorModal({
     }));
   };
 
-  // Helper to load template information directly from the selected template type
+  // Helper to load template information directly from the selected template type scoped to user
   const loadPresetWithSavedSettings = (p: typeof EVENT_PRESETS[0]) => {
-    // 1. Check if user previously saved custom edits for this specific template
+    const scopedId = getScopedEventId(p.sampleEvent.id, effectiveScope);
+    // 1. Check if THIS user previously saved custom edits for this specific template
     try {
-      const stored = localStorage.getItem(`wedding_template_saved_${p.sampleEvent.id}`) ||
-                     localStorage.getItem(`wedding_template_type_${p.type}`);
+      const stored =
+        localStorage.getItem(getUserStorageKey(`wedding_template_saved_${scopedId}`, effectiveScope)) ||
+        localStorage.getItem(getUserStorageKey(`wedding_template_saved_${p.sampleEvent.id}`, effectiveScope)) ||
+        localStorage.getItem(getUserStorageKey(`wedding_template_type_${p.type}`, effectiveScope));
       if (stored) {
         const parsed = JSON.parse(stored);
-        setFormData(parsed);
+        setFormData({
+          ...parsed,
+          id: scopedId,
+          templateId: p.id,
+          ...(effectiveScope !== 'guest_public' ? { ownerId: effectiveScope } : {}),
+        });
         setSyncFeedback(`បានទាញយកទិន្នន័យពីប្រភេទគំរូ ${p.titleKh}!`);
         setTimeout(() => setSyncFeedback(null), 3000);
         return;
@@ -1041,7 +1063,9 @@ export default function EventEditorModal({
 
     const updatedEvent: WeddingEvent = {
       ...templateSample,
-      id: p.sampleEvent.id,
+      id: scopedId,
+      templateId: p.id,
+      ...(effectiveScope !== 'guest_public' ? { ownerId: effectiveScope } : {}),
       eventType: p.type,
       singlePerson: p.sampleEvent.singlePerson ?? (p.type === 'birthday'),
       name: p.sampleEvent.name,
@@ -1069,41 +1093,51 @@ export default function EventEditorModal({
     };
 
     setFormData(updatedEvent);
-    localStorage.setItem('wedding_custom_event_data', JSON.stringify(updatedEvent));
-    localStorage.setItem(`wedding_template_type_${p.type}`, JSON.stringify(updatedEvent));
+    try {
+      localStorage.setItem(getUserStorageKey('wedding_custom_event_data', effectiveScope), JSON.stringify(updatedEvent));
+      localStorage.setItem(getUserStorageKey(`wedding_template_type_${p.type}`, effectiveScope), JSON.stringify(updatedEvent));
+    } catch {}
     setSyncFeedback(`ព័ត៌មានទាំងអស់ត្រូវបានទាញយកពីប្រភេទគំរូ ${p.titleKh} (All information retrieved from template)!`);
     setTimeout(() => setSyncFeedback(null), 3500);
   };
 
   const fetchSavedInformation = async (targetId?: string, targetType?: string) => {
-    const idToFetch = targetId || formData.id || 'cmgrawhnk0003le0434762j7n';
+    const rawId = targetId || formData.id || 'cmgrawhnk0003le0434762j7n';
+    const idToFetch = getScopedEventId(rawId, effectiveScope);
     const typeToFetch = targetType || currentTemplateType;
+    const ownerQuery = effectiveScope && effectiveScope !== 'guest_public' ? `&ownerId=${encodeURIComponent(effectiveScope)}` : '';
     setIsFetchingSavedInfo(true);
     try {
-      // 1. Check server API by ID first
-      let res = await fetch(`/api/event?id=${encodeURIComponent(idToFetch)}`);
+      // 1. Check server API by scoped ID first
+      let res = await fetch(`/api/event?id=${encodeURIComponent(idToFetch)}${ownerQuery}`);
       let data = res.ok ? await res.json() : null;
 
-      // 2. If not found by ID, query by template type
+      // 2. If not found by ID, query by template type + ownerId
       if ((!data || !data.event) && typeToFetch) {
-        res = await fetch(`/api/event?type=${encodeURIComponent(typeToFetch)}`);
+        res = await fetch(`/api/event?type=${encodeURIComponent(typeToFetch)}${ownerQuery}`);
         data = res.ok ? await res.json() : null;
       }
 
       if (data?.success && data.event) {
-        setFormData(data.event);
-        setSavedRetrievedInfo(data.event);
+        const scopedEvt = {
+          ...data.event,
+          id: idToFetch,
+          ...(effectiveScope !== 'guest_public' ? { ownerId: effectiveScope } : {}),
+        };
+        setFormData(scopedEvt);
+        setSavedRetrievedInfo(scopedEvt);
         const timeStr = new Date().toLocaleTimeString('km-KH');
         setLastRetrievedTime(timeStr);
         setSyncFeedback(`បានទាញយកទិន្នន័យពី Server ជោគជ័យ! (${timeStr})`);
         setTimeout(() => setSyncFeedback(null), 3000);
-        return data.event;
+        return scopedEvt;
       }
 
-      // 3. Fallback to localStorage
-      const localSpecific = localStorage.getItem(`wedding_template_saved_${idToFetch}`) ||
-                            localStorage.getItem(`wedding_template_type_${typeToFetch}`) ||
-                            localStorage.getItem('wedding_custom_event_data');
+      // 3. Fallback to user-scoped localStorage
+      const localSpecific = localStorage.getItem(getUserStorageKey(`wedding_template_saved_${idToFetch}`, effectiveScope)) ||
+                            localStorage.getItem(getUserStorageKey(`wedding_template_saved_${rawId}`, effectiveScope)) ||
+                            localStorage.getItem(getUserStorageKey(`wedding_template_type_${typeToFetch}`, effectiveScope)) ||
+                            localStorage.getItem(getUserStorageKey('wedding_custom_event_data', effectiveScope));
       if (localSpecific) {
         const parsed = JSON.parse(localSpecific);
         setFormData(parsed);
@@ -1128,6 +1162,8 @@ export default function EventEditorModal({
       const timestamp = new Date().toISOString();
       const updated: WeddingEvent = {
         ...formData,
+        id: getScopedEventId(formData.id || 'cmgrawhnk0003le0434762j7n', effectiveScope),
+        ...(effectiveScope !== 'guest_public' ? { ownerId: effectiveScope } : {}),
         eventType: currentTemplateType,
         updatedAt: timestamp,
       };
@@ -1135,7 +1171,7 @@ export default function EventEditorModal({
       // 1. Send once to parent onSave (updates React state, caches localStorage, syncs Server API, and triggers bounded background Firestore sync)
       await onSave(updated, false);
 
-      // 2. Update apply-to-all preset caches if requested
+      // 2. Update apply-to-all preset caches scoped strictly to THIS user
       if (applyToAllTypes) {
         try {
           const allTypes: Array<'wedding' | 'engagement' | 'housewarming' | 'birthday' | 'anniversary'> = [
@@ -1147,7 +1183,7 @@ export default function EventEditorModal({
           ];
           for (const t of allTypes) {
             localStorage.setItem(
-              `wedding_template_type_${t}`,
+              getUserStorageKey(`wedding_template_type_${t}`, effectiveScope),
               JSON.stringify({
                 ...updated,
                 eventType: t,

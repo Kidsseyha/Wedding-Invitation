@@ -6,6 +6,7 @@ import confetti from 'canvas-confetti';
 import { INITIAL_WISHES } from '../data/weddingData';
 import { Language, WishMessage } from '../types';
 import { getSavedGuests } from '../data/guests';
+import { DEFAULT_PRESET_EVENT_ID, extractScopeFromEventId, resolveUserScope } from '../lib/userScope';
 import {
   subscribeToWishes,
   addWishToFirebase,
@@ -21,6 +22,8 @@ interface WishesSectionProps {
   theme?: ThemeMode;
   isAdmin?: boolean;
   eventType?: string;
+  eventId?: string;
+  ownerId?: string;
 }
 
 export default function WishesSection({
@@ -31,18 +34,24 @@ export default function WishesSection({
   theme = 'dark',
   isAdmin = false,
   eventType,
+  eventId,
+  ownerId,
 }: WishesSectionProps) {
   const isHousewarming = eventType === 'housewarming';
+  const effectiveEventId = eventId || DEFAULT_PRESET_EVENT_ID;
+  const effectiveOwnerId = ownerId || extractScopeFromEventId(effectiveEventId) || resolveUserScope().scopeId;
+  const wishesStorageKey = `wedding_wishes_list__${effectiveEventId}`;
+
   const [wishes, setWishes] = useState<WishMessage[]>(() => {
     try {
-      const saved = localStorage.getItem('wedding_wishes_list');
-      if (saved) {
+      const saved = localStorage.getItem(wishesStorageKey);
+      if (saved !== null) {
         return JSON.parse(saved);
       }
     } catch {
       // ignore
     }
-    return INITIAL_WISHES;
+    return effectiveEventId === DEFAULT_PRESET_EVENT_ID ? INITIAL_WISHES : [];
   });
 
   const [name, setName] = useState(defaultGuestName || '');
@@ -79,15 +88,33 @@ export default function WishesSection({
   const [adminPasscode, setAdminPasscode] = useState('');
   const [passcodeError, setPasscodeError] = useState('');
 
-  // Sync wishes in real-time from Firestore & REST
+  // Sync wishes in real-time from Firestore & REST scoped strictly by effectiveEventId
   useEffect(() => {
-    const unsubscribe = subscribeToWishes((liveWishes) => {
-      if (liveWishes && liveWishes.length > 0) {
-        setWishes(liveWishes);
+    try {
+      const saved = localStorage.getItem(wishesStorageKey);
+      if (saved !== null) {
+        setWishes(JSON.parse(saved));
+      } else {
+        setWishes(effectiveEventId === DEFAULT_PRESET_EVENT_ID ? INITIAL_WISHES : []);
+      }
+    } catch {
+      setWishes(effectiveEventId === DEFAULT_PRESET_EVENT_ID ? INITIAL_WISHES : []);
+    }
+
+    const unsubscribe = subscribeToWishes(effectiveEventId, (liveWishes) => {
+      if (Array.isArray(liveWishes)) {
+        if (liveWishes.length > 0 || effectiveEventId !== DEFAULT_PRESET_EVENT_ID) {
+          setWishes(liveWishes);
+          try {
+            localStorage.setItem(wishesStorageKey, JSON.stringify(liveWishes));
+          } catch {
+            // ignore
+          }
+        }
       }
     });
     return () => unsubscribe();
-  }, []);
+  }, [effectiveEventId, wishesStorageKey]);
 
   useEffect(() => {
     if (defaultGuestName) {
@@ -95,17 +122,15 @@ export default function WishesSection({
     }
   }, [defaultGuestName]);
 
-  // Fetch list of honored guests for auto-suggestion
+  // Fetch list of honored guests for auto-suggestion scoped to current owner
   useEffect(() => {
     try {
-      const list = getSavedGuests();
-      if (list && list.length > 0) {
-        setSavedGuestNames(list.map(g => g.name).filter(Boolean));
-      }
+      const list = getSavedGuests(effectiveOwnerId);
+      setSavedGuestNames((list || []).map(g => g.name).filter(Boolean));
     } catch {
-      // ignore
+      setSavedGuestNames([]);
     }
-  }, []);
+  }, [effectiveOwnerId]);
 
   const triggerHeartCelebration = () => {
     // 1. Generate floating rising heart particles
@@ -177,7 +202,7 @@ export default function WishesSection({
     );
 
     // Sync like to Firestore & REST
-    await likeWishInFirebase(id);
+    await likeWishInFirebase(id, effectiveEventId);
   };
 
   const handleClickDelete = (id: string) => {
@@ -233,7 +258,7 @@ export default function WishesSection({
       setWishes(prev => {
         const filtered = prev.filter(w => w.id !== id);
         try {
-          localStorage.setItem('wedding_wishes_list', JSON.stringify(filtered));
+          localStorage.setItem(wishesStorageKey, JSON.stringify(filtered));
         } catch {
           // ignore
         }
@@ -241,7 +266,7 @@ export default function WishesSection({
       });
 
       // 2. Server & Firestore sync
-      await deleteWishInFirebase(id);
+      await deleteWishInFirebase(id, effectiveEventId);
 
       setDeleteToast(
         language === 'kh'
@@ -263,16 +288,26 @@ export default function WishesSection({
 
     setIsSubmitting(true);
     try {
-      const newWish: Omit<WishMessage, 'id'> = {
+      const newWish = {
         name: name.trim(),
         relationship: relationship.trim(),
         message: message.trim(),
         createdAt: new Date().toISOString(),
         likes: 1,
+        eventId: effectiveEventId,
+        ownerId: effectiveOwnerId,
       };
 
       const savedWish = await addWishToFirebase(newWish);
-      setWishes(prev => [savedWish, ...prev.filter(w => w.id !== savedWish.id)]);
+      setWishes(prev => {
+        const next = [savedWish, ...prev.filter(w => w.id !== savedWish.id)];
+        try {
+          localStorage.setItem(wishesStorageKey, JSON.stringify(next));
+        } catch {
+          // ignore
+        }
+        return next;
+      });
       setMessage('');
 
       // Trigger heart animation and celebratory confetti

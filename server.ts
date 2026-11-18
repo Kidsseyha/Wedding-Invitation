@@ -9,6 +9,8 @@ import {
   buildInvitationMeta,
   injectMetaIntoHtml,
   fetchEventFromFirestoreRest,
+  fetchShortLinkFromFirestoreRest,
+  saveShortLinkToFirestoreRest,
   normalizeCategoryString,
 } from './src/utils/shareMeta';
 import rawFirebaseConfig from './firebase-applet-config.json';
@@ -489,10 +491,22 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+const DEFAULT_PRESET_ID = 'cmgrawhnk0003le0434762j7n';
+
 // Wishes API
 app.get('/api/wishes', (req, res) => {
+  const eventId = (req.query.eventId as string | undefined)?.trim();
   const wishes = getSavedWishes();
-  res.json({ success: true, wishes });
+  if (!eventId) {
+    return res.json({ success: true, wishes });
+  }
+  const filtered = wishes.filter((w: any) => {
+    if (eventId === DEFAULT_PRESET_ID) {
+      return !w.eventId || w.eventId === DEFAULT_PRESET_ID;
+    }
+    return w.eventId === eventId;
+  });
+  res.json({ success: true, wishes: filtered });
 });
 
 app.post('/api/wishes', (req, res) => {
@@ -514,20 +528,31 @@ app.post('/api/wishes', (req, res) => {
 
 app.delete('/api/wishes/:id', (req, res) => {
   const { id } = req.params;
+  const eventId = (req.query.eventId as string | undefined)?.trim();
   if (!id) {
     return res.status(400).json({ error: 'Invalid wish ID' });
   }
   let wishes = getSavedWishes();
   const initialLength = wishes.length;
-  wishes = wishes.filter((w: any) => w.id !== id);
+  wishes = wishes.filter((w: any) => {
+    if (w.id !== id) return true;
+    if (eventId && w.eventId && w.eventId !== eventId) return true;
+    return false;
+  });
   saveWishes(wishes);
-  broadcastWebSocket({ type: 'wishes:deleted', id });
+  broadcastWebSocket({ type: 'wishes:deleted', id, eventId });
   res.json({ success: true, deleted: wishes.length < initialLength, id });
 });
 
 // RSVPs API
 app.get('/api/rsvps', (req, res) => {
-  const rsvps = getSavedRSVPs();
+  const eventId = (req.query.eventId as string | undefined)?.trim();
+  const ownerId = (req.query.ownerId as string | undefined)?.trim();
+  const rsvps = getSavedRSVPs().filter((r: any) => {
+    if (eventId && r.eventId !== eventId) return false;
+    if (ownerId && r.ownerId !== ownerId) return false;
+    return true;
+  });
   res.json({ success: true, rsvps });
 });
 
@@ -545,7 +570,13 @@ app.post('/api/rsvps', (req, res) => {
 
 // Notifications API (Owner Dashboard Alert & Email Trigger)
 app.get('/api/notifications', (req, res) => {
-  const notifications = getSavedNotifications();
+  const eventId = (req.query.eventId as string | undefined)?.trim();
+  const ownerId = (req.query.ownerId as string | undefined)?.trim();
+  const notifications = getSavedNotifications().filter((n: any) => {
+    if (eventId && n.eventId !== eventId) return false;
+    if (ownerId && n.ownerId !== ownerId) return false;
+    return true;
+  });
   res.json({ success: true, notifications });
 });
 
@@ -562,7 +593,11 @@ app.post('/api/notifications', (req, res) => {
 
 // Guests API
 app.get('/api/guests', (req, res) => {
-  const guests = getSavedGuests();
+  const ownerId = (req.query.ownerId as string | undefined)?.trim();
+  const allGuests = getSavedGuests();
+  const guests = ownerId
+    ? allGuests.filter((g: any) => g.ownerId === ownerId)
+    : allGuests;
   res.json({ success: true, guests });
 });
 
@@ -583,32 +618,56 @@ app.post('/api/guests', (req, res) => {
 });
 
 app.delete('/api/guests', (req, res) => {
-  const id = req.query.id as string;
+  const id = (req.query.id as string | undefined)?.trim();
+  const ownerId = (req.query.ownerId as string | undefined)?.trim();
+  const clearAll = req.query.all === '1' || req.query.all === 'true';
+  let guests = getSavedGuests();
+
+  if (clearAll && ownerId) {
+    guests = guests.filter((g: any) => g.ownerId !== ownerId);
+    saveGuests(guests);
+    return res.json({ success: true, cleared: true });
+  }
+
   if (!id) {
     return res.status(400).json({ error: 'Missing guest id' });
   }
-  let guests = getSavedGuests();
-  guests = guests.filter((g: any) => g.id !== id);
+
+  guests = guests.filter((g: any) => {
+    if (g.id !== id) return true;
+    if (ownerId && g.ownerId && g.ownerId !== ownerId) return true;
+    return false;
+  });
   saveGuests(guests);
   res.json({ success: true });
 });
 
-// Get Event by ID, Type, or default event
+// Get Event by ID, Type, or ownerId (strictly isolated across users)
 app.get('/api/event', (req, res) => {
-  const eventId = req.query.id as string;
-  const eventType = req.query.type as string;
+  const eventId = (req.query.id as string | undefined)?.trim();
+  const eventType = (req.query.type as string | undefined)?.trim();
+  const ownerId = (req.query.ownerId as string | undefined)?.trim();
   const events = getSavedEvents();
-  
-  // If specific ID is requested, return that specific template event (or saved event for that category slug)
+
+  // If specific ID is requested
   if (eventId) {
     if (events[eventId]) {
       return res.json({ success: true, event: events[eventId], source: 'server', requestedId: eventId });
     }
-    if (events[`type_${eventId}`]) {
-      return res.json({ success: true, event: events[`type_${eventId}`], source: 'server', requestedId: eventId });
-    }
-    if (eventType && events[`type_${eventType}`]) {
-      return res.json({ success: true, event: events[`type_${eventType}`], source: 'server', requestedId: eventId, requestedType: eventType });
+    if (ownerId) {
+      if (events[`user_${ownerId}_type_${eventId}`]) {
+        return res.json({ success: true, event: events[`user_${ownerId}_type_${eventId}`], source: 'server', requestedId: eventId });
+      }
+      if (eventType && events[`user_${ownerId}_type_${eventType}`]) {
+        return res.json({ success: true, event: events[`user_${ownerId}_type_${eventType}`], source: 'server', requestedId: eventId, requestedType: eventType });
+      }
+    } else {
+      if (events[`type_${eventId}`]) {
+        return res.json({ success: true, event: events[`type_${eventId}`], source: 'server', requestedId: eventId });
+      }
+      if (eventType && events[`type_${eventType}`]) {
+        return res.json({ success: true, event: events[`type_${eventType}`], source: 'server', requestedId: eventId, requestedType: eventType });
+      }
     }
     const preset = findTemplatePreset(eventId);
     if (preset) {
@@ -619,12 +678,23 @@ app.get('/api/event', (req, res) => {
 
   // If template type is requested
   if (eventType) {
-    if (events[`type_${eventType}`]) {
-      return res.json({ success: true, event: events[`type_${eventType}`], source: 'server', requestedType: eventType });
-    }
-    const match = Object.values(events).find((e: any) => e?.eventType === eventType);
-    if (match) {
-      return res.json({ success: true, event: match, source: 'server', requestedType: eventType });
+    if (ownerId) {
+      const userTypeKey = `user_${ownerId}_type_${eventType}`;
+      if (events[userTypeKey]) {
+        return res.json({ success: true, event: events[userTypeKey], source: 'server', requestedType: eventType });
+      }
+      const userMatch = Object.values(events).find((e: any) => e?.ownerId === ownerId && e?.eventType === eventType);
+      if (userMatch) {
+        return res.json({ success: true, event: userMatch, source: 'server', requestedType: eventType });
+      }
+    } else {
+      if (events[`type_${eventType}`]) {
+        return res.json({ success: true, event: events[`type_${eventType}`], source: 'server', requestedType: eventType });
+      }
+      const match = Object.values(events).find((e: any) => e?.eventType === eventType && !e?.ownerId);
+      if (match) {
+        return res.json({ success: true, event: match, source: 'server', requestedType: eventType });
+      }
     }
     const preset = findTemplatePreset(eventType);
     if (preset) {
@@ -632,33 +702,50 @@ app.get('/api/event', (req, res) => {
     }
     return res.json({ success: true, event: null, requestedType: eventType, source: 'not_found' });
   }
-  
-  // If no ID requested, check default or first saved
+
+  // If ownerId is requested with no ID/type, return ONLY that owner's default/first event
+  if (ownerId) {
+    const userDefaultKey = `user_${ownerId}_default`;
+    if (events[userDefaultKey]) {
+      return res.json({ success: true, event: events[userDefaultKey], source: 'server' });
+    }
+    const ownerKeys = Object.keys(events).filter(
+      k => !k.startsWith('type_') && !k.startsWith('user_') && events[k]?.ownerId === ownerId
+    );
+    if (ownerKeys.length > 0) {
+      return res.json({ success: true, event: events[ownerKeys[0]], source: 'server' });
+    }
+    return res.json({ success: true, event: null, source: 'default' });
+  }
+
+  // Fallback for unauthenticated / legacy public visitor
   if (events['default']) {
     return res.json({ success: true, event: events['default'], source: 'server' });
   }
 
-  // If there is any saved event, use that
-  const keys = Object.keys(events).filter(k => !k.startsWith('type_'));
+  const keys = Object.keys(events).filter(k => !k.startsWith('type_') && !k.startsWith('user_'));
   if (keys.length > 0) {
     return res.json({ success: true, event: events[keys[0]], source: 'server' });
   }
 
-  // No custom event saved yet on server
   return res.json({ success: true, event: null, source: 'default' });
 });
 
-// List all saved template IDs on server
+// List all saved template IDs on server (strictly filtered by ownerId when provided)
 app.get('/api/templates', (req, res) => {
+  const ownerId = (req.query.ownerId as string | undefined)?.trim();
   const events = getSavedEvents();
   const list = Object.keys(events)
-    .filter(key => !key.startsWith('type_') && key !== 'default')
+    .filter(key => !key.startsWith('type_') && !key.startsWith('user_') && key !== 'default')
+    .filter(key => (ownerId ? events[key]?.ownerId === ownerId : true))
     .map(key => ({
       key,
       id: events[key]?.id,
       name: events[key]?.name,
       eventType: events[key]?.eventType,
+      ownerId: events[key]?.ownerId,
       updatedAt: events[key]?.updatedAt,
+      event: events[key],
     }));
   res.json({ success: true, templates: list });
 });
@@ -883,26 +970,29 @@ app.post('/api/verify-email', async (req, res) => {
 });
 
 
-// Save or Update Event
+// Save or Update Event (strictly isolated by ownerId when authenticated)
 app.post('/api/event', (req, res) => {
   const eventData = req.body;
   if (!eventData || typeof eventData !== 'object') {
     return res.status(400).json({ error: 'Invalid event data' });
   }
 
-  const eventId = eventData.id || 'cmgrawhnk0003le0434762j7n';
+  const eventId = eventData.id || DEFAULT_PRESET_ID;
   const eventType = eventData.eventType;
+  const ownerId = typeof eventData.ownerId === 'string' && eventData.ownerId.trim() ? eventData.ownerId.trim() : '';
   const events = getSavedEvents();
 
   events[eventId] = eventData;
-  if (eventType) {
-    events[`type_${eventType}`] = eventData;
-  }
-  
-  if (eventId === 'cmgrawhnk0003le0434762j7n') {
-    events['default'] = eventData;
+
+  if (ownerId && ownerId !== 'guest_public') {
+    if (eventType) {
+      events[`user_${ownerId}_type_${eventType}`] = eventData;
+    }
+    events[`user_${ownerId}_default`] = eventData;
   } else {
-    // Also update default if this was saved, without clobbering the main wedding template
+    if (eventType) {
+      events[`type_${eventType}`] = eventData;
+    }
     events['default'] = eventData;
   }
 
@@ -911,13 +1001,18 @@ app.post('/api/event', (req, res) => {
 });
 
 app.post('/api/event/reset', (req, res) => {
-  const eventId = req.body.id || 'cmgrawhnk0003le0434762j7n';
+  const eventId = req.body.id || DEFAULT_PRESET_ID;
+  const ownerId = typeof req.body.ownerId === 'string' ? req.body.ownerId.trim() : '';
   const events = getSavedEvents();
   if (events[eventId]) {
-    delete events[eventId];
+    if (!ownerId || !events[eventId].ownerId || events[eventId].ownerId === ownerId) {
+      delete events[eventId];
+    }
   }
-  // also delete default if it matches
-  if (events['default'] && events['default'].id === eventId) {
+  if (ownerId && events[`user_${ownerId}_default`] && events[`user_${ownerId}_default`].id === eventId) {
+    delete events[`user_${ownerId}_default`];
+  }
+  if (!ownerId && events['default'] && events['default'].id === eventId) {
     delete events['default'];
   }
   saveEvents(events);
@@ -925,22 +1020,36 @@ app.post('/api/event/reset', (req, res) => {
 });
 
 app.delete('/api/event', (req, res) => {
-  const eventId = req.query.id as string;
+  const eventId = (req.query.id as string | undefined)?.trim();
+  const ownerId = (req.query.ownerId as string | undefined)?.trim();
   if (!eventId) {
     return res.status(400).json({ error: 'Missing event id' });
   }
   const events = getSavedEvents();
   let deleted = false;
-  if (events[eventId]) {
+  if (events[eventId] && (!ownerId || !events[eventId].ownerId || events[eventId].ownerId === ownerId)) {
     delete events[eventId];
     deleted = true;
   }
-  if (events[`type_${eventId}`]) {
-    delete events[`type_${eventId}`];
-    deleted = true;
-  }
-  if (events['default'] && (events['default'].id === eventId || events['default'].presetId === eventId)) {
-    delete events['default'];
+  if (ownerId) {
+    if (events[`user_${ownerId}_type_${eventId}`]) {
+      delete events[`user_${ownerId}_type_${eventId}`];
+      deleted = true;
+    }
+    if (
+      events[`user_${ownerId}_default`] &&
+      (events[`user_${ownerId}_default`].id === eventId || events[`user_${ownerId}_default`].presetId === eventId)
+    ) {
+      delete events[`user_${ownerId}_default`];
+    }
+  } else {
+    if (events[`type_${eventId}`]) {
+      delete events[`type_${eventId}`];
+      deleted = true;
+    }
+    if (events['default'] && (events['default'].id === eventId || events['default'].presetId === eventId)) {
+      delete events['default'];
+    }
   }
   saveEvents(events);
   res.json({ success: true, deleted, id: eventId });
@@ -948,16 +1057,20 @@ app.delete('/api/event', (req, res) => {
 
 app.delete('/api/templates/:id', (req, res) => {
   const { id } = req.params;
+  const ownerId = (req.query.ownerId as string | undefined)?.trim();
   if (!id) {
     return res.status(400).json({ error: 'Missing template id' });
   }
   const events = getSavedEvents();
   let deleted = false;
-  if (events[id]) {
+  if (events[id] && (!ownerId || !events[id].ownerId || events[id].ownerId === ownerId)) {
     delete events[id];
     deleted = true;
   }
-  if (events[`type_${id}`]) {
+  if (ownerId && events[`user_${ownerId}_type_${id}`]) {
+    delete events[`user_${ownerId}_type_${id}`];
+    deleted = true;
+  } else if (!ownerId && events[`type_${id}`]) {
     delete events[`type_${id}`];
     deleted = true;
   }
@@ -969,7 +1082,19 @@ app.delete('/api/templates/:id', (req, res) => {
 app.get('/s/:code', async (req, res) => {
   const code = req.params.code;
   const links = getShortLinks();
-  const target = links[code];
+  let target = links[code];
+
+  if (!target) {
+    const fsLink = await fetchShortLinkFromFirestoreRest({
+      projectId: rawFirebaseConfig.projectId,
+      databaseId: (rawFirebaseConfig as any).firestoreDatabaseId || '(default)',
+      code,
+      apiKey: rawFirebaseConfig.apiKey,
+    });
+    if (fsLink?.url) {
+      target = fsLink.url;
+    }
+  }
 
   if (target) {
     let cleanTarget = target;
@@ -1074,23 +1199,48 @@ app.post('/api/shorten', async (req, res) => {
       !clientOrigin.includes('localhost') &&
       !clientOrigin.includes('127.0.0.1')
     ) {
-      baseOrigin = clientOrigin;
+      baseOrigin = clientOrigin.replace(/\/+$/, '');
     }
 
     if (baseOrigin.includes('ais-dev-')) {
       baseOrigin = baseOrigin.replace('ais-dev-', 'ais-pre-');
     }
 
+    // Ensure Khmer language & share flag are preserved in target URL
+    let targetLang = 'kh';
+    try {
+      const parsedTarget = new URL(cleanUrl);
+      if (!parsedTarget.searchParams.get('lang')) {
+        parsedTarget.searchParams.set('lang', 'kh');
+      }
+      targetLang = parsedTarget.searchParams.get('lang') || 'kh';
+      if (!parsedTarget.searchParams.get('share')) {
+        parsedTarget.searchParams.set('share', '1');
+      }
+      cleanUrl = parsedTarget.toString();
+    } catch {
+      // keep cleanUrl as-is
+    }
+
     // Check if an identical URL is already cached/saved
     const existingLinks = getShortLinks();
     for (const [existingCode, targetUrl] of Object.entries(existingLinks)) {
       if (targetUrl === cleanUrl) {
+        await saveShortLinkToFirestoreRest({
+          projectId: rawFirebaseConfig.projectId,
+          databaseId: (rawFirebaseConfig as any).firestoreDatabaseId || '(default)',
+          code: existingCode,
+          url: cleanUrl,
+          lang: targetLang,
+          apiKey: rawFirebaseConfig.apiKey,
+        });
         const cachedShortUrl = `${baseOrigin}/s/${existingCode}`;
         return res.json({
           success: true,
           shortUrl: cachedShortUrl,
           internalShortUrl: cachedShortUrl,
           code: existingCode,
+          lang: targetLang,
           provider: 'cached',
         });
       }
@@ -1100,21 +1250,38 @@ app.post('/api/shorten', async (req, res) => {
     let code = '';
     try {
       const urlObj = new URL(cleanUrl);
+      const typeParam = (urlObj.searchParams.get('type') || '').toLowerCase().trim();
+      let prefix = 'kh';
+      if (typeParam.startsWith('wedding')) prefix = 'wd';
+      else if (typeParam.startsWith('engage')) prefix = 'eg';
+      else if (typeParam.startsWith('house')) prefix = 'hw';
+      else if (typeParam.startsWith('birth')) prefix = 'bd';
+      else if (typeParam.startsWith('anniv')) prefix = 'an';
+
       const nameParam = urlObj.searchParams.get('name');
       if (nameParam) {
         const cleanName = nameParam.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10);
-        const rand = Math.random().toString(36).substring(2, 6);
-        code = cleanName ? `${cleanName}-${rand}` : rand;
+        if (cleanName) prefix = cleanName;
       }
+      const rand = Math.random().toString(36).substring(2, 7);
+      code = `${prefix}-${rand}`;
     } catch {
       // url parse error, fallback
     }
 
     if (!code) {
-      code = Math.random().toString(36).substring(2, 8);
+      code = `kh-${Math.random().toString(36).substring(2, 8)}`;
     }
 
     saveShortLink(code, cleanUrl);
+    await saveShortLinkToFirestoreRest({
+      projectId: rawFirebaseConfig.projectId,
+      databaseId: (rawFirebaseConfig as any).firestoreDatabaseId || '(default)',
+      code,
+      url: cleanUrl,
+      lang: targetLang,
+      apiKey: rawFirebaseConfig.apiKey,
+    });
 
     const internalShortUrl = `${baseOrigin}/s/${code}`;
 
@@ -1123,6 +1290,7 @@ app.post('/api/shorten', async (req, res) => {
       shortUrl: internalShortUrl,
       internalShortUrl,
       code,
+      lang: targetLang,
       provider: 'internal',
     });
   } catch (err: any) {

@@ -6,12 +6,16 @@ import { Language } from '../types';
 import { ThemeMode } from './ThemeToggle';
 import { saveRSVPToFirebase } from '../lib/firebaseServices';
 
+import { DEFAULT_PRESET_EVENT_ID, extractScopeFromEventId } from '../lib/userScope';
+
 interface RSVPModalProps {
   isOpen: boolean;
   onClose: () => void;
   defaultGuestName: string;
   language: Language;
   theme?: ThemeMode;
+  eventId?: string;
+  ownerId?: string;
 }
 
 export default function RSVPModal({
@@ -20,8 +24,12 @@ export default function RSVPModal({
   defaultGuestName,
   language,
   theme = 'dark',
+  eventId,
+  ownerId,
 }: RSVPModalProps) {
   const isLight = theme === 'light';
+  const effectiveEventId = eventId || DEFAULT_PRESET_EVENT_ID;
+  const effectiveOwnerId = ownerId || extractScopeFromEventId(effectiveEventId) || '';
   const [name, setName] = useState(defaultGuestName);
   const [attending, setAttending] = useState<'yes' | 'no'>('yes');
   const [guestCount, setGuestCount] = useState('1');
@@ -47,6 +55,8 @@ export default function RSVPModal({
     }
 
     const rsvpData = {
+      eventId: effectiveEventId,
+      ownerId: effectiveOwnerId,
       name,
       attending,
       guestCount: attending === 'yes' ? parseInt(guestCount, 10) : 0,
@@ -60,9 +70,9 @@ export default function RSVPModal({
       console.error('Error saving RSVP to Firebase:', err);
     });
 
-    // Save to localStorage
+    // Save to localStorage scoped per eventId
     try {
-      localStorage.setItem('wedding_rsvp_status', JSON.stringify(rsvpData));
+      localStorage.setItem(`wedding_rsvp_status__${effectiveEventId}`, JSON.stringify(rsvpData));
     } catch {
       // ignore
     }

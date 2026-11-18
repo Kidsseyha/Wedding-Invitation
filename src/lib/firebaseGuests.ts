@@ -5,24 +5,54 @@ import {
   getDocs,
   deleteDoc,
   onSnapshot,
+  query,
+  where,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, IS_FIRESTORE_WRITE_DISABLED } from '../lib/firebase';
-import { DEFAULT_GUEST_PRESETS, GuestPreset } from '../data/guests';
+import { getScopedDefaultGuests, GuestPreset } from '../data/guests';
+import { getScopedGuestId, getUserStorageKey, resolveUserScope } from './userScope';
 
 const GUESTS_COLLECTION = 'guests';
 const LOCAL_STORAGE_KEY = 'wedding_saved_guest_list_v1';
 
+function resolveOwnerId(ownerId?: string): string {
+  return (ownerId && ownerId.trim()) || resolveUserScope().scopeId;
+}
+
+function getOwnerStorageKey(ownerId?: string): string {
+  return getUserStorageKey(LOCAL_STORAGE_KEY, resolveOwnerId(ownerId));
+}
+
+function mapDocToGuest(id: string, data: Partial<GuestPreset>, effectiveOwner: string): GuestPreset {
+  return {
+    id,
+    name: data.name || '',
+    category: data.category || 'general',
+    categoryLabelKh: data.categoryLabelKh || 'ទូទៅ',
+    categoryLabelEn: data.categoryLabelEn || 'General',
+    note: data.note || '',
+    ownerId: data.ownerId || effectiveOwner,
+  };
+}
+
 /**
- * Fetch all guests from Firestore with fallback to server API / localStorage / presets
+ * Fetch all guests for a specific owner from REST API / Firestore / scoped localStorage
  */
-export async function fetchGuestsFromFirebase(): Promise<GuestPreset[]> {
-  // Check server API first if Firestore writes are disabled
+export async function fetchGuestsFromFirebase(ownerId?: string): Promise<GuestPreset[]> {
+  const effectiveOwner = resolveOwnerId(ownerId);
+  const storageKey = getOwnerStorageKey(effectiveOwner);
+
+  // Check scoped server API first
   try {
-    const res = await fetch('/api/guests');
+    const res = await fetch(`/api/guests?ownerId=${encodeURIComponent(effectiveOwner)}`);
     if (res.ok) {
       const data = await res.json();
       if (data && data.success && Array.isArray(data.guests) && data.guests.length > 0) {
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data.guests));
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(data.guests));
+        } catch {
+          // ignore
+        }
         return data.guests;
       }
     }
@@ -31,24 +61,16 @@ export async function fetchGuestsFromFirebase(): Promise<GuestPreset[]> {
   }
 
   try {
-    const querySnapshot = await getDocs(collection(db, GUESTS_COLLECTION));
+    const q = query(collection(db, GUESTS_COLLECTION), where('ownerId', '==', effectiveOwner));
+    const querySnapshot = await getDocs(q);
     if (!querySnapshot.empty) {
       const guests: GuestPreset[] = [];
       querySnapshot.forEach(docSnap => {
-        const data = docSnap.data() as GuestPreset;
-        guests.push({
-          id: docSnap.id,
-          name: data.name || '',
-          category: data.category || 'general',
-          categoryLabelKh: data.categoryLabelKh || 'ទូទៅ',
-          categoryLabelEn: data.categoryLabelEn || 'General',
-          note: data.note || '',
-        });
+        guests.push(mapDocToGuest(docSnap.id, docSnap.data() as GuestPreset, effectiveOwner));
       });
-      // Sync to localStorage
       try {
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(guests));
-      } catch (e) {
+        localStorage.setItem(storageKey, JSON.stringify(guests));
+      } catch {
         // ignore
       }
       return guests;
@@ -57,34 +79,67 @@ export async function fetchGuestsFromFirebase(): Promise<GuestPreset[]> {
     handleFirestoreError(error, OperationType.GET, GUESTS_COLLECTION);
   }
 
-  // Fallback to local storage or defaults without burning Firestore write quotas
+  // Fallback to scoped local storage (preserving explicit empty [] when cleared) or scoped defaults
   try {
-    const local = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (local) {
-      return JSON.parse(local);
+    const local = localStorage.getItem(storageKey);
+    if (local !== null) {
+      const parsed = JSON.parse(local);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
     }
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(DEFAULT_GUEST_PRESETS));
-  } catch (e) {
+    const defaults = getScopedDefaultGuests(effectiveOwner);
+    localStorage.setItem(storageKey, JSON.stringify(defaults));
+    return defaults;
+  } catch {
     // ignore
   }
 
-  return DEFAULT_GUEST_PRESETS;
+  return getScopedDefaultGuests(effectiveOwner);
 }
 
 /**
- * Seed initial presets to Firebase if collection is empty
+ * Seed initial presets scoped to the specified owner
  */
-export async function seedDefaultGuestsToFirebase() {
+export async function seedDefaultGuestsToFirebase(ownerId?: string) {
+  const effectiveOwner = resolveOwnerId(ownerId);
+  const storageKey = getOwnerStorageKey(effectiveOwner);
+  const defaults = getScopedDefaultGuests(effectiveOwner);
+
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(defaults));
+  } catch {
+    // ignore
+  }
+
+  // Sync to REST API
+  try {
+    for (const preset of defaults) {
+      await fetch('/api/guests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...preset,
+          ownerId: effectiveOwner,
+          updatedAt: new Date().toISOString(),
+        }),
+      });
+    }
+  } catch {
+    // ignore
+  }
+
   if (IS_FIRESTORE_WRITE_DISABLED || (typeof window !== 'undefined' && localStorage.getItem('firestore_quota_exceeded') === 'true')) {
     return;
   }
   try {
-    for (const preset of DEFAULT_GUEST_PRESETS) {
+    for (const preset of defaults) {
       const docRef = doc(db, GUESTS_COLLECTION, preset.id);
       await setDoc(
         docRef,
         {
           ...preset,
+          ownerId: effectiveOwner,
           updatedAt: new Date().toISOString(),
         },
         { merge: true }
@@ -96,52 +151,51 @@ export async function seedDefaultGuestsToFirebase() {
 }
 
 /**
- * Real-time listener for guests from Firebase
+ * Real-time listener for a single owner's guests from Firebase
  */
-export function subscribeToGuests(callback: (guests: GuestPreset[]) => void) {
+export function subscribeToGuests(callback: (guests: GuestPreset[]) => void, ownerId?: string) {
+  const effectiveOwner = resolveOwnerId(ownerId);
+  const storageKey = getOwnerStorageKey(effectiveOwner);
+
   const fallbackGuests = () => {
     try {
-      const local = localStorage.getItem(LOCAL_STORAGE_KEY);
-      if (local) {
-        callback(JSON.parse(local));
-        return;
+      const local = localStorage.getItem(storageKey);
+      if (local !== null) {
+        const parsed = JSON.parse(local);
+        if (Array.isArray(parsed)) {
+          callback(parsed);
+          return;
+        }
       }
     } catch {
       // ignore
     }
-    fetch('/api/guests')
+    fetch(`/api/guests?ownerId=${encodeURIComponent(effectiveOwner)}`)
       .then(res => res.json())
       .then(data => {
         if (data && data.success && Array.isArray(data.guests) && data.guests.length > 0) {
           callback(data.guests);
         } else {
-          callback(DEFAULT_GUEST_PRESETS);
+          callback(getScopedDefaultGuests(effectiveOwner));
         }
       })
-      .catch(() => callback(DEFAULT_GUEST_PRESETS));
+      .catch(() => callback(getScopedDefaultGuests(effectiveOwner)));
   };
 
   try {
+    const q = query(collection(db, GUESTS_COLLECTION), where('ownerId', '==', effectiveOwner));
     return onSnapshot(
-      collection(db, GUESTS_COLLECTION),
+      q,
       snapshot => {
         if (!snapshot.empty) {
           const guests: GuestPreset[] = [];
           snapshot.forEach(docSnap => {
-            const data = docSnap.data() as GuestPreset;
-            guests.push({
-              id: docSnap.id,
-              name: data.name || '',
-              category: data.category || 'general',
-              categoryLabelKh: data.categoryLabelKh || 'ទូទៅ',
-              categoryLabelEn: data.categoryLabelEn || 'General',
-              note: data.note || '',
-            });
+            guests.push(mapDocToGuest(docSnap.id, docSnap.data() as GuestPreset, effectiveOwner));
           });
 
           try {
-            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(guests));
-          } catch (e) {
+            localStorage.setItem(storageKey, JSON.stringify(guests));
+          } catch {
             // ignore
           }
           callback(guests);
@@ -149,7 +203,7 @@ export function subscribeToGuests(callback: (guests: GuestPreset[]) => void) {
           fallbackGuests();
         }
       },
-      error => {
+      () => {
         fallbackGuests();
       }
     );
@@ -160,35 +214,40 @@ export function subscribeToGuests(callback: (guests: GuestPreset[]) => void) {
 }
 
 /**
- * Save or update guest in Firebase Firestore
+ * Save or update guest scoped to the current owner in Firestore, API, and localStorage
  */
-export async function saveGuestToFirebase(guest: GuestPreset | Omit<GuestPreset, 'id'>) {
-  const guestId = 'id' in guest && guest.id ? guest.id : `guest-${Date.now()}`;
+export async function saveGuestToFirebase(guest: GuestPreset | Omit<GuestPreset, 'id'>, ownerId?: string) {
+  const effectiveOwner = resolveOwnerId(ownerId || guest.ownerId);
+  const storageKey = getOwnerStorageKey(effectiveOwner);
+  const rawId = 'id' in guest && guest.id ? guest.id : `guest-${Date.now()}`;
+  const guestId = getScopedGuestId(rawId, effectiveOwner);
+
   const payload: any = {
     ...guest,
     note: guest.note !== undefined && guest.note !== null ? guest.note : '',
     id: guestId,
+    ownerId: effectiveOwner,
     updatedAt: new Date().toISOString(),
   };
 
-  // Ensure no undefined properties exist
   Object.keys(payload).forEach(key => {
     if (payload[key] === undefined) {
       payload[key] = '';
     }
   });
 
-  // Always update local storage
+  // Always update scoped local storage
   try {
-    const local = localStorage.getItem(LOCAL_STORAGE_KEY);
-    let list: GuestPreset[] = local ? JSON.parse(local) : [...DEFAULT_GUEST_PRESETS];
+    const local = localStorage.getItem(storageKey);
+    const parsed = local !== null ? JSON.parse(local) : null;
+    const list: GuestPreset[] = Array.isArray(parsed) ? parsed : getScopedDefaultGuests(effectiveOwner);
     const idx = list.findIndex(g => g.id === guestId);
     if (idx >= 0) {
       list[idx] = payload;
     } else {
       list.push(payload);
     }
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(list));
+    localStorage.setItem(storageKey, JSON.stringify(list));
   } catch {
     // ignore
   }
@@ -220,21 +279,29 @@ export async function saveGuestToFirebase(guest: GuestPreset | Omit<GuestPreset,
 }
 
 /**
- * Delete a guest from Firebase Firestore
+ * Delete a guest scoped to the current owner
  */
-export async function deleteGuestFromFirebase(id: string) {
+export async function deleteGuestFromFirebase(id: string, ownerId?: string) {
+  const effectiveOwner = resolveOwnerId(ownerId);
+  const storageKey = getOwnerStorageKey(effectiveOwner);
+
   try {
-    const local = localStorage.getItem(LOCAL_STORAGE_KEY);
-    if (local) {
-      const list = JSON.parse(local).filter((g: any) => g.id !== id);
-      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(list));
+    const local = localStorage.getItem(storageKey);
+    if (local !== null) {
+      const parsed = JSON.parse(local);
+      if (Array.isArray(parsed)) {
+        const list = parsed.filter((g: any) => g.id !== id);
+        localStorage.setItem(storageKey, JSON.stringify(list));
+      }
     }
   } catch {
     // ignore
   }
 
   try {
-    await fetch(`/api/guests?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+    await fetch(`/api/guests?id=${encodeURIComponent(id)}&ownerId=${encodeURIComponent(effectiveOwner)}`, {
+      method: 'DELETE',
+    });
   } catch {
     // ignore
   }
@@ -252,12 +319,23 @@ export async function deleteGuestFromFirebase(id: string) {
 }
 
 /**
- * Clear all guests from Firebase Firestore
+ * Clear ONLY the specified owner's guests from localStorage, API, and Firestore
  */
-export async function clearAllGuestsFromFirebase(guestIds?: string[]) {
+export async function clearAllGuestsFromFirebase(ownerId?: string) {
+  const effectiveOwner = resolveOwnerId(ownerId);
+  const storageKey = getOwnerStorageKey(effectiveOwner);
+
   try {
-    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify([]));
-  } catch (e) {
+    localStorage.setItem(storageKey, JSON.stringify([]));
+  } catch {
+    // ignore
+  }
+
+  try {
+    await fetch(`/api/guests?all=1&ownerId=${encodeURIComponent(effectiveOwner)}`, {
+      method: 'DELETE',
+    });
+  } catch {
     // ignore
   }
 
@@ -266,8 +344,9 @@ export async function clearAllGuestsFromFirebase(guestIds?: string[]) {
   }
 
   try {
-    const querySnapshot = await getDocs(collection(db, GUESTS_COLLECTION));
-    const deletePromises = querySnapshot.docs.map(docSnap => 
+    const q = query(collection(db, GUESTS_COLLECTION), where('ownerId', '==', effectiveOwner));
+    const querySnapshot = await getDocs(q);
+    const deletePromises = querySnapshot.docs.map(docSnap =>
       deleteDoc(doc(db, GUESTS_COLLECTION, docSnap.id))
     );
     await Promise.all(deletePromises);

@@ -6,9 +6,12 @@ import {
   getDocs,
   deleteDoc,
   onSnapshot,
+  query,
+  where,
 } from 'firebase/firestore';
 import { db, auth, IS_FIRESTORE_WRITE_DISABLED, handleFirestoreError, OperationType } from './firebase';
 import type { WeddingEvent } from '../types';
+import { DEFAULT_PRESET_EVENT_ID, extractScopeFromEventId, isGlobalSharedPresetId } from './userScope';
 import { compressBase64String } from '../utils/imageCompressor';
 import {
   shouldSkipImageRecompression,
@@ -18,6 +21,8 @@ import {
 
 export interface RSVPRecord {
   id?: string;
+  eventId?: string;
+  ownerId?: string;
   name: string;
   attending: 'yes' | 'no';
   guestCount: number;
@@ -141,12 +146,23 @@ async function prepareFirestorePayload(event: WeddingEvent): Promise<WeddingEven
 }
 
 /**
- * Submit wedding wish/blessing to Firestore and full-stack REST API
+ * Submit wedding wish/blessing scoped to a specific eventId & ownerId
  */
-export async function submitWishToFirebase(wish: { name: string; message: string; relation: string; timestamp: string }) {
+export async function submitWishToFirebase(wish: {
+  name: string;
+  message: string;
+  relation: string;
+  timestamp: string;
+  eventId?: string;
+  ownerId?: string;
+}) {
   const wishId = 'wish-' + Date.now();
+  const effectiveEventId = wish.eventId || DEFAULT_PRESET_EVENT_ID;
+  const effectiveOwnerId = wish.ownerId || extractScopeFromEventId(effectiveEventId) || '';
   const payload = {
     id: wishId,
+    eventId: effectiveEventId,
+    ownerId: effectiveOwnerId,
     name: wish.name || '',
     relationship: wish.relation || '',
     message: wish.message || '',
@@ -186,19 +202,22 @@ export async function addWishToFirebase(wish: any) {
     name: wish.name || '',
     message: wish.message || '',
     relation: wish.relation || wish.relationship || '',
-    timestamp: wish.createdAt || wish.timestamp || new Date().toISOString()
+    timestamp: wish.createdAt || wish.timestamp || new Date().toISOString(),
+    eventId: wish.eventId,
+    ownerId: wish.ownerId,
   });
 }
 
 /**
  * Increment heart likes on a wish
  */
-export async function likeWishInFirebase(wishId: string) {
+export async function likeWishInFirebase(wishId: string, eventId?: string) {
   let updatedWish: any = null;
+  const querySuffix = eventId ? `?eventId=${encodeURIComponent(eventId)}` : '';
 
   // 1. Local/Server API update
   try {
-    const res = await fetch('/api/wishes');
+    const res = await fetch(`/api/wishes${querySuffix}`);
     const data = await res.json();
     const wishes = data.wishes || [];
     const wish = wishes.find((w: any) => w.id === wishId);
@@ -227,8 +246,11 @@ export async function likeWishInFirebase(wishId: string) {
           : (currentData.likes || 0) + 1;
         await setDoc(docRef, { likes: newLikes }, { merge: true });
       } else if (updatedWish && updatedWish.name && updatedWish.message) {
+        const effectiveEventId = updatedWish.eventId || eventId || DEFAULT_PRESET_EVENT_ID;
         await setDoc(docRef, {
           id: updatedWish.id || wishId,
+          eventId: effectiveEventId,
+          ownerId: updatedWish.ownerId || extractScopeFromEventId(effectiveEventId) || '',
           name: String(updatedWish.name).slice(0, 200),
           relationship: String(updatedWish.relationship || updatedWish.relation || ''),
           message: String(updatedWish.message).slice(0, 2000),
@@ -245,10 +267,11 @@ export async function likeWishInFirebase(wishId: string) {
 /**
  * Delete a wish from both server and Firestore
  */
-export async function deleteWishInFirebase(wishId: string): Promise<void> {
+export async function deleteWishInFirebase(wishId: string, eventId?: string): Promise<void> {
+  const querySuffix = eventId ? `?eventId=${encodeURIComponent(eventId)}` : '';
   // 1. Delete from REST API
   try {
-    await fetch(`/api/wishes/${encodeURIComponent(wishId)}`, {
+    await fetch(`/api/wishes/${encodeURIComponent(wishId)}${querySuffix}`, {
       method: 'DELETE',
     });
   } catch (e) {
@@ -267,13 +290,17 @@ export async function deleteWishInFirebase(wishId: string): Promise<void> {
 }
 
 /**
- * Submit RSVP response and notify event owner via in-app dashboard alert & email trigger log
+ * Submit RSVP response and notify the specific event owner
  */
 export async function saveRSVPToFirebase(rsvp: RSVPRecord) {
   const rsvpId = rsvp.id || 'rsvp-' + Date.now();
+  const effectiveEventId = rsvp.eventId || DEFAULT_PRESET_EVENT_ID;
+  const effectiveOwnerId = rsvp.ownerId || extractScopeFromEventId(effectiveEventId) || '';
   const payload = {
     ...rsvp,
     id: rsvpId,
+    eventId: effectiveEventId,
+    ownerId: effectiveOwnerId,
     note: rsvp.note || '',
     timestamp: rsvp.timestamp || new Date().toISOString()
   };
@@ -304,6 +331,8 @@ export async function saveRSVPToFirebase(rsvp: RSVPRecord) {
     const notificationId = 'notif-' + Date.now();
     const notifPayload = {
       id: notificationId,
+      eventId: effectiveEventId,
+      ownerId: effectiveOwnerId,
       type: 'RSVP_SUBMISSION',
       title: `New RSVP: ${payload.name}`,
       message: `${payload.name} submitted RSVP: ${payload.attending === 'yes' ? 'Attending' : 'Not Attending'} (${payload.guestCount} guests). Phone: ${payload.phone || 'N/A'}`,
@@ -370,8 +399,8 @@ export async function fetchUserEvent(userId: string): Promise<WeddingEvent | nul
 /**
  * Fetch wedding event from Firestore or fallback to REST API
  */
-export async function fetchEventFromFirebase(eventId: string): Promise<WeddingEvent | null> {
-  const targetId = eventId || 'cmgrawhnk0003le0434762j7n';
+export async function fetchEventFromFirebase(eventId: string, ownerId?: string): Promise<WeddingEvent | null> {
+  const targetId = eventId || DEFAULT_PRESET_EVENT_ID;
 
   // Try fetching from Firestore first
   if (!IS_FIRESTORE_WRITE_DISABLED) {
@@ -388,7 +417,8 @@ export async function fetchEventFromFirebase(eventId: string): Promise<WeddingEv
 
   // Fallback to server REST API
   try {
-    const res = await fetch(`/api/event?id=${targetId}`);
+    const ownerParam = ownerId ? `&ownerId=${encodeURIComponent(ownerId)}` : '';
+    const res = await fetch(`/api/event?id=${encodeURIComponent(targetId)}${ownerParam}`);
     if (res.ok) {
       const json = await res.json();
       if (json.success && json.event) return json.event;
@@ -397,6 +427,50 @@ export async function fetchEventFromFirebase(eventId: string): Promise<WeddingEv
     console.warn('REST API fetch event error:', error);
   }
   return null;
+}
+
+/**
+ * Fetch all saved/custom events belonging strictly to a specific ownerId
+ */
+export async function fetchUserTemplatesFromFirebase(ownerId: string): Promise<WeddingEvent[]> {
+  if (!ownerId || ownerId === 'guest_public') return [];
+  const results = new Map<string, WeddingEvent>();
+
+  // 1. REST API templates owned by this user
+  try {
+    const res = await fetch(`/api/templates?ownerId=${encodeURIComponent(ownerId)}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data?.success && Array.isArray(data.templates)) {
+        for (const t of data.templates) {
+          const evt = t?.event || t;
+          if (evt && evt.id && !isGlobalSharedPresetId(evt.id) && evt.ownerId === ownerId) {
+            results.set(evt.id, evt);
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // 2. Firestore events query where('ownerId', '==', ownerId)
+  if (!IS_FIRESTORE_WRITE_DISABLED) {
+    try {
+      const q = query(collection(db, 'events'), where('ownerId', '==', ownerId));
+      const snap = await getDocs(q);
+      snap.forEach((docSnap) => {
+        const evt = docSnap.data() as WeddingEvent;
+        if (evt && docSnap.id && !isGlobalSharedPresetId(docSnap.id)) {
+          results.set(docSnap.id, { ...evt, id: evt.id || docSnap.id });
+        }
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  return Array.from(results.values());
 }
 
 /**
@@ -516,18 +590,41 @@ export function subscribeToEvent(eventId: string, callback: (event: WeddingEvent
 }
 
 /**
- * Real-time listener for wishes/blessings
+ * Real-time listener for wishes/blessings scoped to a specific eventId
  */
-export function subscribeToWishes(callback: (wishes: any[]) => void) {
+export function subscribeToWishes(
+  eventIdOrCallback: string | ((wishes: any[]) => void),
+  maybeCallback?: (wishes: any[]) => void
+) {
+  const targetEventId =
+    typeof eventIdOrCallback === 'string' && eventIdOrCallback
+      ? eventIdOrCallback
+      : DEFAULT_PRESET_EVENT_ID;
+  const callback =
+    typeof eventIdOrCallback === 'function'
+      ? eventIdOrCallback
+      : maybeCallback!;
+
   if (!IS_FIRESTORE_WRITE_DISABLED) {
     try {
       const wishesCol = collection(db, 'wishes');
-      return onSnapshot(wishesCol, (snap) => {
+      const sourceQuery =
+        targetEventId === DEFAULT_PRESET_EVENT_ID
+          ? wishesCol
+          : query(wishesCol, where('eventId', '==', targetEventId));
+
+      return onSnapshot(sourceQuery, (snap) => {
         const wishes: any[] = [];
         snap.forEach((docSnap) => {
-          wishes.push(docSnap.data());
+          const data = docSnap.data();
+          if (targetEventId === DEFAULT_PRESET_EVENT_ID) {
+            if (!data.eventId || data.eventId === targetEventId) {
+              wishes.push(data);
+            }
+          } else if (data.eventId === targetEventId) {
+            wishes.push(data);
+          }
         });
-        // Sort wishes descending by creation timestamp
         wishes.sort((a, b) => new Date(b.createdAt || b.timestamp || 0).getTime() - new Date(a.createdAt || a.timestamp || 0).getTime());
         callback(wishes);
       }, (error) => {
@@ -538,18 +635,20 @@ export function subscribeToWishes(callback: (wishes: any[]) => void) {
     }
   }
 
-  // Fallback polling
-  const intervalId = setInterval(async () => {
+  // Fallback polling scoped by eventId
+  const pollWishes = async () => {
     try {
-      const res = await fetch('/api/wishes');
+      const res = await fetch(`/api/wishes?eventId=${encodeURIComponent(targetEventId)}`);
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.wishes) callback(json.wishes);
       }
-    } catch (e) {
+    } catch {
       // ignore
     }
-  }, 10000);
+  };
+  pollWishes();
+  const intervalId = setInterval(pollWishes, 10000);
 
   return () => clearInterval(intervalId);
 }

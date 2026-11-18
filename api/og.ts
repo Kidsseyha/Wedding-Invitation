@@ -5,6 +5,7 @@ import {
   buildInvitationMeta,
   injectMetaIntoHtml,
   fetchEventFromFirestoreRest,
+  fetchShortLinkFromFirestoreRest,
   normalizeCategoryString,
 } from '../src/utils/shareMeta.js';
 
@@ -71,12 +72,64 @@ export default async function handler(req: VercelReq, res: VercelRes) {
     const origin = `${proto.split(',')[0].trim()}://${host.split(',')[0].trim()}`;
 
     const rawUrl = req.url || '/';
-    const parsedUrl = new URL(rawUrl, origin);
-    const params = parsedUrl.searchParams;
+    let parsedUrl = new URL(rawUrl, origin);
+    let params = parsedUrl.searchParams;
+    let replaceStatePath: string | undefined;
+
+    // Resolve short links (/s/:code) from Firestore or local saved_short_links.json
+    const shortMatch = parsedUrl.pathname.match(/^\/s\/([a-zA-Z0-9_-]+)\/?$/);
+    if (shortMatch && shortMatch[1]) {
+      const shortCode = shortMatch[1];
+      let resolvedTargetUrl: string | null = null;
+
+      const fsShortLink = await fetchShortLinkFromFirestoreRest({
+        projectId: firebaseCfg.projectId,
+        databaseId: firebaseCfg.firestoreDatabaseId,
+        code: shortCode,
+        apiKey: firebaseCfg.apiKey,
+      });
+
+      if (fsShortLink?.url) {
+        resolvedTargetUrl = fsShortLink.url;
+      } else {
+        try {
+          const localShortFile = path.join(process.cwd(), 'data', 'saved_short_links.json');
+          if (fs.existsSync(localShortFile)) {
+            const links = JSON.parse(fs.readFileSync(localShortFile, 'utf-8'));
+            if (typeof links?.[shortCode] === 'string') {
+              resolvedTargetUrl = links[shortCode];
+            }
+          }
+        } catch {
+          // ignore local short link lookup errors
+        }
+      }
+
+      if (resolvedTargetUrl) {
+        try {
+          const targetObj = new URL(resolvedTargetUrl, origin);
+          // Merge any extra query params passed on the short URL (e.g. ?name=...)
+          for (const [k, v] of Array.from(params.entries())) {
+            if (v) targetObj.searchParams.set(k, v);
+          }
+          if (!targetObj.searchParams.get('lang')) {
+            targetObj.searchParams.set('lang', fsShortLink?.lang || 'kh');
+          }
+          if (!targetObj.searchParams.get('share')) {
+            targetObj.searchParams.set('share', '1');
+          }
+          parsedUrl = targetObj;
+          params = targetObj.searchParams;
+          replaceStatePath = `/${targetObj.search}`;
+        } catch {
+          // ignore invalid URL
+        }
+      }
+    }
 
     const eventId = getQueryParam(params, req, 'id').trim();
     const rawType = (getQueryParam(params, req, 'type') || getQueryParam(params, req, 'category')).trim();
-    let rawGuest = (
+    const rawGuest = (
       getQueryParam(params, req, 'name') ||
       getQueryParam(params, req, 'i') ||
       getQueryParam(params, req, 'guest') ||
@@ -165,7 +218,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       pageUrl: parsedUrl.toString(),
     });
 
-    const injected = injectMetaIntoHtml(html, meta);
+    const injected = injectMetaIntoHtml(html, meta, replaceStatePath);
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');

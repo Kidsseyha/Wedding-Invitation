@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   X,
@@ -36,7 +36,14 @@ import ThemeToggle, { ThemeMode } from './ThemeToggle';
 import LanguageToggle from './LanguageToggle';
 import { EVENT_PRESETS, EventTypePreset, getCategoryCoverImage } from '../data/eventTemplates';
 import TemplateLivePreview from './TemplateLivePreview';
-import { deleteEventFromFirebase } from '../lib/firebaseServices';
+import { deleteEventFromFirebase, fetchUserTemplatesFromFirebase } from '../lib/firebaseServices';
+import {
+  getScopedEventId,
+  getUserStorageKey,
+  isGlobalSharedPresetId,
+  resolveUserScope,
+  stripScopedEventId,
+} from '../lib/userScope';
 
 interface EventTypeModalProps {
   isOpen: boolean;
@@ -48,6 +55,8 @@ interface EventTypeModalProps {
   theme?: ThemeMode;
   onToggleLanguage?: () => void;
   onChangeTheme?: (theme: ThemeMode) => void;
+  userScope?: string;
+  ownerEmail?: string;
 }
 
 export default function EventTypeModal({
@@ -60,7 +69,12 @@ export default function EventTypeModal({
   theme = 'dark',
   onToggleLanguage,
   onChangeTheme,
+  userScope,
+  ownerEmail,
 }: EventTypeModalProps) {
+  const effectiveScope = (userScope && userScope.trim()) || currentEvent?.ownerId || resolveUserScope().scopeId;
+  const effectiveOwnerEmail = ownerEmail || currentEvent?.ownerEmail || resolveUserScope().ownerEmail || '';
+
   const [selectedPreset, setSelectedPreset] = useState<EventTypePreset>(EVENT_PRESETS[0]);
   const [viewingProgramPreset, setViewingProgramPreset] = useState<EventTypePreset | null>(null);
   const [livePreviewPreset, setLivePreviewPreset] = useState<EventTypePreset | null>(null);
@@ -70,7 +84,7 @@ export default function EventTypeModal({
   const [deletedPresetIds, setDeletedPresetIds] = useState<string[]>(() => {
     if (typeof window !== 'undefined') {
       try {
-        const stored = localStorage.getItem('wedding_deleted_preset_ids');
+        const stored = localStorage.getItem(getUserStorageKey('wedding_deleted_preset_ids', effectiveScope));
         return stored ? JSON.parse(stored) : [];
       } catch (e) {}
     }
@@ -79,7 +93,7 @@ export default function EventTypeModal({
   const [customTemplates, setCustomTemplates] = useState<WeddingEvent[]>(() => {
     if (typeof window !== 'undefined') {
       try {
-        const stored = localStorage.getItem('wedding_custom_templates');
+        const stored = localStorage.getItem(getUserStorageKey('wedding_custom_templates', effectiveScope));
         const parsed = stored ? JSON.parse(stored) : [];
         return Array.isArray(parsed) ? parsed : [];
       } catch (e) {}
@@ -182,25 +196,93 @@ export default function EventTypeModal({
 
   const [preserveDesignSettings, setPreserveDesignSettings] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('wedding_preserve_design_settings');
+      const stored = localStorage.getItem(getUserStorageKey('wedding_preserve_design_settings', effectiveScope));
       return stored !== null ? stored === 'true' : false;
     }
     return false;
   });
 
+  // Reload per-user templates, hidden presets, and preferences when userScope switches or modal opens
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let localDeleted: string[] = [];
+    try {
+      const delRaw = localStorage.getItem(getUserStorageKey('wedding_deleted_preset_ids', effectiveScope));
+      localDeleted = delRaw ? JSON.parse(delRaw) : [];
+      setDeletedPresetIds(Array.isArray(localDeleted) ? localDeleted : []);
+    } catch {
+      setDeletedPresetIds([]);
+    }
+
+    let localCustom: WeddingEvent[] = [];
+    try {
+      const custRaw = localStorage.getItem(getUserStorageKey('wedding_custom_templates', effectiveScope));
+      const parsed = custRaw ? JSON.parse(custRaw) : [];
+      localCustom = Array.isArray(parsed) ? parsed : [];
+      setCustomTemplates(localCustom);
+    } catch {
+      setCustomTemplates([]);
+    }
+
+    try {
+      const pref = localStorage.getItem(getUserStorageKey('wedding_preserve_design_settings', effectiveScope));
+      setPreserveDesignSettings(pref !== null ? pref === 'true' : false);
+    } catch {
+      setPreserveDesignSettings(false);
+    }
+
+    if (isOpen && effectiveScope && effectiveScope !== 'guest_public') {
+      fetchUserTemplatesFromFirebase(effectiveScope)
+        .then((cloudEvents) => {
+          if (!cloudEvents || cloudEvents.length === 0) return;
+          const delSet = new Set(localDeleted);
+          const mergedCustom = new Map<string, WeddingEvent>();
+          for (const c of localCustom) {
+            if (c?.id && !delSet.has(c.id)) mergedCustom.set(c.id, c);
+          }
+          for (const evt of cloudEvents) {
+            if (!evt?.id) continue;
+            // Save user's customized presets locally so All Templates / Share shows them too
+            try {
+              localStorage.setItem(getUserStorageKey(`wedding_template_saved_${evt.id}`, effectiveScope), JSON.stringify(evt));
+              const stripped = stripScopedEventId(evt.id);
+              if (stripped) {
+                localStorage.setItem(getUserStorageKey(`wedding_template_saved_${stripped}`, effectiveScope), JSON.stringify(evt));
+              }
+            } catch {}
+
+            if ((evt.id.includes('custom-event-') || evt.templateId?.includes('custom-event-')) && !delSet.has(evt.id)) {
+              mergedCustom.set(evt.id, evt);
+            }
+          }
+          const finalCustom = Array.from(mergedCustom.values());
+          setCustomTemplates(finalCustom);
+          try {
+            localStorage.setItem(getUserStorageKey('wedding_custom_templates', effectiveScope), JSON.stringify(finalCustom));
+          } catch {}
+        })
+        .catch(() => {});
+    }
+  }, [effectiveScope, isOpen]);
+
   const handleTogglePreserveDesign = (val: boolean) => {
     setPreserveDesignSettings(val);
     try {
-      localStorage.setItem('wedding_preserve_design_settings', String(val));
+      localStorage.setItem(getUserStorageKey('wedding_preserve_design_settings', effectiveScope), String(val));
     } catch (e) {}
   };
 
   const getSavedTemplateData = (presetId: string): WeddingEvent | null => {
     if (typeof window === 'undefined') return null;
     try {
-      const stored = localStorage.getItem(`wedding_template_saved_${presetId}`);
-      if (stored) {
-        return JSON.parse(stored);
+      const scopedId = getScopedEventId(presetId, effectiveScope);
+      const storedScoped = localStorage.getItem(getUserStorageKey(`wedding_template_saved_${scopedId}`, effectiveScope));
+      if (storedScoped) {
+        return JSON.parse(storedScoped);
+      }
+      const storedBase = localStorage.getItem(getUserStorageKey(`wedding_template_saved_${presetId}`, effectiveScope));
+      if (storedBase) {
+        return JSON.parse(storedBase);
       }
     } catch (e) {}
     return null;
@@ -209,18 +291,28 @@ export default function EventTypeModal({
   const handleResetPresetSavedData = (presetId: string, title: string) => {
     if (typeof window === 'undefined') return;
     try {
-      localStorage.removeItem(`wedding_template_saved_${presetId}`);
+      const scopedId = getScopedEventId(presetId, effectiveScope);
+      localStorage.removeItem(getUserStorageKey(`wedding_template_saved_${presetId}`, effectiveScope));
+      localStorage.removeItem(getUserStorageKey(`wedding_template_saved_${scopedId}`, effectiveScope));
       setSuccessToast(language === 'kh' ? `បានស្ដារការកំណត់ដើមសម្រាប់ "${title}"!` : `Restored original defaults for "${title}"!`);
       setTimeout(() => setSuccessToast(null), 2500);
     } catch (e) {}
   };
 
   const buildEffectiveEvent = (preset: EventTypePreset): WeddingEvent => {
-    // 1. Check if user has explicitly saved customizations for this preset
+    const scopedId = getScopedEventId(preset.sampleEvent.id, effectiveScope);
+    const ownerFields =
+      effectiveScope !== 'guest_public'
+        ? { ownerId: effectiveScope, ...(effectiveOwnerEmail ? { ownerEmail: effectiveOwnerEmail } : {}) }
+        : {};
+
+    // 1. Check if THIS user has explicitly saved customizations for this preset
     const saved = getSavedTemplateData(preset.sampleEvent.id);
     if (saved) {
       return {
         ...saved,
+        id: scopedId,
+        ...ownerFields,
         eventType: preset.type,
         singlePerson: preset.type === 'birthday' ? true : (saved.singlePerson ?? false),
       };
@@ -230,6 +322,8 @@ export default function EventTypeModal({
     if (preserveDesignSettings && currentEvent?.config) {
       return {
         ...preset.sampleEvent,
+        id: scopedId,
+        ...ownerFields,
         eventType: preset.type,
         singlePerson: preset.type === 'birthday' ? true : false,
         config: {
@@ -254,6 +348,8 @@ export default function EventTypeModal({
     const categoryCover = getCategoryCoverImage(preset.type) || preset.coverImage;
     return {
       ...preset.sampleEvent,
+      id: scopedId,
+      ...ownerFields,
       templateId: preset.id,
       eventType: preset.type,
       image: categoryCover,
@@ -268,19 +364,36 @@ export default function EventTypeModal({
 
   const handleApply = async (preset: EventTypePreset) => {
     const categoryCover = getCategoryCoverImage(preset.type) || preset.coverImage;
-    // Build fresh event data for the chosen template preset (or keep custom template fields)
-    const isCustomPreset = preset.id.startsWith('custom-event-');
+    const isCustomPreset = preset.id.includes('custom-event-');
+    const scopedEventId = getScopedEventId(preset.sampleEvent.id, effectiveScope);
+    const ownerFields =
+      effectiveScope !== 'guest_public'
+        ? { ownerId: effectiveScope, ...(effectiveOwnerEmail ? { ownerEmail: effectiveOwnerEmail } : {}) }
+        : {};
+
     const saved = getSavedTemplateData(preset.sampleEvent.id);
     const freshPresetEvent: WeddingEvent = isCustomPreset
       ? {
           ...preset.sampleEvent,
+          id: scopedEventId,
+          ...ownerFields,
+          templateId: preset.id,
+          eventType: preset.type,
+          updatedAt: new Date().toISOString(),
+        }
+      : saved
+      ? {
+          ...saved,
+          id: scopedEventId,
+          ...ownerFields,
           templateId: preset.id,
           eventType: preset.type,
           updatedAt: new Date().toISOString(),
         }
       : {
           ...preset.sampleEvent,
-          ...(saved ? {} : {}),
+          id: scopedEventId,
+          ...ownerFields,
           templateId: preset.id,
           eventType: preset.type,
           image: categoryCover,
@@ -301,11 +414,13 @@ export default function EventTypeModal({
     );
 
     try {
-      localStorage.setItem('wedding_custom_event_data', JSON.stringify(freshPresetEvent));
-      localStorage.setItem(`wedding_template_saved_${preset.sampleEvent.id}`, JSON.stringify(freshPresetEvent));
-      localStorage.setItem('wedding_last_active_template_id', preset.sampleEvent.id);
-      localStorage.setItem('wedding_last_active_preset_id', preset.id);
-      localStorage.setItem('wedding_last_template_type', preset.type);
+      localStorage.setItem(getUserStorageKey('wedding_custom_event_data', effectiveScope), JSON.stringify(freshPresetEvent));
+      localStorage.setItem(getUserStorageKey(`wedding_template_saved_${preset.sampleEvent.id}`, effectiveScope), JSON.stringify(freshPresetEvent));
+      localStorage.setItem(getUserStorageKey(`wedding_template_saved_${scopedEventId}`, effectiveScope), JSON.stringify(freshPresetEvent));
+      localStorage.setItem(getUserStorageKey(`wedding_template_type_${preset.type}`, effectiveScope), JSON.stringify(freshPresetEvent));
+      localStorage.setItem(getUserStorageKey('wedding_last_active_template_id', effectiveScope), scopedEventId);
+      localStorage.setItem(getUserStorageKey('wedding_last_active_preset_id', effectiveScope), preset.id);
+      localStorage.setItem(getUserStorageKey('wedding_last_template_type', effectiveScope), preset.type);
     } catch (e) {}
 
     // Save the event data completely to server/localStorage/Firebase
@@ -323,7 +438,7 @@ export default function EventTypeModal({
       try {
         const url = new URL(window.location.href);
         url.searchParams.set('type', preset.type);
-        url.searchParams.set('id', preset.sampleEvent.id);
+        url.searchParams.set('id', scopedEventId);
         window.history.replaceState({}, '', url.toString());
       } catch (e) {}
       window.location.reload();
@@ -342,7 +457,7 @@ export default function EventTypeModal({
 
   const handleCreateCustom = () => {
     const basePreset = EVENT_PRESETS.find((p) => p.type === customType) || EVENT_PRESETS[0];
-    const customId = `custom-event-${Date.now()}`;
+    const customId = getScopedEventId(`custom-event-${Date.now()}`, effectiveScope);
     const categoryCover = getCategoryCoverImage(customType) || basePreset.coverImage;
     const resolvedName = customName || (language === 'kh' ? basePreset.titleKh : basePreset.titleEn);
     const resolvedLocation = customLocation || basePreset.sampleEvent.location;
@@ -352,6 +467,9 @@ export default function EventTypeModal({
       ...basePreset.sampleEvent,
       id: customId,
       templateId: customId,
+      ...(effectiveScope !== 'guest_public'
+        ? { ownerId: effectiveScope, ...(effectiveOwnerEmail ? { ownerEmail: effectiveOwnerEmail } : {}) }
+        : {}),
       eventType: customType,
       name: resolvedName,
       groom: customHost1 || basePreset.sampleEvent.groom,
@@ -385,11 +503,11 @@ export default function EventTypeModal({
     const nextCustomTemplates = [newEvent, ...customTemplates.filter((c) => c.id !== newEvent.id)];
     setCustomTemplates(nextCustomTemplates);
     try {
-      localStorage.setItem('wedding_custom_templates', JSON.stringify(nextCustomTemplates));
-      localStorage.setItem(`wedding_template_saved_${newEvent.id}`, JSON.stringify(newEvent));
-      localStorage.setItem('wedding_last_active_template_id', newEvent.id);
-      localStorage.setItem('wedding_last_active_preset_id', newEvent.id);
-      localStorage.setItem('wedding_last_template_type', customType);
+      localStorage.setItem(getUserStorageKey('wedding_custom_templates', effectiveScope), JSON.stringify(nextCustomTemplates));
+      localStorage.setItem(getUserStorageKey(`wedding_template_saved_${newEvent.id}`, effectiveScope), JSON.stringify(newEvent));
+      localStorage.setItem(getUserStorageKey('wedding_last_active_template_id', effectiveScope), newEvent.id);
+      localStorage.setItem(getUserStorageKey('wedding_last_active_preset_id', effectiveScope), newEvent.id);
+      localStorage.setItem(getUserStorageKey('wedding_last_template_type', effectiveScope), customType);
     } catch (e) {}
 
     onApplyTemplate(newEvent);
@@ -407,29 +525,38 @@ export default function EventTypeModal({
   const handleDeletePreset = async (preset: EventTypePreset) => {
     const presetId = preset.id;
     const sampleId = preset.sampleEvent.id;
+    const scopedSampleId = getScopedEventId(sampleId, effectiveScope);
     const title = language === 'kh' ? preset.titleKh : preset.titleEn;
 
     if (window.confirm(language === 'kh' ? `តើអ្នកប្រាកដជាចង់លុបគំរូធៀប "${title}" នេះចេញពី Database និង Website ឬ?` : `Are you sure you want to delete template "${title}" from database and website?`)) {
       try {
-        await deleteEventFromFirebase(sampleId);
-        await deleteEventFromFirebase(presetId);
+        if (scopedSampleId && !isGlobalSharedPresetId(scopedSampleId)) {
+          await deleteEventFromFirebase(scopedSampleId);
+        }
+        if (sampleId && !isGlobalSharedPresetId(sampleId) && sampleId !== scopedSampleId) {
+          await deleteEventFromFirebase(sampleId);
+        }
+        if (presetId && !isGlobalSharedPresetId(presetId)) {
+          await deleteEventFromFirebase(presetId);
+        }
       } catch (e) {
         console.warn('Error deleting template from backend:', e);
       }
 
-      if (presetId.startsWith('custom-event-')) {
+      if (presetId.includes('custom-event-')) {
         const remainingCustom = customTemplates.filter((c) => c.id !== presetId && c.id !== sampleId);
         setCustomTemplates(remainingCustom);
         try {
-          localStorage.setItem('wedding_custom_templates', JSON.stringify(remainingCustom));
+          localStorage.setItem(getUserStorageKey('wedding_custom_templates', effectiveScope), JSON.stringify(remainingCustom));
         } catch (e) {}
       }
 
-      const nextDeleted = [...deletedPresetIds, presetId, sampleId];
+      const nextDeleted = Array.from(new Set([...deletedPresetIds, presetId, sampleId, stripScopedEventId(sampleId)]));
       setDeletedPresetIds(nextDeleted);
       try {
-        localStorage.setItem('wedding_deleted_preset_ids', JSON.stringify(nextDeleted));
-        localStorage.removeItem(`wedding_template_saved_${sampleId}`);
+        localStorage.setItem(getUserStorageKey('wedding_deleted_preset_ids', effectiveScope), JSON.stringify(nextDeleted));
+        localStorage.removeItem(getUserStorageKey(`wedding_template_saved_${sampleId}`, effectiveScope));
+        localStorage.removeItem(getUserStorageKey(`wedding_template_saved_${scopedSampleId}`, effectiveScope));
       } catch (e) {}
 
       if (viewingProgramPreset?.id === presetId) {
@@ -1070,14 +1197,17 @@ export default function EventTypeModal({
             ) : activeTab === 'presets' ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                 {filteredPresets.map((preset, presetIdx) => {
+                  const strippedCurId = stripScopedEventId(currentEvent.id);
                   const exactMatch =
                     currentEvent.templateId === preset.id ||
                     currentEvent.id === preset.sampleEvent.id ||
+                    strippedCurId === preset.sampleEvent.id ||
                     currentEvent.id === preset.id;
                   const hasAnyExactMatch = availablePresets.some(
                     (p) =>
                       currentEvent.templateId === p.id ||
                       currentEvent.id === p.sampleEvent.id ||
+                      strippedCurId === p.sampleEvent.id ||
                       currentEvent.id === p.id
                   );
                   const defaultMatch = !hasAnyExactMatch && preset.id === availablePresets.find((p) => p.type === (currentEvent.eventType || 'wedding'))?.id;

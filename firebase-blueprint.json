@@ -11,6 +11,8 @@
         "categoryLabelKh": { "type": "string", "description": "Khmer category label", "maxLength": 100 },
         "categoryLabelEn": { "type": "string", "description": "English category label", "maxLength": 100 },
         "note": { "type": "string", "description": "Optional note or table assignment", "maxLength": 500 },
+        "ownerId": { "type": "string", "description": "Owner user scope ID for per-user guest list isolation", "maxLength": 128 },
+        "eventId": { "type": "string", "description": "Optional associated event ID", "maxLength": 128 },
         "updatedAt": { "type": "string", "description": "ISO timestamp of last update", "maxLength": 64 }
       },
       "required": ["name", "category"]
@@ -21,6 +23,8 @@
       "type": "object",
       "properties": {
         "id": { "type": "string", "description": "Unique wish identifier", "maxLength": 128 },
+        "eventId": { "type": "string", "description": "Target invitation event ID", "maxLength": 128 },
+        "ownerId": { "type": "string", "description": "Owner user scope ID of the target invitation", "maxLength": 128 },
         "name": { "type": "string", "description": "Guest sender name", "maxLength": 200 },
         "relationship": { "type": "string", "description": "Relationship to bride/groom", "maxLength": 100 },
         "message": { "type": "string", "description": "Wish blessing message content", "maxLength": 2000 },
@@ -34,6 +38,9 @@
       "description": "Guest RSVP confirmation response",
       "type": "object",
       "properties": {
+        "id": { "type": "string", "description": "Unique RSVP identifier", "maxLength": 128 },
+        "eventId": { "type": "string", "description": "Target invitation event ID", "maxLength": 128 },
+        "ownerId": { "type": "string", "description": "Owner user scope ID of the target invitation", "maxLength": 128 },
         "name": { "type": "string", "description": "Guest name", "maxLength": 200 },
         "attending": { "type": "string", "description": "Whether attending yes or no", "maxLength": 10 },
         "guestCount": { "type": "number", "description": "Number of attendees" },
@@ -49,8 +56,11 @@
       "type": "object",
       "properties": {
         "id": { "type": "string", "description": "Unique event ID", "maxLength": 128 },
+        "templateId": { "type": "string", "description": "Base template/preset identifier", "maxLength": 128 },
+        "eventType": { "type": "string", "description": "Event category (wedding, engagement, housewarming, birthday, anniversary)", "maxLength": 50 },
         "name": { "type": "string", "description": "Event name / title", "maxLength": 300 },
         "title": { "type": "string", "description": "Alternative event title", "maxLength": 300 },
+        "slug": { "type": "string", "description": "Event URL slug", "maxLength": 128 },
         "groom": { "type": "string", "description": "Groom name", "maxLength": 200 },
         "bride": { "type": "string", "description": "Bride name", "maxLength": 200 },
         "groom_name": { "type": "string", "description": "Groom name alias", "maxLength": 200 },
@@ -97,12 +107,30 @@
       "type": "object",
       "properties": {
         "id": { "type": "string", "description": "Notification ID", "maxLength": 128 },
+        "eventId": { "type": "string", "description": "Associated event ID", "maxLength": 128 },
+        "ownerId": { "type": "string", "description": "Owner user scope ID", "maxLength": 128 },
         "title": { "type": "string", "description": "Notification title", "maxLength": 200 },
         "message": { "type": "string", "description": "Notification message body", "maxLength": 2000 },
         "type": { "type": "string", "description": "Notification category or type", "maxLength": 50 },
+        "guestName": { "type": "string", "description": "Guest name for RSVP notifications", "maxLength": 200 },
+        "attending": { "type": "string", "description": "Attending status yes or no", "maxLength": 10 },
+        "read": { "type": "boolean", "description": "Whether notification has been read" },
+        "timestamp": { "type": "string", "description": "ISO timestamp string", "maxLength": 64 },
         "createdAt": { "type": "string", "description": "ISO timestamp of notification", "maxLength": 64 }
       },
       "required": ["title", "message"]
+    },
+    "ShortLink": {
+      "title": "ShortLink",
+      "description": "Publicly resolvable short link mapping for sharing invitations with Khmer language support",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string", "description": "Short link code", "maxLength": 128 },
+        "url": { "type": "string", "description": "Target invitation URL", "maxLength": 2000 },
+        "lang": { "type": "string", "description": "Default language code (e.g. kh or en)", "maxLength": 10 },
+        "createdAt": { "type": "string", "description": "ISO timestamp of creation", "maxLength": 64 }
+      },
+      "required": ["code", "url"]
     }
   },
   "firestore": {
@@ -133,6 +161,10 @@
     "/notifications/{notificationId}": {
       "schema": { "$ref": "#/entities/Notification" },
       "description": "Owner dashboard alerts and activity logs"
+    },
+    "/short_links/{code}": {
+      "schema": { "$ref": "#/entities/ShortLink" },
+      "description": "Short link mappings for Vercel and social sharing"
     }
   }
 }

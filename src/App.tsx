@@ -59,7 +59,16 @@ import { formatKhmerDate, formatEnDate } from './utils/khmerHelpers';
 import { testFirestoreConnection, auth, db } from './lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, User } from 'firebase/auth';
-import { saveEventToFirebase, fetchEventFromFirebase, subscribeToEvent, syncUserProfile, fetchUserEvent, registerSystemUserInFirebase, fetchSystemUsersFromFirebase, deleteSystemUserFromFirebase } from './lib/firebaseServices';
+import { saveEventToFirebase, fetchEventFromFirebase, fetchUserTemplatesFromFirebase, subscribeToEvent, syncUserProfile, registerSystemUserInFirebase, fetchSystemUsersFromFirebase, deleteSystemUserFromFirebase } from './lib/firebaseServices';
+import {
+  DEFAULT_PRESET_EVENT_ID,
+  GUEST_PUBLIC_SCOPE,
+  extractScopeFromEventId,
+  getScopedEventId,
+  getUserStorageKey,
+  resolveUserScope,
+  stripScopedEventId,
+} from './lib/userScope';
 import AudioPlayer from './components/AudioPlayer';
 import LanguageToggle from './components/LanguageToggle';
 import ThemeToggle, { ThemeMode } from './components/ThemeToggle';
@@ -131,24 +140,32 @@ export default function App() {
     return 'wedding';
   };
 
-  // Load custom event data from URL params, localStorage, or preset
+  // Load custom event data from URL params, per-user localStorage, or preset
   const [event, setEvent] = useState<WeddingEvent>(() => {
+    const initialScope = resolveUserScope(null);
+    const scopeId = initialScope.scopeId;
     try {
       // 1. Check URL parameters FIRST so direct links and shared links load the correct template/category immediately
       let urlId: string | null = null;
       let urlType: string | null = null;
+      let isShare = false;
       if (typeof window !== 'undefined') {
         const params = new URLSearchParams(window.location.search);
         urlId = params.get('id');
         urlType = params.get('type') || params.get('category');
+        isShare = Boolean(params.get('name') || params.get('i') || params.get('guest') || params.get('to') || params.get('share'));
       }
 
       if (urlId || urlType) {
         const explicitCat = normalizeCategoryString(urlType);
         const targetId = urlId || urlType!;
+        const scopedTargetId = initialScope.isAuthenticated && !isShare
+          ? getScopedEventId(targetId, scopeId)
+          : targetId;
         const storedTemplate =
-          localStorage.getItem(`wedding_template_saved_${targetId}`) ||
-          (explicitCat ? localStorage.getItem(`wedding_template_type_${explicitCat}`) : null);
+          localStorage.getItem(getUserStorageKey(`wedding_template_saved_${scopedTargetId}`, scopeId)) ||
+          localStorage.getItem(getUserStorageKey(`wedding_template_saved_${stripScopedEventId(targetId)}`, scopeId)) ||
+          (explicitCat ? localStorage.getItem(getUserStorageKey(`wedding_template_type_${explicitCat}`, scopeId)) : null);
         if (storedTemplate) {
           const parsed = sanitizeWeddingEvent(JSON.parse(storedTemplate));
           const parsedCat = normalizeCategoryString(parsed.eventType || parsed.id || parsed.name);
@@ -157,16 +174,21 @@ export default function App() {
           }
         }
 
-        const preset = (explicitCat ? findTemplatePreset(explicitCat) : null) || findTemplatePreset(targetId);
+        const preset = (explicitCat ? findTemplatePreset(explicitCat) : null) || findTemplatePreset(stripScopedEventId(targetId));
         if (preset) {
+          const basePreset = preset.sampleEvent;
           return sanitizeWeddingEvent({
-            ...preset.sampleEvent,
+            ...basePreset,
+            id: initialScope.isAuthenticated && !isShare ? getScopedEventId(basePreset.id, scopeId) : (urlId || basePreset.id),
+            templateId: basePreset.id,
+            ownerId: initialScope.isAuthenticated && !isShare ? scopeId : extractScopeFromEventId(urlId) || undefined,
+            ownerEmail: initialScope.isAuthenticated && !isShare ? (initialScope.ownerEmail || undefined) : undefined,
             eventType: preset.type,
           });
         }
 
         if (!explicitCat) {
-          const customStored = localStorage.getItem('wedding_custom_event_data');
+          const customStored = localStorage.getItem(getUserStorageKey('wedding_custom_event_data', scopeId));
           if (customStored) {
             try {
               const parsedCustom = JSON.parse(customStored);
@@ -176,27 +198,33 @@ export default function App() {
         }
       }
 
-      // 2. Otherwise check active template ID and type from localStorage
-      const activeTemplateId = localStorage.getItem('wedding_last_active_template_id');
-      const activeTemplateType = localStorage.getItem('wedding_last_template_type');
+      // 2. Otherwise check active template ID and type from THIS user's scoped localStorage
+      const activeTemplateId = localStorage.getItem(getUserStorageKey('wedding_last_active_template_id', scopeId));
+      const activeTemplateType = localStorage.getItem(getUserStorageKey('wedding_last_template_type', scopeId));
 
       if (activeTemplateId) {
-        const storedTemplate = localStorage.getItem(`wedding_template_saved_${activeTemplateId}`);
+        const storedTemplate =
+          localStorage.getItem(getUserStorageKey(`wedding_template_saved_${activeTemplateId}`, scopeId)) ||
+          localStorage.getItem(getUserStorageKey(`wedding_template_saved_${stripScopedEventId(activeTemplateId)}`, scopeId));
         if (storedTemplate) {
           const parsed = sanitizeWeddingEvent(JSON.parse(storedTemplate));
           parsed.eventType = parsed.eventType || (activeTemplateType as any) || validateCurrentTemplateType(parsed);
           return parsed;
         }
-        const preset = findTemplatePreset(activeTemplateId);
+        const preset = findTemplatePreset(stripScopedEventId(activeTemplateId));
         if (preset) {
           return sanitizeWeddingEvent({
             ...preset.sampleEvent,
+            id: initialScope.isAuthenticated ? getScopedEventId(preset.sampleEvent.id, scopeId) : preset.sampleEvent.id,
+            templateId: preset.sampleEvent.id,
+            ownerId: initialScope.isAuthenticated ? scopeId : undefined,
+            ownerEmail: initialScope.isAuthenticated ? (initialScope.ownerEmail || undefined) : undefined,
             eventType: preset.type,
           });
         }
       }
       if (activeTemplateType) {
-        const storedByType = localStorage.getItem(`wedding_template_type_${activeTemplateType}`);
+        const storedByType = localStorage.getItem(getUserStorageKey(`wedding_template_type_${activeTemplateType}`, scopeId));
         if (storedByType) {
           const parsed = sanitizeWeddingEvent(JSON.parse(storedByType));
           parsed.eventType = parsed.eventType || (activeTemplateType as any);
@@ -206,11 +234,15 @@ export default function App() {
         if (preset) {
           return sanitizeWeddingEvent({
             ...preset.sampleEvent,
+            id: initialScope.isAuthenticated ? getScopedEventId(preset.sampleEvent.id, scopeId) : preset.sampleEvent.id,
+            templateId: preset.sampleEvent.id,
+            ownerId: initialScope.isAuthenticated ? scopeId : undefined,
+            ownerEmail: initialScope.isAuthenticated ? (initialScope.ownerEmail || undefined) : undefined,
             eventType: preset.type,
           });
         }
       }
-      const stored = localStorage.getItem('wedding_custom_event_data');
+      const stored = localStorage.getItem(getUserStorageKey('wedding_custom_event_data', scopeId));
       if (stored) {
         const parsed = sanitizeWeddingEvent(JSON.parse(stored));
         parsed.eventType = parsed.eventType || validateCurrentTemplateType(parsed);
@@ -219,8 +251,14 @@ export default function App() {
     } catch (e) {
       console.error('Failed to load stored event:', e);
     }
-    const defaultEvent = sanitizeWeddingEvent(WEDDING_EVENT);
-    defaultEvent.eventType = 'wedding';
+    const defaultEvent = sanitizeWeddingEvent({
+      ...WEDDING_EVENT,
+      id: initialScope.isAuthenticated ? getScopedEventId(DEFAULT_PRESET_EVENT_ID, scopeId) : DEFAULT_PRESET_EVENT_ID,
+      templateId: DEFAULT_PRESET_EVENT_ID,
+      ownerId: initialScope.isAuthenticated ? scopeId : undefined,
+      ownerEmail: initialScope.isAuthenticated ? (initialScope.ownerEmail || undefined) : undefined,
+      eventType: 'wedding',
+    });
     return defaultEvent;
   });
 
@@ -240,52 +278,30 @@ export default function App() {
   const [localAdminOverride, setLocalAdminOverride] = useState<boolean>(() => {
     return localStorage.getItem('wedding_admin_override') === 'true';
   });
+  const [loggedInIdentifier, setLoggedInIdentifier] = useState<string>(() => {
+    return localStorage.getItem('wedding_logged_in_identifier') || '';
+  });
+
+  const activeUserScope = resolveUserScope(authUser, loggedInIdentifier);
 
   useEffect(() => {
     testFirestoreConnection();
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       setAuthUser(user);
       if (user) {
-        const userEventId = `event_${user.uid}`;
+        const identifier = user.email || user.displayName || user.uid;
+        if (identifier) {
+          try {
+            localStorage.setItem('wedding_logged_in_identifier', identifier);
+          } catch {}
+          setLoggedInIdentifier(identifier);
+        }
+        const resolved = resolveUserScope(user, identifier);
+        const scopedDefaultId = getScopedEventId(DEFAULT_PRESET_EVENT_ID, resolved.scopeId);
         try {
-          await syncUserProfile(user, userEventId);
+          await syncUserProfile(user, scopedDefaultId);
         } catch (e) {
           console.warn('Error recording user in Firestore:', e);
-        }
-
-        // Check if user has personal saved event data in database or needs initialization
-        if (typeof window !== 'undefined') {
-          const params = new URLSearchParams(window.location.search);
-          const hasExplicitUrlEvent = params.get('id') || params.get('type') || params.get('event');
-          if (!hasExplicitUrlEvent) {
-            try {
-              const personalEvent = await fetchEventFromFirebase(userEventId);
-              if (personalEvent) {
-                const sanitized = sanitizeWeddingEvent(personalEvent);
-                setEvent(sanitized);
-                localStorage.setItem('wedding_custom_event_data', JSON.stringify(sanitized));
-                localStorage.setItem(`wedding_user_event_${user.uid}`, JSON.stringify(sanitized));
-              } else {
-                // Initialize dedicated event for this user
-                setEvent(prevEvent => {
-                  const userInitialEvent: WeddingEvent = {
-                    ...prevEvent,
-                    id: userEventId,
-                    ownerId: user.uid,
-                    ownerEmail: user.email || '',
-                    updatedAt: new Date().toISOString(),
-                  };
-                  const sanitized = sanitizeWeddingEvent(userInitialEvent);
-                  localStorage.setItem('wedding_custom_event_data', JSON.stringify(sanitized));
-                  localStorage.setItem(`wedding_user_event_${user.uid}`, JSON.stringify(sanitized));
-                  saveEventToFirebase(sanitized).catch(() => {});
-                  return sanitized;
-                });
-              }
-            } catch (err) {
-              console.warn('Error loading user-specific event:', err);
-            }
-          }
         }
       }
     });
@@ -426,7 +442,25 @@ export default function App() {
     if (checkIsCurrentActorOwner()) return true;
     const activeEmail = (authUser?.email || '').toLowerCase().trim();
     const activeIdentifier = (localStorage.getItem('wedding_logged_in_identifier') || '').toLowerCase().trim();
-    return activeEmail === ADMIN_EMAIL || activeIdentifier === ADMIN_EMAIL || activeIdentifier === 'seyha';
+    if (activeEmail === ADMIN_EMAIL || activeIdentifier === ADMIN_EMAIL || activeIdentifier === 'seyha') {
+      return true;
+    }
+    if (!activeEmail && !activeIdentifier) return false;
+    const checkList = dbUsersList.length > 0
+      ? dbUsersList
+      : (() => {
+          try {
+            return JSON.parse(localStorage.getItem('wedding_registered_users') || '[]');
+          } catch {
+            return [];
+          }
+        })();
+    const matchedUser = checkList.find((u: any) => {
+      const uEmail = (u.email || '').toLowerCase().trim();
+      const uName = (u.name || '').toLowerCase().trim();
+      return (activeEmail && uEmail === activeEmail) || (activeIdentifier && (uEmail === activeIdentifier || uName === activeIdentifier));
+    });
+    return Boolean(matchedUser && (matchedUser.role || '').toLowerCase().trim() === 'admin');
   };
 
   const loadDbUsers = useCallback(async () => {
@@ -982,7 +1016,7 @@ export default function App() {
       return;
     }
 
-    const newUser = { name: signupName, email: signupEmail, passcode: signupPasscode, createdAt: new Date().toISOString() };
+    const newUser = { name: signupName, email: signupEmail, passcode: signupPasscode, role: 'user', createdAt: new Date().toISOString() };
     
     // 1. Insert into database (Firestore & REST API) for Security Verification
     try {
@@ -998,8 +1032,11 @@ export default function App() {
     else existingUsers.push(newUser);
     localStorage.setItem('wedding_registered_users', JSON.stringify(existingUsers));
 
+    hasSavedLocallyRef.current = false;
     setLocalAdminOverride(true);
     localStorage.setItem('wedding_admin_override', 'true');
+    localStorage.setItem('wedding_logged_in_identifier', signupEmail.trim());
+    setLoggedInIdentifier(signupEmail.trim());
     setShowAdminLoginModal(false);
     setSignupName('');
     setSignupEmail('');
@@ -1041,13 +1078,14 @@ export default function App() {
       : null;
 
     if (isTargetOwner || isTargetAdmin || (isMasterPasscode && identifier !== ADMIN_EMAIL && identifier !== 'seyha') || (localMatch && localMatch.passcode === adminPasscode)) {
+      hasSavedLocallyRef.current = false;
       setLocalAdminOverride(true);
       localStorage.setItem('wedding_admin_override', 'true');
-      if (identifier === OWNER_EMAIL || isTargetOwner) {
-        localStorage.setItem('wedding_logged_in_identifier', OWNER_EMAIL);
-      } else if (loginEmailOrUsername.trim()) {
-        localStorage.setItem('wedding_logged_in_identifier', loginEmailOrUsername.trim());
-      }
+      const nextIdentifier = (identifier === OWNER_EMAIL || isTargetOwner)
+        ? OWNER_EMAIL
+        : (loginEmailOrUsername.trim() || 'local_admin_default');
+      localStorage.setItem('wedding_logged_in_identifier', nextIdentifier);
+      setLoggedInIdentifier(nextIdentifier);
       setShowAdminLoginModal(false);
       setAdminPasscode('');
       setLoginEmailOrUsername('');
@@ -1097,11 +1135,12 @@ export default function App() {
       : existingUsers.find((u: any) => u.passcode === adminPasscode);
 
     if (userMatch) {
+      hasSavedLocallyRef.current = false;
       setLocalAdminOverride(true);
       localStorage.setItem('wedding_admin_override', 'true');
-      if (loginEmailOrUsername.trim()) {
-        localStorage.setItem('wedding_logged_in_identifier', loginEmailOrUsername.trim());
-      }
+      const nextIdentifier = loginEmailOrUsername.trim() || (userMatch as any)?.email || 'local_admin_default';
+      localStorage.setItem('wedding_logged_in_identifier', nextIdentifier);
+      setLoggedInIdentifier(nextIdentifier);
       setShowAdminLoginModal(false);
       setAdminPasscode('');
       setLoginEmailOrUsername('');
@@ -1126,17 +1165,19 @@ export default function App() {
     try {
       const result = await signInWithPopup(auth, provider);
       if (result.user) {
+        hasSavedLocallyRef.current = false;
         setLocalAdminOverride(true);
         localStorage.setItem('wedding_admin_override', 'true');
-        if (result.user.email || result.user.displayName) {
-          localStorage.setItem('wedding_logged_in_identifier', result.user.email || result.user.displayName || 'Google User');
-        }
+        const nextIdentifier = result.user.email || result.user.displayName || 'Google User';
+        localStorage.setItem('wedding_logged_in_identifier', nextIdentifier);
+        setLoggedInIdentifier(nextIdentifier);
         setShowAdminLoginModal(false);
         setShowForgotPasswordModal(false);
         if (pendingCallback) {
           pendingCallback();
           setPendingCallback(null);
         }
+        setTimeout(() => window.location.reload(), 500);
 
         const isOwnerAccount = result.user.email?.toLowerCase() === OWNER_EMAIL;
         const userRole = isOwnerAccount ? 'owner' : (result.user.email?.toLowerCase() === ADMIN_EMAIL ? 'admin' : 'editor');
@@ -1183,15 +1224,18 @@ export default function App() {
       } else {
         // Fallback to instant verified Google Login (Owner / Admin session) to ensure seamless preview experience without domain restriction errors
         console.log('[Google Auth] Unauthorized domain or popup restriction in preview. Activating instant Google fallback.');
+        hasSavedLocallyRef.current = false;
         setLocalAdminOverride(true);
         localStorage.setItem('wedding_admin_override', 'true');
         localStorage.setItem('wedding_logged_in_identifier', OWNER_EMAIL);
+        setLoggedInIdentifier(OWNER_EMAIL);
         setShowAdminLoginModal(false);
         setShowForgotPasswordModal(false);
         if (pendingCallback) {
           pendingCallback();
           setPendingCallback(null);
         }
+        setTimeout(() => window.location.reload(), 500);
         try {
           const ownerGoogleUser = {
             name: 'Seyha Yoeurn (Google Owner)',
@@ -1246,8 +1290,12 @@ export default function App() {
   const [refreshValidationFeedback, setRefreshValidationFeedback] = useState<string | null>(null);
 
   const handleRefreshWithValidation = async () => {
+    const scopeId = activeUserScope.scopeId;
     const validatedType = validateCurrentTemplateType(event);
-    const currentId = event.id || localStorage.getItem('wedding_last_active_template_id') || 'cmgrawhnk0003le0434762j7n';
+    const rawBaseId = event.templateId || stripScopedEventId(event.id || DEFAULT_PRESET_EVENT_ID);
+    const currentId = activeUserScope.isAuthenticated
+      ? getScopedEventId(event.id || rawBaseId, scopeId)
+      : (event.id || localStorage.getItem(getUserStorageKey('wedding_last_active_template_id', scopeId)) || DEFAULT_PRESET_EVENT_ID);
 
     const typeLabelKh = {
       wedding: 'មង្គលការ (Wedding)',
@@ -1259,16 +1307,21 @@ export default function App() {
 
     const validatedEvent: WeddingEvent = {
       ...event,
+      id: currentId,
+      templateId: rawBaseId,
+      ownerId: activeUserScope.isAuthenticated ? scopeId : event.ownerId,
+      ownerEmail: activeUserScope.isAuthenticated ? (activeUserScope.ownerEmail || event.ownerEmail || '') : event.ownerEmail,
       eventType: validatedType,
       updatedAt: event.updatedAt || new Date().toISOString(),
     };
 
     try {
-      localStorage.setItem('wedding_custom_event_data', JSON.stringify(validatedEvent));
-      localStorage.setItem(`wedding_template_saved_${currentId}`, JSON.stringify(validatedEvent));
-      localStorage.setItem(`wedding_template_type_${validatedType}`, JSON.stringify(validatedEvent));
-      localStorage.setItem('wedding_last_active_template_id', currentId);
-      localStorage.setItem('wedding_last_template_type', validatedType);
+      localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(validatedEvent));
+      localStorage.setItem(getUserStorageKey(`wedding_template_saved_${currentId}`, scopeId), JSON.stringify(validatedEvent));
+      localStorage.setItem(getUserStorageKey(`wedding_template_saved_${rawBaseId}`, scopeId), JSON.stringify(validatedEvent));
+      localStorage.setItem(getUserStorageKey(`wedding_template_type_${validatedType}`, scopeId), JSON.stringify(validatedEvent));
+      localStorage.setItem(getUserStorageKey('wedding_last_active_template_id', scopeId), currentId);
+      localStorage.setItem(getUserStorageKey('wedding_last_template_type', scopeId), validatedType);
 
       // Persist to server API
       fetch('/api/event', {
@@ -1288,157 +1341,257 @@ export default function App() {
     }, 600);
   };
 
-  // Read guest name and event ID from URL query parameters, and fetch latest event from server
+  // Read guest name and event ID from URL query parameters, and fetch latest user-isolated event from server/Firestore
   const [guestName, setGuestName] = useState('Your Name');
   const hasSavedLocallyRef = useRef(false);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const iParam = params.get('i');
-      const nameParam = params.get('name');
-      const guestParam = params.get('guest');
-      const toParam = params.get('to');
-      const urlIdParam = params.get('id');
-      const urlTypeParam = params.get('type') || params.get('category');
+    if (typeof window === 'undefined') return;
+    let cancelled = false;
+    hasSavedLocallyRef.current = false;
 
-      const activeTemplateId = localStorage.getItem('wedding_last_active_template_id');
+    const scopeId = activeUserScope.scopeId;
+    const params = new URLSearchParams(window.location.search);
+    const iParam = params.get('i');
+    const nameParam = params.get('name');
+    const guestParam = params.get('guest');
+    const toParam = params.get('to');
+    let urlIdParam = params.get('id');
+    const urlTypeParam = params.get('type') || params.get('category');
+
+    // If an authenticated owner opens their dashboard (not a shared link) with a stale ?id= belonging to a different user, clear it
+    const urlIdOwnerScope = extractScopeFromEventId(urlIdParam);
+    if (activeUserScope.isAuthenticated && !isFromShareLink && urlIdOwnerScope && urlIdOwnerScope !== scopeId) {
+      urlIdParam = null;
+      try {
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('id');
+        cleanUrl.searchParams.delete('type');
+        cleanUrl.searchParams.delete('category');
+        window.history.replaceState({}, '', cleanUrl.toString());
+      } catch {}
+    }
+
+    const foundGuest = iParam || guestParam || nameParam || toParam;
+    if (foundGuest) {
+      setGuestName(foundGuest);
+      setIsFromShareLink(true);
+    } else {
+      setGuestName('Your Name');
+      if (params.get('share')) {
+        setIsFromShareLink(true);
+      }
+    }
+
+    // Check if URL contains #template hash
+    const checkHash = () => {
+      if (window.location.hash === '#template') {
+        setShowEnvelopeModal(false);
+        setHasOpenedEnvelope(true);
+        setShowEditorModal(true);
+      }
+    };
+    checkHash();
+    window.addEventListener('hashchange', checkHash);
+
+    testFirestoreConnection();
+
+    // Determine exact target event ID for either shared link viewer or authenticated user workspace
+    let fetchId = DEFAULT_PRESET_EVENT_ID;
+    let targetOwnerFilter = '';
+
+    if (isFromShareLink || (!activeUserScope.isAuthenticated && (urlIdParam || urlTypeParam))) {
+      fetchId = urlIdParam || urlTypeParam || DEFAULT_PRESET_EVENT_ID;
+      targetOwnerFilter = extractScopeFromEventId(fetchId) || '';
+    } else if (activeUserScope.isAuthenticated) {
+      targetOwnerFilter = scopeId;
+      const activeTemplateId = localStorage.getItem(getUserStorageKey('wedding_last_active_template_id', scopeId));
       let storedEventId: string | null = null;
       try {
-        const stored = localStorage.getItem('wedding_custom_event_data');
+        const stored = localStorage.getItem(getUserStorageKey('wedding_custom_event_data', scopeId));
         if (stored) {
           const parsed = JSON.parse(stored);
           if (parsed?.id) storedEventId = parsed.id;
         }
-      } catch (e) {}
+      } catch {}
 
-      // Preserve the user's chosen template type across refreshes
-      const fetchId = urlIdParam || urlTypeParam || activeTemplateId || storedEventId || 'cmgrawhnk0003le0434762j7n';
+      const candidateId = urlIdParam || urlTypeParam || activeTemplateId || storedEventId || DEFAULT_PRESET_EVENT_ID;
+      fetchId = getScopedEventId(candidateId, scopeId);
 
-      const foundGuest = iParam || guestParam || nameParam || toParam;
-      if (foundGuest) {
-        setGuestName(foundGuest);
-        setIsFromShareLink(true);
-        // Update document title for personalized browser tab and share
-        document.title = `${event.name || 'លិខិតអញ្ជើញឌីជីថល'} - សូមគោរពអញ្ជើញ ${foundGuest}`;
+      // Immediately hydrate from this user's own local cache (or reset to clean default for new user) so no previous user's data remains on screen
+      const localScopedRaw =
+        localStorage.getItem(getUserStorageKey(`wedding_template_saved_${fetchId}`, scopeId)) ||
+        localStorage.getItem(getUserStorageKey(`wedding_template_saved_${stripScopedEventId(fetchId)}`, scopeId)) ||
+        (urlTypeParam ? localStorage.getItem(getUserStorageKey(`wedding_template_type_${normalizeCategoryString(urlTypeParam)}`, scopeId)) : null) ||
+        localStorage.getItem(getUserStorageKey('wedding_custom_event_data', scopeId));
+
+      if (localScopedRaw) {
+        try {
+          const parsedLocal = sanitizeWeddingEvent(JSON.parse(localScopedRaw));
+          if (!parsedLocal.ownerId || parsedLocal.ownerId === scopeId || parsedLocal.ownerId === authUser?.uid) {
+            setEvent({
+              ...parsedLocal,
+              id: parsedLocal.id || fetchId,
+              ownerId: scopeId,
+              ownerEmail: activeUserScope.ownerEmail || parsedLocal.ownerEmail || '',
+            });
+          }
+        } catch {}
       } else {
-        setGuestName('Your Name');
-        if (params.get('share')) {
-          setIsFromShareLink(true);
-        }
-        document.title = event.name || 'លិខិតអញ្ជើញឌីជីថល';
+        const preset = findTemplatePreset(urlTypeParam || stripScopedEventId(fetchId));
+        const baseTemplate = preset ? preset.sampleEvent : WEDDING_EVENT;
+        const cleanUserDefault = sanitizeWeddingEvent({
+          ...baseTemplate,
+          id: fetchId,
+          templateId: baseTemplate.id || DEFAULT_PRESET_EVENT_ID,
+          ownerId: scopeId,
+          ownerEmail: activeUserScope.ownerEmail || '',
+          eventType: preset ? preset.type : 'wedding',
+        });
+        setEvent(cleanUserDefault);
       }
+    } else {
+      const activeTemplateId = localStorage.getItem(getUserStorageKey('wedding_last_active_template_id', scopeId));
+      fetchId = activeTemplateId || DEFAULT_PRESET_EVENT_ID;
+    }
 
-      // Check if URL contains #template hash
-      const checkHash = () => {
-        if (window.location.hash === '#template') {
-          setShowEnvelopeModal(false);
-          setHasOpenedEnvelope(true);
-          setShowEditorModal(true);
-        }
-      };
-      checkHash();
-      window.addEventListener('hashchange', checkHash);
+    const explicitUrlCat = normalizeCategoryString(urlTypeParam);
+    const isMatchingUrlCategory = (candidate: any) => {
+      if (!explicitUrlCat) return true;
+      const candidateCat = normalizeCategoryString(candidate?.eventType || candidate?.id || candidate?.name);
+      return !candidateCat || candidateCat === explicitUrlCat;
+    };
+    const isOwnedByCurrentScope = (candidate: any) => {
+      if (isFromShareLink || !activeUserScope.isAuthenticated) return true;
+      if (!candidate?.ownerId) return true;
+      return candidate.ownerId === scopeId || (Boolean(authUser?.uid) && candidate.ownerId === authUser?.uid);
+    };
 
-      // Test Firestore connection on boot
-      testFirestoreConnection();
-
-      // Subscribe to real-time event configuration changes from Firestore using the chosen template ID
-      const explicitUrlCat = normalizeCategoryString(urlTypeParam);
-      const isMatchingUrlCategory = (candidate: any) => {
-        if (!explicitUrlCat) return true;
-        const candidateCat = normalizeCategoryString(candidate?.eventType || candidate?.id || candidate?.name);
-        return !candidateCat || candidateCat === explicitUrlCat;
-      };
-
-      const unsubscribeEvent = subscribeToEvent(fetchId, (fbEvent) => {
-        if (hasSavedLocallyRef.current) return;
-        if (fbEvent && isMatchingUrlCategory(fbEvent)) {
-          const sanitized = sanitizeWeddingEvent(fbEvent);
-          setEvent(sanitized);
+    const unsubscribeEvent = subscribeToEvent(fetchId, (fbEvent) => {
+      if (cancelled || hasSavedLocallyRef.current) return;
+      if (fbEvent && isMatchingUrlCategory(fbEvent) && isOwnedByCurrentScope(fbEvent)) {
+        const sanitized = sanitizeWeddingEvent({
+          ...fbEvent,
+          ownerId: fbEvent.ownerId || (activeUserScope.isAuthenticated && !isFromShareLink ? scopeId : undefined),
+        });
+        setEvent(sanitized);
+        if (!isFromShareLink) {
           try {
-            localStorage.setItem('wedding_custom_event_data', JSON.stringify(sanitized));
-            localStorage.setItem(`wedding_template_saved_${sanitized.id}`, JSON.stringify(sanitized));
-          } catch (e) {
-            // ignore
-          }
-        }
-      });
-
-      // Fetch latest synced event data from Firebase Firestore & server API
-      const fetchServerData = async () => {
-        try {
-          const fbEvent = await fetchEventFromFirebase(fetchId);
-          if (hasSavedLocallyRef.current) return;
-          if (fbEvent && isMatchingUrlCategory(fbEvent)) {
-            const sanitized = sanitizeWeddingEvent(fbEvent);
-            setEvent(sanitized);
-            try {
-              localStorage.setItem('wedding_custom_event_data', JSON.stringify(sanitized));
-              localStorage.setItem(`wedding_template_saved_${sanitized.id}`, JSON.stringify(sanitized));
-            } catch (e) {}
-            return;
-          }
-        } catch (e) {
-          console.warn('Firebase event fetch fallback to server:', e);
-        }
-
-        if (hasSavedLocallyRef.current) return;
-
-        try {
-          const apiQuery = `id=${encodeURIComponent(fetchId)}${urlTypeParam ? `&type=${encodeURIComponent(urlTypeParam)}` : ''}`;
-          const res = await fetch(`/api/event?${apiQuery}`);
-          if (hasSavedLocallyRef.current) return;
-          if (res.ok) {
-            const data = await res.json();
-            if (data && data.success && data.event && data.source !== 'preset' && isMatchingUrlCategory(data.event)) {
-              const sanitized = sanitizeWeddingEvent(data.event);
-              setEvent(sanitized);
-              try {
-                localStorage.setItem('wedding_custom_event_data', JSON.stringify(sanitized));
-              } catch (e) {}
-              return;
-            }
-          }
-        } catch (err) {
-          console.warn('Could not fetch server event:', err);
-        }
-
-        if (hasSavedLocallyRef.current) return;
-
-        // If neither Firestore nor server API had a saved custom event, load local saved template or preset
-        const preset = findTemplatePreset(urlTypeParam || fetchId) || findTemplatePreset(fetchId);
-        if (preset) {
-          let templateEvent = preset.sampleEvent;
-          const storedTemplate =
-            localStorage.getItem(`wedding_template_saved_${fetchId}`) ||
-            localStorage.getItem(`wedding_template_type_${preset.type}`);
-          if (storedTemplate) {
-            try {
-              templateEvent = JSON.parse(storedTemplate);
-            } catch {}
-          }
-          const sanitized = sanitizeWeddingEvent({
-            ...templateEvent,
-            eventType: preset.type,
-          });
-          setEvent(sanitized);
-          try {
-            localStorage.setItem('wedding_custom_event_data', JSON.stringify(sanitized));
-            localStorage.setItem('wedding_last_active_template_id', fetchId);
-            localStorage.setItem('wedding_last_template_type', preset.type);
+            localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(sanitized));
+            localStorage.setItem(getUserStorageKey(`wedding_template_saved_${sanitized.id}`, scopeId), JSON.stringify(sanitized));
           } catch {}
         }
-      };
+      }
+    });
 
-      fetchServerData();
+    const fetchServerData = async () => {
+      try {
+        let fbEvent = await fetchEventFromFirebase(fetchId, targetOwnerFilter || undefined);
+        // Legacy Google UID migration fallback if user has no scoped doc yet
+        if (!fbEvent && activeUserScope.isAuthenticated && !isFromShareLink && authUser?.uid) {
+          const legacyEvent = await fetchEventFromFirebase(`event_${authUser.uid}`);
+          if (legacyEvent && (!legacyEvent.ownerId || legacyEvent.ownerId === authUser.uid || legacyEvent.ownerId === scopeId)) {
+            fbEvent = {
+              ...legacyEvent,
+              id: fetchId,
+              ownerId: scopeId,
+              ownerEmail: activeUserScope.ownerEmail || legacyEvent.ownerEmail || '',
+            };
+          }
+        }
+        // Check if user has any saved custom templates in cloud when default scoped ID is empty
+        if (!fbEvent && activeUserScope.isAuthenticated && !isFromShareLink && !urlIdParam && !urlTypeParam) {
+          const userTemplates = await fetchUserTemplatesFromFirebase(scopeId);
+          if (userTemplates.length > 0) {
+            userTemplates.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
+            fbEvent = userTemplates[0];
+          }
+        }
 
-      return () => {
-        window.removeEventListener('hashchange', checkHash);
-        if (unsubscribeEvent) unsubscribeEvent();
-      };
-    }
-  }, []);
+        if (cancelled || hasSavedLocallyRef.current) return;
+        if (fbEvent && isMatchingUrlCategory(fbEvent) && isOwnedByCurrentScope(fbEvent)) {
+          const sanitized = sanitizeWeddingEvent({
+            ...fbEvent,
+            ownerId: fbEvent.ownerId || (activeUserScope.isAuthenticated && !isFromShareLink ? scopeId : undefined),
+          });
+          setEvent(sanitized);
+          if (!isFromShareLink) {
+            try {
+              localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(sanitized));
+              localStorage.setItem(getUserStorageKey(`wedding_template_saved_${sanitized.id}`, scopeId), JSON.stringify(sanitized));
+            } catch {}
+          }
+          return;
+        }
+      } catch (e) {
+        console.warn('Firebase event fetch fallback to server:', e);
+      }
+
+      if (cancelled || hasSavedLocallyRef.current) return;
+
+      try {
+        const ownerParam = targetOwnerFilter ? `&ownerId=${encodeURIComponent(targetOwnerFilter)}` : '';
+        const apiQuery = `id=${encodeURIComponent(fetchId)}${urlTypeParam ? `&type=${encodeURIComponent(urlTypeParam)}` : ''}${ownerParam}`;
+        const res = await fetch(`/api/event?${apiQuery}`);
+        if (cancelled || hasSavedLocallyRef.current) return;
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.success && data.event && data.source !== 'preset' && isMatchingUrlCategory(data.event) && isOwnedByCurrentScope(data.event)) {
+            const sanitized = sanitizeWeddingEvent(data.event);
+            setEvent(sanitized);
+            if (!isFromShareLink) {
+              try {
+                localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(sanitized));
+                localStorage.setItem(getUserStorageKey(`wedding_template_saved_${sanitized.id}`, scopeId), JSON.stringify(sanitized));
+              } catch {}
+            }
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn('Could not fetch server event:', err);
+      }
+
+      if (cancelled || hasSavedLocallyRef.current) return;
+
+      // Fallback to this user's own local saved template or clean preset
+      const preset = findTemplatePreset(urlTypeParam || stripScopedEventId(fetchId)) || findTemplatePreset(stripScopedEventId(fetchId));
+      if (preset && !isFromShareLink) {
+        let templateEvent = preset.sampleEvent;
+        const storedTemplate =
+          localStorage.getItem(getUserStorageKey(`wedding_template_saved_${fetchId}`, scopeId)) ||
+          localStorage.getItem(getUserStorageKey(`wedding_template_saved_${preset.sampleEvent.id}`, scopeId)) ||
+          localStorage.getItem(getUserStorageKey(`wedding_template_type_${preset.type}`, scopeId));
+        if (storedTemplate) {
+          try {
+            templateEvent = JSON.parse(storedTemplate);
+          } catch {}
+        }
+        const sanitized = sanitizeWeddingEvent({
+          ...templateEvent,
+          id: activeUserScope.isAuthenticated ? getScopedEventId(templateEvent.id || preset.sampleEvent.id, scopeId) : (templateEvent.id || preset.sampleEvent.id),
+          templateId: preset.sampleEvent.id,
+          ownerId: activeUserScope.isAuthenticated ? scopeId : undefined,
+          ownerEmail: activeUserScope.isAuthenticated ? (activeUserScope.ownerEmail || undefined) : undefined,
+          eventType: preset.type,
+        });
+        setEvent(sanitized);
+        try {
+          localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(sanitized));
+          localStorage.setItem(getUserStorageKey('wedding_last_active_template_id', scopeId), sanitized.id);
+          localStorage.setItem(getUserStorageKey('wedding_last_template_type', scopeId), preset.type);
+        } catch {}
+      }
+    };
+
+    fetchServerData();
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('hashchange', checkHash);
+      if (unsubscribeEvent) unsubscribeEvent();
+    };
+  }, [activeUserScope.scopeId, activeUserScope.isAuthenticated, activeUserScope.ownerEmail, authUser?.uid, isFromShareLink]);
 
   useEffect(() => {
     const origin =
@@ -1660,14 +1813,18 @@ export default function App() {
 
   const handleSaveEvent = async (updatedEvent: WeddingEvent, refreshEnvelope: boolean = true) => {
     hasSavedLocallyRef.current = true;
+    const scopeId = activeUserScope.scopeId;
     const validatedType = updatedEvent.eventType || validateCurrentTemplateType(updatedEvent);
-    const userEventId = authUser ? `event_${authUser.uid}` : (updatedEvent.id || 'cmgrawhnk0003le0434762j7n');
+    const rawBaseId = updatedEvent.templateId || stripScopedEventId(updatedEvent.id || DEFAULT_PRESET_EVENT_ID);
+    const userEventId = activeUserScope.isAuthenticated
+      ? getScopedEventId(updatedEvent.id || rawBaseId, scopeId)
+      : (updatedEvent.id || DEFAULT_PRESET_EVENT_ID);
     const preparedEvent: WeddingEvent = {
       ...updatedEvent,
       id: userEventId,
-      templateId: updatedEvent.templateId || updatedEvent.id,
-      ownerId: authUser ? authUser.uid : updatedEvent.ownerId,
-      ownerEmail: authUser ? (authUser.email || '') : updatedEvent.ownerEmail,
+      templateId: rawBaseId,
+      ownerId: activeUserScope.isAuthenticated ? scopeId : updatedEvent.ownerId,
+      ownerEmail: activeUserScope.isAuthenticated ? (activeUserScope.ownerEmail || authUser?.email || updatedEvent.ownerEmail || '') : updatedEvent.ownerEmail,
       eventType: validatedType,
       updatedAt: updatedEvent.updatedAt || new Date().toISOString(),
     };
@@ -1678,25 +1835,23 @@ export default function App() {
       setShowEnvelopeModal(true);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-    // 1. Instant local cache save (active event, per-template cache, per-template-type cache, and active design settings)
+    // 1. Instant per-user local cache save (active event, per-template cache, per-template-type cache, and active design settings)
     try {
-      localStorage.setItem('wedding_custom_event_data', JSON.stringify(preparedEvent));
-      if (authUser) {
-        localStorage.setItem(`wedding_user_event_${authUser.uid}`, JSON.stringify(preparedEvent));
-      }
+      localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(preparedEvent));
       if (preparedEvent.id) {
-        localStorage.setItem(`wedding_template_saved_${preparedEvent.id}`, JSON.stringify(preparedEvent));
-        localStorage.setItem('wedding_last_active_template_id', preparedEvent.id);
+        localStorage.setItem(getUserStorageKey(`wedding_template_saved_${preparedEvent.id}`, scopeId), JSON.stringify(preparedEvent));
+        localStorage.setItem(getUserStorageKey(`wedding_template_saved_${rawBaseId}`, scopeId), JSON.stringify(preparedEvent));
+        localStorage.setItem(getUserStorageKey('wedding_last_active_template_id', scopeId), preparedEvent.id);
       }
       if (preparedEvent.templateId) {
-        localStorage.setItem('wedding_last_active_preset_id', preparedEvent.templateId);
+        localStorage.setItem(getUserStorageKey('wedding_last_active_preset_id', scopeId), preparedEvent.templateId);
       }
       if (validatedType) {
-        localStorage.setItem(`wedding_template_type_${validatedType}`, JSON.stringify(preparedEvent));
-        localStorage.setItem('wedding_last_template_type', validatedType);
+        localStorage.setItem(getUserStorageKey(`wedding_template_type_${validatedType}`, scopeId), JSON.stringify(preparedEvent));
+        localStorage.setItem(getUserStorageKey('wedding_last_template_type', scopeId), validatedType);
       }
       if (preparedEvent.config) {
-        localStorage.setItem('wedding_last_custom_design_config', JSON.stringify(preparedEvent.config));
+        localStorage.setItem(getUserStorageKey('wedding_last_custom_design_config', scopeId), JSON.stringify(preparedEvent.config));
       }
     } catch (e) {
       console.warn('Failed to save local event data:', e);
@@ -1727,10 +1882,28 @@ export default function App() {
   };
 
   const handleResetEvent = async () => {
-    setEvent(WEDDING_EVENT);
+    const scopeId = activeUserScope.scopeId;
+    const resetId = activeUserScope.isAuthenticated
+      ? getScopedEventId(DEFAULT_PRESET_EVENT_ID, scopeId)
+      : DEFAULT_PRESET_EVENT_ID;
+    const resetEvent: WeddingEvent = {
+      ...WEDDING_EVENT,
+      id: resetId,
+      templateId: DEFAULT_PRESET_EVENT_ID,
+      ownerId: activeUserScope.isAuthenticated ? scopeId : undefined,
+      ownerEmail: activeUserScope.isAuthenticated ? activeUserScope.ownerEmail : undefined,
+      eventType: 'wedding',
+    };
+    setEvent(resetEvent);
     try {
-      localStorage.removeItem('wedding_custom_event_data');
-      await fetch('/api/event/reset', { method: 'POST' });
+      localStorage.removeItem(getUserStorageKey('wedding_custom_event_data', scopeId));
+      localStorage.removeItem(getUserStorageKey(`wedding_template_saved_${resetId}`, scopeId));
+      localStorage.removeItem(getUserStorageKey(`wedding_template_saved_${DEFAULT_PRESET_EVENT_ID}`, scopeId));
+      await fetch('/api/event/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerId: scopeId, eventId: event.id }),
+      });
     } catch (e) {
       console.error('Failed to reset event data:', e);
     }
@@ -2098,10 +2271,19 @@ export default function App() {
             {/* Logout Button */}
             <motion.button
               onClick={() => {
+                hasSavedLocallyRef.current = false;
                 setLocalAdminOverride(false);
+                setLoggedInIdentifier('');
+                setAuthUser(null);
                 localStorage.removeItem('wedding_admin_override');
                 localStorage.removeItem('wedding_logged_in_identifier');
                 auth.signOut();
+                setEvent(sanitizeWeddingEvent({
+                  ...WEDDING_EVENT,
+                  id: DEFAULT_PRESET_EVENT_ID,
+                  templateId: DEFAULT_PRESET_EVENT_ID,
+                  eventType: 'wedding',
+                }));
               }}
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.94 }}
@@ -2179,8 +2361,8 @@ export default function App() {
           </span>
         </motion.button>
 
-        {/* Manage Users Data Button for Owner (seyhayoeurn2017@gmail.com) & Admin */}
-        {!isViewer && (checkIsCurrentActorOwner() || checkIsCurrentActorAdmin() || isAdmin) && (
+        {/* Manage Users Data Button for Owner (seyhayoeurn2017@gmail.com) & Admin Only */}
+        {!isViewer && (checkIsCurrentActorOwner() || checkIsCurrentActorAdmin()) && (
           <motion.button
             id="manage-users-data-btn"
             onClick={() => setShowAdminUsersModal(true)}
@@ -2991,6 +3173,8 @@ export default function App() {
             theme={theme}
             isAdmin={isAdmin}
             eventType={currentTemplateTypeInfo.type}
+            eventId={event.id}
+            ownerId={event.ownerId || extractScopeFromEventId(event.id) || (activeUserScope.isAuthenticated ? activeUserScope.scopeId : '')}
           />
         </div>
 
@@ -3035,6 +3219,7 @@ export default function App() {
         language={language}
         onToggleLanguage={toggleLanguage}
         onChangeTheme={handleThemeChange}
+        userScope={activeUserScope.scopeId}
       />
 
       {/* QUICK KHMER ANNIVERSARY STORY & CHAPTERS EDITOR (FROM OPENED INVITATION) */}
@@ -3059,6 +3244,8 @@ export default function App() {
         defaultGuestName={guestName}
         language={language}
         theme={theme}
+        eventId={event.id}
+        ownerId={event.ownerId || extractScopeFromEventId(event.id) || (activeUserScope.isAuthenticated ? activeUserScope.scopeId : '')}
       />
 
       {/* SHARE / PERSONALIZE MODAL */}
@@ -3075,10 +3262,23 @@ export default function App() {
         onSelectCategory={cat => {
           const matchedPreset = EVENT_PRESETS.find(p => p.type === cat);
           if (matchedPreset) {
-            let nextEvent = matchedPreset.sampleEvent;
+            const scopeId = activeUserScope.scopeId;
+            const scopedId = activeUserScope.isAuthenticated
+              ? getScopedEventId(matchedPreset.sampleEvent.id, scopeId)
+              : matchedPreset.sampleEvent.id;
+            let nextEvent: WeddingEvent = {
+              ...matchedPreset.sampleEvent,
+              id: scopedId,
+              templateId: matchedPreset.sampleEvent.id,
+              ownerId: activeUserScope.isAuthenticated ? scopeId : undefined,
+              ownerEmail: activeUserScope.isAuthenticated ? activeUserScope.ownerEmail : undefined,
+              eventType: cat,
+            };
             try {
-              const savedById = localStorage.getItem(`wedding_template_saved_${matchedPreset.sampleEvent.id}`);
-              const savedByType = localStorage.getItem(`wedding_template_type_${cat}`);
+              const savedById =
+                localStorage.getItem(getUserStorageKey(`wedding_template_saved_${scopedId}`, scopeId)) ||
+                localStorage.getItem(getUserStorageKey(`wedding_template_saved_${matchedPreset.sampleEvent.id}`, scopeId));
+              const savedByType = localStorage.getItem(getUserStorageKey(`wedding_template_type_${cat}`, scopeId));
               if (savedById) nextEvent = JSON.parse(savedById);
               else if (savedByType) nextEvent = JSON.parse(savedByType);
             } catch {}
@@ -3100,6 +3300,7 @@ export default function App() {
         locationName={typeof event.location === 'string' ? event.location : (event as any).location?.name}
         coverImage={event.cover_image || event.image || getCategoryCoverImage(event.eventType || event.id)}
         theme={theme}
+        userScope={activeUserScope.scopeId}
       />
 
       {/* ADD / PERSONALIZE GUEST MODAL */}
@@ -3116,6 +3317,7 @@ export default function App() {
         onToggleLanguage={toggleLanguage}
         onChangeTheme={handleThemeChange}
         eventId={event.id}
+        ownerId={activeUserScope.isAuthenticated ? activeUserScope.scopeId : (event.ownerId || extractScopeFromEventId(event.id) || GUEST_PUBLIC_SCOPE)}
         groom={event.groom}
         bride={event.bride}
         theme={theme}
@@ -3136,6 +3338,8 @@ export default function App() {
           setShowEditorModal(true);
         }}
         theme={theme}
+        userScope={activeUserScope.scopeId}
+        ownerEmail={activeUserScope.ownerEmail}
       />
 
       {/* ADMIN LOGIN MODAL (NETLIFY / GOOGLE AUTH & PASSCODE) */}
@@ -3773,7 +3977,7 @@ export default function App() {
 
       {/* Admin Users Data & Management Modal */}
       <AnimatePresence>
-        {showAdminUsersModal && (
+        {showAdminUsersModal && !isViewer && (checkIsCurrentActorOwner() || checkIsCurrentActorAdmin()) && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -4354,36 +4558,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 2. Google OAuth */}
-                  <div className={`p-2.5 rounded-xl border ${theme === 'light' ? 'bg-neutral-50/80 border-neutral-200' : 'bg-white/[0.03] border-white/10'} flex items-start gap-2 transition-colors hover:border-amber-400/40`}>
-                    <div className="p-1 rounded-md bg-white border border-neutral-200 mt-0.5 flex-shrink-0 shadow-2xs">
-                      <svg className="w-3 h-3" viewBox="0 0 24 24">
-                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                      </svg>
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-[11px] font-bold font-mono truncate">Google OAuth</div>
-                      <p className={`text-[9.5px] leading-tight ${theme === 'light' ? 'text-neutral-600' : 'text-neutral-400'}`}>
-                        Google sign-in & identity
-                      </p>
-                    </div>
-                  </div>
 
-                  {/* 3. Firebase / Supabase / Auth.js */}
-                  <div className={`p-2.5 rounded-xl border ${theme === 'light' ? 'bg-neutral-50/80 border-neutral-200' : 'bg-white/[0.03] border-white/10'} flex items-start gap-2 transition-colors hover:border-amber-400/40`}>
-                    <div className="p-1 rounded-md bg-amber-500/10 text-amber-500 mt-0.5 border border-amber-500/20 flex-shrink-0">
-                      <KeyRound className="w-3 h-3" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-[11px] font-bold font-mono truncate">Firebase / Auth</div>
-                      <p className={`text-[9.5px] leading-tight ${theme === 'light' ? 'text-neutral-600' : 'text-neutral-400'}`}>
-                        Authentication & password reset
-                      </p>
-                    </div>
-                  </div>
 
                   {/* 4. TikTok Video Guide */}
                   <a

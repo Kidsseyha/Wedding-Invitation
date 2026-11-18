@@ -1,4 +1,5 @@
 import { EVENT_PRESETS, EventTypePreset, findTemplatePreset, getCategoryCoverImage } from '../data/eventTemplates.js';
+import { getUserStorageKey, resolveUserScope, stripScopedEventId } from '../lib/userScope.js';
 
 export type InvitationCategory = 'wedding' | 'engagement' | 'housewarming' | 'birthday' | 'anniversary';
 
@@ -138,16 +139,24 @@ export function buildAllShareTemplates(params: {
   if (currentEvent) {
     const curTemplateId = currentEvent.templateId;
     const curId = currentEvent.id;
+    const curBaseId = curId ? stripScopedEventId(curId) : '';
     const curName = currentEvent.name;
     const curCat = resolveCategoryFromHints({
       eventType: currentEvent.eventType,
-      eventId: currentEvent.id,
+      eventId: curBaseId || currentEvent.id,
       eventName: currentEvent.name,
     });
 
     const exactPreset =
       availablePresets.find((p) => curTemplateId && p.id === curTemplateId) ||
-      availablePresets.find((p) => curId && (p.sampleEvent.id === curId || p.id === curId)) ||
+      availablePresets.find(
+        (p) =>
+          curId &&
+          (p.sampleEvent.id === curId ||
+            p.sampleEvent.id === curBaseId ||
+            p.id === curId ||
+            p.id === curBaseId)
+      ) ||
       availablePresets.find(
         (p) => lastActivePresetId && p.id === lastActivePresetId && p.type === curCat
       ) ||
@@ -155,7 +164,7 @@ export function buildAllShareTemplates(params: {
 
     if (exactPreset) {
       matchedCurrentPresetId = exactPreset.id;
-    } else if (!String(curId || '').startsWith('custom-event-')) {
+    } else if (!String(curBaseId || curId || '').startsWith('custom-event-')) {
       const byCategory = availablePresets.find((p) => p.type === curCat);
       if (byCategory) {
         matchedCurrentPresetId = byCategory.id;
@@ -232,11 +241,13 @@ export function buildAllShareTemplates(params: {
     const bySampleId = savedEventsById[p.sampleEvent.id];
     const byPresetId = savedEventsById[p.id];
     const byTypeRaw = savedEventsByType[p.type];
+    const byTypeBaseId = byTypeRaw?.id ? stripScopedEventId(byTypeRaw.id) : '';
     const canUseByType =
       Boolean(byTypeRaw) &&
       (typeCounts[p.type] === 1 ||
         byTypeRaw.templateId === p.id ||
         byTypeRaw.id === p.sampleEvent.id ||
+        byTypeBaseId === p.sampleEvent.id ||
         byTypeRaw.name === p.sampleEvent.name);
 
     const saved = bySampleId || byPresetId || (canUseByType ? byTypeRaw : null);
@@ -380,7 +391,7 @@ export function resolveSelectedShareTemplateId(params: {
   return options[0].templateId;
 }
 
-export function readShareTemplatesStorageState(): {
+export function readShareTemplatesStorageState(userScopeId?: string): {
   deletedPresetIds: string[];
   savedEventsById: Record<string, any>;
   savedEventsByType: Record<string, any>;
@@ -397,6 +408,9 @@ export function readShareTemplatesStorageState(): {
     };
   }
 
+  const effectiveScope = (userScopeId && userScopeId.trim()) || resolveUserScope().scopeId;
+  const scopeSuffix = `__${effectiveScope}`;
+
   let deletedPresetIds: string[] = [];
   let customTemplates: any[] = [];
   const savedEventsById: Record<string, any> = {};
@@ -404,31 +418,37 @@ export function readShareTemplatesStorageState(): {
   let lastActivePresetId: string | null = null;
 
   try {
-    const deletedRaw = localStorage.getItem('wedding_deleted_preset_ids');
+    const deletedRaw = localStorage.getItem(getUserStorageKey('wedding_deleted_preset_ids', effectiveScope));
     if (deletedRaw) deletedPresetIds = JSON.parse(deletedRaw);
   } catch {}
 
   try {
-    const customRaw = localStorage.getItem('wedding_custom_templates');
+    const customRaw = localStorage.getItem(getUserStorageKey('wedding_custom_templates', effectiveScope));
     if (customRaw) customTemplates = JSON.parse(customRaw);
   } catch {}
 
   try {
-    lastActivePresetId = localStorage.getItem('wedding_last_active_preset_id');
+    lastActivePresetId = localStorage.getItem(getUserStorageKey('wedding_last_active_preset_id', effectiveScope));
   } catch {}
 
   try {
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (!key) continue;
+      if (!key || !key.endsWith(scopeSuffix)) continue;
       if (key.startsWith('wedding_template_saved_')) {
-        const id = key.slice('wedding_template_saved_'.length);
+        const rawId = key.slice('wedding_template_saved_'.length, key.length - scopeSuffix.length);
         try {
           const val = JSON.parse(localStorage.getItem(key) || 'null');
-          if (val) savedEventsById[id] = val;
+          if (val) {
+            savedEventsById[rawId] = val;
+            const stripped = stripScopedEventId(rawId);
+            if (stripped && !savedEventsById[stripped]) {
+              savedEventsById[stripped] = val;
+            }
+          }
         } catch {}
       } else if (key.startsWith('wedding_template_type_')) {
-        const type = key.slice('wedding_template_type_'.length);
+        const type = key.slice('wedding_template_type_'.length, key.length - scopeSuffix.length);
         try {
           const val = JSON.parse(localStorage.getItem(key) || 'null');
           if (val) savedEventsByType[type] = val;
@@ -595,9 +615,19 @@ export function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
-export function injectMetaIntoHtml(html: string, meta: InvitationMetaResult): string {
+export function injectMetaIntoHtml(
+  html: string,
+  meta: InvitationMetaResult,
+  replaceStatePath?: string
+): string {
   const safeTitleText = meta.title.replace(/</g, '&lt;').replace(/>/g, '&gt;');
   let result = html;
+
+  if (replaceStatePath && /<head[^>]*>/i.test(result)) {
+    const safePathLiteral = JSON.stringify(replaceStatePath).replace(/</g, '\\u003c');
+    const replaceScript = `<script>(function(){try{if(window.history&&window.history.replaceState){window.history.replaceState(null,"",${safePathLiteral});}}catch(e){}})();</script>`;
+    result = result.replace(/<head[^>]*>/i, (match) => `${match}\n    ${replaceScript}`);
+  }
 
   if (/<title>[\s\S]*?<\/title>/i.test(result)) {
     result = result.replace(/<title>[\s\S]*?<\/title>/i, `<title>${safeTitleText}</title>`);
@@ -693,6 +723,98 @@ export async function fetchEventFromFirestoreRest(options: {
     return parsed;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function fetchShortLinkFromFirestoreRest(options: {
+  projectId: string;
+  databaseId?: string;
+  code: string;
+  apiKey?: string;
+  timeoutMs?: number;
+}): Promise<{ code: string; url: string; lang?: string; createdAt?: string } | null> {
+  const { projectId, databaseId = '(default)', code, apiKey, timeoutMs = 2500 } = options;
+  if (!projectId || !code || !/^[a-zA-Z0-9_-]{1,128}$/.test(code)) return null;
+
+  const dbSegment = databaseId || '(default)';
+  const keyParam = apiKey ? `?key=${encodeURIComponent(apiKey)}` : '';
+  const endpoint = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+    projectId
+  )}/databases/${encodeURIComponent(dbSegment)}/documents/short_links/${encodeURIComponent(code)}${keyParam}`;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    let res = await fetch(endpoint, { signal: controller.signal });
+    if (!res.ok && dbSegment !== '(default)') {
+      const fallbackEndpoint = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+        projectId
+      )}/databases/(default)/documents/short_links/${encodeURIComponent(code)}${keyParam}`;
+      res = await fetch(fallbackEndpoint, { signal: controller.signal });
+    }
+    if (!res.ok) return null;
+    const json = (await res.json()) as { fields?: Record<string, any> };
+    if (!json || !json.fields) return null;
+    const parsed = parseFirestoreDocumentFields(json.fields);
+    if (typeof parsed.url === 'string' && parsed.url.trim()) {
+      return {
+        code: String(parsed.code || code),
+        url: parsed.url.trim(),
+        lang: typeof parsed.lang === 'string' ? parsed.lang : 'kh',
+        createdAt: typeof parsed.createdAt === 'string' ? parsed.createdAt : undefined,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export async function saveShortLinkToFirestoreRest(options: {
+  projectId: string;
+  databaseId?: string;
+  code: string;
+  url: string;
+  lang?: string;
+  apiKey?: string;
+  timeoutMs?: number;
+}): Promise<boolean> {
+  const { projectId, databaseId = '(default)', code, url, lang = 'kh', apiKey, timeoutMs = 3000 } = options;
+  if (!projectId || !code || !url || !/^[a-zA-Z0-9_-]{1,128}$/.test(code)) return false;
+
+  const dbSegment = databaseId || '(default)';
+  const keyParam = apiKey ? `?key=${encodeURIComponent(apiKey)}` : '';
+  const endpoint = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+    projectId
+  )}/databases/${encodeURIComponent(dbSegment)}/documents/short_links/${encodeURIComponent(code)}${keyParam}`;
+
+  const payload = {
+    fields: {
+      code: { stringValue: code },
+      url: { stringValue: url.slice(0, 2000) },
+      lang: { stringValue: (lang || 'kh').slice(0, 10) },
+      createdAt: { stringValue: new Date().toISOString() },
+    },
+  };
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    return res.ok;
+  } catch {
+    return false;
   } finally {
     clearTimeout(timer);
   }

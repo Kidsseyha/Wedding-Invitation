@@ -33,12 +33,12 @@ import {
 } from '../data/guests';
 import {
   subscribeToGuests,
-  fetchGuestsFromFirebase,
   saveGuestToFirebase,
   deleteGuestFromFirebase,
   seedDefaultGuestsToFirebase,
   clearAllGuestsFromFirebase,
 } from '../lib/firebaseGuests';
+import { resolveUserScope } from '../lib/userScope';
 
 interface AddGuestModalProps {
   isOpen: boolean;
@@ -48,6 +48,7 @@ interface AddGuestModalProps {
   onOpenEnvelopeWithName: (name: string) => void;
   language: Language;
   eventId?: string;
+  ownerId?: string;
   groom?: string;
   bride?: string;
   theme?: ThemeMode;
@@ -63,6 +64,7 @@ export default function AddGuestModal({
   onOpenEnvelopeWithName,
   language,
   eventId = 'cmgrawhnk0003le0434762j7n',
+  ownerId,
   groom = 'រ៉ូ ម៉ាឡេ',
   bride = 'លីន វល្ខ័ក',
   theme = 'dark',
@@ -70,12 +72,13 @@ export default function AddGuestModal({
   onChangeTheme,
 }: AddGuestModalProps) {
   const isLight = theme === 'light';
+  const effectiveOwnerId = (ownerId && ownerId.trim()) || resolveUserScope().scopeId;
   const [guestInput, setGuestInput] = useState(currentGuestName || '');
   const [copied, setCopied] = useState(false);
   const [prefix, setPrefix] = useState('');
   const [category, setCategory] = useState<'family' | 'vip' | 'friends' | 'colleagues' | 'general'>('general');
   const [note, setNote] = useState('');
-  const [savedGuests, setSavedGuests] = useState<GuestPreset[]>(() => getSavedGuests());
+  const [savedGuests, setSavedGuests] = useState<GuestPreset[]>(() => getSavedGuests(effectiveOwnerId));
   const [isManagingList, setIsManagingList] = useState(false);
   const [editingGuestId, setEditingGuestId] = useState<string | null>(null);
   const [editingGuestName, setEditingGuestName] = useState('');
@@ -86,13 +89,14 @@ export default function AddGuestModal({
   const [isPlayingMusic, setIsPlayingMusic] = useState(false);
   const [isSyncingWithCloud, setIsSyncingWithCloud] = useState(false);
 
-  // Sync with Firestore in real-time
+  // Sync with Firestore in real-time scoped to effectiveOwnerId
   useEffect(() => {
+    setSavedGuests(getSavedGuests(effectiveOwnerId));
     const unsubscribe = subscribeToGuests((guests) => {
       setSavedGuests(guests);
-    });
+    }, effectiveOwnerId);
     return () => unsubscribe();
-  }, []);
+  }, [effectiveOwnerId]);
 
   useEffect(() => {
     const audio = document.getElementById('wedding-audio') as HTMLAudioElement | null;
@@ -248,7 +252,7 @@ export default function AddGuestModal({
         category: newGuestQuickCategory,
         categoryLabelKh: catLabels.kh,
         categoryLabelEn: catLabels.en,
-      });
+      }, effectiveOwnerId);
       setSavedGuests(prev => [...prev.filter(g => g.id !== saved.id), saved]);
       setGuestInput(newGuestQuickName.trim());
       setCategory(newGuestQuickCategory);
@@ -276,7 +280,7 @@ export default function AddGuestModal({
         categoryLabelKh: catLabels.kh,
         categoryLabelEn: catLabels.en,
         note: note.trim() || undefined,
-      });
+      }, effectiveOwnerId);
       setSavedGuests(prev => [...prev.filter(g => g.id !== saved.id), saved]);
       showFeedback(language === 'kh' ? 'បានរក្សាទុកឈ្មោះក្នុង Database!' : 'Saved to Database!');
     } catch (err) {
@@ -305,7 +309,7 @@ export default function AddGuestModal({
         category: editingGuestCategory,
         categoryLabelKh: catLabels.kh,
         categoryLabelEn: catLabels.en,
-      });
+      }, effectiveOwnerId);
       setSavedGuests(prev => prev.map(g => (g.id === id ? updated : g)));
       setEditingGuestId(null);
       showFeedback(language === 'kh' ? 'បានកែប្រែឈ្មោះដោយជោគជ័យ!' : 'Updated successfully!');
@@ -320,7 +324,7 @@ export default function AddGuestModal({
   const handleDeleteGuest = async (id: string, name: string) => {
     setIsSyncingWithCloud(true);
     try {
-      await deleteGuestFromFirebase(id);
+      await deleteGuestFromFirebase(id, effectiveOwnerId);
       setSavedGuests(prev => prev.filter(g => g.id !== id));
       showFeedback(language === 'kh' ? `បានលុប "${name}"` : `Deleted "${name}"`);
     } catch (err) {
@@ -330,11 +334,11 @@ export default function AddGuestModal({
     }
   };
 
-  // Delete all guests
+  // Delete all guests for current user only
   const handleClearAllGuests = async () => {
     setIsSyncingWithCloud(true);
     try {
-      await clearAllGuestsFromFirebase();
+      await clearAllGuestsFromFirebase(effectiveOwnerId);
       setSavedGuests([]);
       showFeedback(language === 'kh' ? 'បានសម្អាតបញ្ជីភ្ញៀវទាំងអស់' : 'Cleared all guests');
     } catch (err) {
@@ -471,7 +475,7 @@ export default function AddGuestModal({
           category: guest.category as any,
           categoryLabelKh: guest.categoryLabelKh,
           categoryLabelEn: guest.categoryLabelEn,
-        });
+        }, effectiveOwnerId);
         count++;
       }
 
@@ -588,7 +592,7 @@ export default function AddGuestModal({
           category: 'general',
           categoryLabelKh: 'ភ្ញៀវទូទៅ',
           categoryLabelEn: 'General',
-        });
+        }, effectiveOwnerId);
         count++;
       }
 
@@ -609,11 +613,12 @@ export default function AddGuestModal({
     }
   };
 
-  // Restore default preset guests in Firebase
+  // Restore default preset guests in Firebase for this owner
   const handleResetList = async () => {
     setIsSyncingWithCloud(true);
     try {
-      await seedDefaultGuestsToFirebase();
+      await seedDefaultGuestsToFirebase(effectiveOwnerId);
+      setSavedGuests(getSavedGuests(effectiveOwnerId));
       showFeedback(language === 'kh' ? 'បានស្ដារបញ្ជីដើមឡើងវិញដោយជោគជ័យ' : 'Restored default guests successfully');
     } catch (err) {
       showFeedback(language === 'kh' ? 'មានបញ្ហាក្នុងការស្ដារបញ្ជីដើម' : 'Error restoring default guests');
@@ -629,7 +634,7 @@ export default function AddGuestModal({
     const finalName = fullName;
     onSaveGuestName(finalName);
 
-    // Save to Firebase asynchronously
+    // Save to Firebase asynchronously scoped to owner
     const catLabels = getCategoryLabel(category);
     saveGuestToFirebase({
       name: finalName,
@@ -637,7 +642,7 @@ export default function AddGuestModal({
       categoryLabelKh: catLabels.kh,
       categoryLabelEn: catLabels.en,
       note: note.trim() || undefined,
-    }).catch(() => {
+    }, effectiveOwnerId).catch(() => {
       // offline fallback handled by cache
     });
 
@@ -654,7 +659,7 @@ export default function AddGuestModal({
     const finalName = fullName;
     onSaveGuestName(finalName);
     
-    // Save to Firebase
+    // Save to Firebase scoped to owner
     const catLabels = getCategoryLabel(category);
     saveGuestToFirebase({
       name: finalName,
@@ -662,7 +667,7 @@ export default function AddGuestModal({
       categoryLabelKh: catLabels.kh,
       categoryLabelEn: catLabels.en,
       note: note.trim() || undefined,
-    }).catch(() => {
+    }, effectiveOwnerId).catch(() => {
       // offline fallback
     });
 

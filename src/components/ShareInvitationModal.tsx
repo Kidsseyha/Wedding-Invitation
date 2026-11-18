@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { Language, WeddingEvent } from '../types';
 import { ThemeMode } from './ThemeToggle';
-import { getPublicShareUrl, shortenUrl, PUBLIC_APP_URL, VERCEL_APP_URL } from '../lib/shareUrl';
+import { getPublicShareUrl, shortenUrl, getPreferredVercelOrigin, PUBLIC_APP_URL, VERCEL_APP_URL } from '../lib/shareUrl';
 import { fetchGuestsFromFirebase, deleteGuestFromFirebase } from '../lib/firebaseGuests';
 import { GuestPreset } from '../data/guests';
 import { EVENT_PRESETS, getCategoryCoverImage } from '../data/eventTemplates';
@@ -44,6 +44,7 @@ import {
   resolveSelectedShareTemplateId,
   ShareTemplateOption,
 } from '../utils/shareMeta';
+import { getScopedEventId, getUserStorageKey, resolveUserScope } from '../lib/userScope';
 
 interface ShareInvitationModalProps {
   isOpen: boolean;
@@ -65,6 +66,7 @@ interface ShareInvitationModalProps {
   coverImage?: string;
   theme?: ThemeMode;
   isAdmin?: boolean;
+  userScope?: string;
 }
 
 export default function ShareInvitationModal({
@@ -87,8 +89,10 @@ export default function ShareInvitationModal({
   coverImage,
   theme = 'dark',
   isAdmin = false,
+  userScope,
 }: ShareInvitationModalProps) {
   const isLight = theme === 'light';
+  const effectiveScope = (userScope && userScope.trim()) || currentEvent?.ownerId || resolveUserScope().scopeId;
   const [activeTab, setActiveTab] = useState<'single' | 'batch' | 'qrcode'>('single');
   const [targetGuest, setTargetGuest] = useState(guestName || '');
   const [copiedMessage, setCopiedMessage] = useState(false);
@@ -119,9 +123,9 @@ export default function ShareInvitationModal({
   }, [currentEvent, eventId, eventType, eventName, singlePerson, groom, bride, weddingDate, locationName, coverImage]);
 
   const storageSnapshot = useMemo(() => {
-    return readShareTemplatesStorageState();
+    return readShareTemplatesStorageState(effectiveScope);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, currentEvent]);
+  }, [isOpen, currentEvent, effectiveScope]);
 
   const allShareTemplates = useMemo(
     () =>
@@ -181,13 +185,19 @@ export default function ShareInvitationModal({
 
   const handleTemplateSelect = (opt: ShareTemplateOption) => {
     setSelectedTemplateId(opt.templateId);
+    const scopedId = getScopedEventId(opt.eventId, effectiveScope);
     try {
-      localStorage.setItem('wedding_last_active_preset_id', opt.templateId);
-      localStorage.setItem('wedding_last_active_template_id', opt.eventId);
-      localStorage.setItem('wedding_last_template_type', opt.category);
+      localStorage.setItem(getUserStorageKey('wedding_last_active_preset_id', effectiveScope), opt.templateId);
+      localStorage.setItem(getUserStorageKey('wedding_last_active_template_id', effectiveScope), scopedId);
+      localStorage.setItem(getUserStorageKey('wedding_last_template_type', effectiveScope), opt.category);
     } catch {}
+    const scopedEventData: WeddingEvent = {
+      ...(opt.event as WeddingEvent),
+      id: scopedId,
+      ...(effectiveScope !== 'guest_public' ? { ownerId: effectiveScope } : {}),
+    };
     if (onSelectTemplate) {
-      onSelectTemplate(opt.event as WeddingEvent, opt.category);
+      onSelectTemplate(scopedEventData, opt.category);
     } else if (onSelectCategory) {
       onSelectCategory(opt.category);
     }
@@ -205,13 +215,11 @@ export default function ShareInvitationModal({
 
   useEffect(() => {
     if (isOpen) {
-      fetchGuestsFromFirebase().then((list) => {
-        if (list && list.length > 0) {
-          setAllDbGuests(list);
-        }
+      fetchGuestsFromFirebase(effectiveScope).then((list) => {
+        setAllDbGuests(Array.isArray(list) ? list : []);
       });
     }
-  }, [isOpen]);
+  }, [isOpen, effectiveScope]);
 
   useEffect(() => {
     if (guestName && guestName !== 'Your Name') {
@@ -225,9 +233,10 @@ export default function ShareInvitationModal({
   const isSameTemplateAsCurrent = selectedTemplate.templateId === initialTemplateId;
   const activeEventId = isSameTemplateAsCurrent && fallbackCurrentEvent?.id
     ? fallbackCurrentEvent.id
-    : selectedTemplate.eventId;
+    : getScopedEventId(selectedTemplate.eventId, effectiveScope);
 
-  const selectedDomainOrigin = shareDomain === 'vercel' ? VERCEL_APP_URL : undefined;
+  const runtimeVercelOrigin = getPreferredVercelOrigin();
+  const selectedDomainOrigin = shareDomain === 'vercel' ? runtimeVercelOrigin : undefined;
   const targetShareLang = forceKhmerLang ? 'kh' : (language === 'kh' ? 'kh' : 'en');
 
   const fullUrl = getPublicShareUrl(currentShareGuest, activeEventId, selectedCategory, {
@@ -235,9 +244,10 @@ export default function ShareInvitationModal({
     lang: targetShareLang,
   });
 
-  // Automatically fetch short URL whenever fullUrl changes
+  // Automatically fetch short URL whenever fullUrl changes (clear stale shortUrl immediately)
   useEffect(() => {
     let isMounted = true;
+    setShortUrl('');
     setLoadingShort(true);
     shortenUrl(fullUrl, selectedDomainOrigin)
       .then((res) => {
@@ -255,6 +265,22 @@ export default function ShareInvitationModal({
   }, [fullUrl, selectedDomainOrigin]);
 
   const activeShareLink = shortUrl || fullUrl;
+
+  const resolveFreshShareLink = async (): Promise<string> => {
+    if (shortUrl && !loadingShort) {
+      return shortUrl;
+    }
+    setLoadingShort(true);
+    try {
+      const resolved = await shortenUrl(fullUrl, selectedDomainOrigin);
+      setShortUrl(resolved);
+      return resolved || fullUrl;
+    } catch {
+      return fullUrl;
+    } finally {
+      setLoadingShort(false);
+    }
+  };
 
   // Unified Copy Link feature with guest name and toast confirmation
   const handleCopyLink = (customUrl?: string) => {
@@ -412,7 +438,9 @@ export default function ShareInvitationModal({
     fullUrl,
   ]);
 
-  const weddingMessageKh = `💌 *${displayHeaderKh}*
+  const buildShareMessage = (linkToUse: string) => {
+    if (language === 'kh') {
+      return `💌 *${displayHeaderKh}*
 
 សូមគោរពអញ្ជើញ៖ *${currentShareGuest}*
 ចូលរួមជាអធិបតី និងជាភ្ញៀវកិត្តិយសក្នុងកម្មវិធីរបស់យើងខ្ញុំ៖
@@ -422,11 +450,12 @@ ${celebrationCelebrants}
 📍 *ទីតាំង*៖ ${effectiveLocation}
 
 👉 *សូមចុចតំណភ្ជាប់ខាងក្រោមដើម្បីបើកសំបុត្រអញ្ជើញ*៖
-${activeShareLink}
+${linkToUse}
 
 វត្តមានដ៏ឧត្តុង្គឧត្តមរបស់លោកអ្នក ជាកិត្តិយសដ៏ធំធេងសម្រាប់ក្រុមគ្រួសារយើងខ្ញុំ! 🙏✨`;
+    }
 
-  const weddingMessageEn = `💌 *${displayHeaderEn}*
+    return `💌 *${displayHeaderEn}*
 
 Cordially Invited: *${currentShareGuest}*
 To celebrate with us:
@@ -436,19 +465,29 @@ ${celebrationCelebrants}
 📍 *Venue*: ${effectiveLocation}
 
 👉 *Click the link below to open your personalized invitation*:
-${activeShareLink}
+${linkToUse}
 
 Your presence will make our day truly special! 🙏✨`;
+  };
 
-  const activeMessage = language === 'kh' ? weddingMessageKh : weddingMessageEn;
+  const activeMessage = buildShareMessage(activeShareLink);
 
-  const handleCopyMessage = () => {
+  const handleCopyOnlyShortLink = async () => {
+    const resolvedLink = await resolveFreshShareLink();
+    handleCopyLink(resolvedLink);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
+  };
+
+  const handleCopyMessage = async () => {
+    const resolvedLink = await resolveFreshShareLink();
+    const messageToCopy = buildShareMessage(resolvedLink);
     const onCopied = () => {
       setCopiedMessage(true);
       setCopyToast(
         language === 'kh'
-          ? `បានចម្លងសារអញ្ជើញ និងលីងសម្រាប់ ${currentShareGuest}!`
-          : `Copied invitation message & link for ${currentShareGuest}!`
+          ? `បានចម្លងសារអញ្ជើញ និងលីងខ្លី Vercel សម្រាប់ ${currentShareGuest}!`
+          : `Copied invitation message & Vercel short link for ${currentShareGuest}!`
       );
       setTimeout(() => {
         setCopiedMessage(false);
@@ -457,11 +496,11 @@ Your presence will make our day truly special! 🙏✨`;
     };
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(activeMessage).then(onCopied).catch(() => {
-        fallbackCopyText(activeMessage, onCopied);
+      navigator.clipboard.writeText(messageToCopy).then(onCopied).catch(() => {
+        fallbackCopyText(messageToCopy, onCopied);
       });
     } else {
-      fallbackCopyText(activeMessage, onCopied);
+      fallbackCopyText(messageToCopy, onCopied);
     }
   };
 
@@ -911,22 +950,32 @@ Your presence will make our day truly special! 🙏✨`;
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
-                          onClick={() => {
-                            handleCopyLink(activeShareLink);
-                            setCopiedLink(true);
-                            setTimeout(() => setCopiedLink(false), 2000);
-                          }}
-                          className={`text-[11px] ${isLight ? 'text-amber-800 hover:text-amber-950' : 'text-amber-400 hover:text-amber-200'} font-khmer font-semibold flex items-center gap-1 border border-amber-400/30 px-2 py-0.5 rounded-lg`}
+                          onClick={handleCopyOnlyShortLink}
+                          disabled={loadingShort}
+                          className={`text-[11px] ${isLight ? 'text-amber-800 hover:text-amber-950' : 'text-amber-400 hover:text-amber-200'} font-khmer font-semibold flex items-center gap-1 border border-amber-400/30 px-2 py-0.5 rounded-lg cursor-pointer disabled:opacity-70`}
                         >
-                          {copiedLink ? <Check className="w-3 h-3 text-emerald-500" /> : <Link2 className="w-3 h-3" />}
+                          {loadingShort ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : copiedLink ? (
+                            <Check className="w-3 h-3 text-emerald-500" />
+                          ) : (
+                            <Link2 className="w-3 h-3" />
+                          )}
                           <span>{copiedLink ? (language === 'kh' ? 'បានចម្លងលីង!' : 'Copied Link!') : (language === 'kh' ? 'ចម្លងតែលីង' : 'Copy Link')}</span>
                         </button>
                         <button
                           type="button"
                           onClick={handleCopyMessage}
-                          className={`text-[11px] ${isLight ? 'text-amber-900 hover:text-amber-950' : 'text-amber-300 hover:text-amber-100'} font-khmer font-bold flex items-center gap-1 bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 rounded-lg`}
+                          disabled={loadingShort}
+                          className={`text-[11px] ${isLight ? 'text-amber-900 hover:text-amber-950' : 'text-amber-300 hover:text-amber-100'} font-khmer font-bold flex items-center gap-1 bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 rounded-lg cursor-pointer disabled:opacity-70`}
                         >
-                          {copiedMessage ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                          {loadingShort ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : copiedMessage ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-500" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
                           <span>{copiedMessage ? (language === 'kh' ? 'បានចម្លងសារ!' : 'Copied!') : (language === 'kh' ? 'ចម្លងសារទាំងមូល' : 'Copy All')}</span>
                         </button>
                       </div>

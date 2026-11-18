@@ -4,7 +4,147 @@ service cloud.firestore {
 
     // Global helper functions
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedAdmin() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && (request.auth.token.email == 'seyhayoeurn2017@gmail.com'
+            || request.auth.token.email == 'yoeurn.seyha@diu.edu.kh');
+    }
+
+    function isVerifiedOwner() {
+      return isSignedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email == 'seyhayoeurn2017@gmail.com';
+    }
+
+    function isGlobalPresetId(eventId) {
+      return eventId == 'cmgrawhnk0003le0434762j7n'
+        || eventId == 'engagement-event-001'
+        || eventId == 'housewarming-event-001'
+        || eventId == 'birthday-event-001'
+        || eventId == 'anniversary-event-001'
+        || eventId == 'modern-wedding-001'
+        || eventId == 'default'
+        || eventId.matches('^preset-.*');
+    }
+
+    function isValidGuest(data) {
+      return data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 256
+        && (!('id' in data) || (data.id is string && data.id.size() <= 128))
+        && (!('category' in data) || (data.category is string && data.category.size() <= 50))
+        && (!('categoryLabelKh' in data) || (data.categoryLabelKh is string && data.categoryLabelKh.size() <= 100))
+        && (!('categoryLabelEn' in data) || (data.categoryLabelEn is string && data.categoryLabelEn.size() <= 100))
+        && (!('note' in data) || (data.note is string && data.note.size() <= 500))
+        && (!('ownerId' in data) || (data.ownerId is string && data.ownerId.size() <= 128))
+        && (!('eventId' in data) || (data.eventId is string && data.eventId.size() <= 128))
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function isValidWish(data) {
+      return data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 200
+        && data.message is string
+        && data.message.size() > 0
+        && data.message.size() <= 2000
+        && (!('id' in data) || (data.id is string && data.id.size() <= 128))
+        && (!('eventId' in data) || (data.eventId is string && data.eventId.size() <= 128))
+        && (!('ownerId' in data) || (data.ownerId is string && data.ownerId.size() <= 128))
+        && (!('relationship' in data) || (data.relationship is string && data.relationship.size() <= 100))
+        && (!('likes' in data) || data.likes is number)
+        && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64));
+    }
+
+    function isValidRSVP(data) {
+      return data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 200
+        && data.attending is string
+        && (data.attending == 'yes' || data.attending == 'no')
+        && (!('id' in data) || (data.id is string && data.id.size() <= 128))
+        && (!('eventId' in data) || (data.eventId is string && data.eventId.size() <= 128))
+        && (!('ownerId' in data) || (data.ownerId is string && data.ownerId.size() <= 128))
+        && (!('guestCount' in data) || data.guestCount is number)
+        && (!('phone' in data) || (data.phone is string && data.phone.size() <= 50))
+        && (!('note' in data) || (data.note is string && data.note.size() <= 500))
+        && (!('timestamp' in data) || (data.timestamp is string && data.timestamp.size() <= 64));
+    }
+
+    function isValidWeddingEvent(data) {
+      return data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 300
+        && (!('id' in data) || (data.id is string && data.id.size() <= 128))
+        && (!('templateId' in data) || (data.templateId is string && data.templateId.size() <= 128))
+        && (!('eventType' in data) || (data.eventType is string && data.eventType.size() <= 50))
+        && (!('title' in data) || (data.title is string && data.title.size() <= 300))
+        && (!('slug' in data) || (data.slug is string && data.slug.size() <= 128))
+        && (!('groom' in data) || (data.groom is string && data.groom.size() <= 200))
+        && (!('bride' in data) || (data.bride is string && data.bride.size() <= 200))
+        && (!('groom_name' in data) || (data.groom_name is string && data.groom_name.size() <= 200))
+        && (!('bride_name' in data) || (data.bride_name is string && data.bride_name.size() <= 200))
+        && (!('ownerId' in data) || (data.ownerId is string && data.ownerId.size() <= 128))
+        && (!('ownerEmail' in data) || (data.ownerEmail is string && data.ownerEmail.size() <= 256))
+        && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function isValidNotification(data) {
+      return data.title is string
+        && data.title.size() > 0
+        && data.title.size() <= 200
+        && data.message is string
+        && data.message.size() > 0
+        && data.message.size() <= 2000
+        && (!('id' in data) || (data.id is string && data.id.size() <= 128))
+        && (!('eventId' in data) || (data.eventId is string && data.eventId.size() <= 128))
+        && (!('ownerId' in data) || (data.ownerId is string && data.ownerId.size() <= 128))
+        && (!('type' in data) || (data.type is string && data.type.size() <= 50))
+        && (!('guestName' in data) || (data.guestName is string && data.guestName.size() <= 200))
+        && (!('attending' in data) || (data.attending is string && data.attending.size() <= 10))
+        && (!('read' in data) || data.read is bool)
+        && (!('timestamp' in data) || (data.timestamp is string && data.timestamp.size() <= 64))
+        && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64));
+    }
+
+    function isValidSystemUser(data) {
+      return data.name is string
+        && data.name.size() > 0
+        && data.name.size() <= 256
+        && data.email is string
+        && data.email.size() <= 256
+        && (!('id' in data) || (data.id is string && data.id.size() <= 128))
+        && (!('passcode' in data) || (data.passcode is string && data.passcode.size() <= 128))
+        && (!('role' in data) || (data.role is string && data.role.size() <= 50))
+        && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64));
+    }
+
+    function isValidShortLink(code, data) {
+      return data.keys().hasAll(['code', 'url'])
+        && data.keys().hasOnly(['code', 'url', 'lang', 'createdAt'])
+        && data.code is string
+        && data.code == code
+        && data.url is string
+        && data.url.size() > 0
+        && data.url.size() <= 2000
+        && (!('lang' in data) || (data.lang is string && data.lang.size() <= 10))
+        && (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64));
     }
 
     // Default deny catch-all
@@ -12,93 +152,102 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // Users collection: Authenticated user profiles
+    // Users collection: Authenticated user profiles (PII protected)
     match /users/{userId} {
-      allow read: if request.auth != null && (
-        request.auth.uid == userId || 
-        (request.auth.token.email_verified == true && (
-          request.auth.token.email == 'seyhayoeurn2017@gmail.com' || 
-          request.auth.token.email == 'yoeurn.seyha@diu.edu.kh'
-        ))
-      );
-      allow create, update: if request.auth != null && (
-        (request.auth.token.email_verified == true && request.auth.token.email == 'seyhayoeurn2017@gmail.com') ||
+      allow get: if isSignedIn() && (request.auth.uid == userId || isVerifiedAdmin());
+      allow list: if isVerifiedAdmin();
+      allow create, update: if isSignedIn() && (
+        isVerifiedOwner() ||
         (request.auth.uid == userId
-        && isValidId(userId)
-        && request.resource.data.uid is string
-        && request.resource.data.uid == userId
-        && request.resource.data.email is string
-        && request.resource.data.email.size() <= 256
-        && (!('role' in request.resource.data)
-            || request.resource.data.role == 'editor'
-            || request.resource.data.role == 'user'
-            || (request.resource.data.role == 'admin'
-                && request.auth.token.email_verified == true
-                && request.auth.token.email == 'yoeurn.seyha@diu.edu.kh')))
+          && isValidId(userId)
+          && incoming().uid is string
+          && incoming().uid == userId
+          && incoming().email is string
+          && incoming().email.size() <= 256
+          && (!('displayName' in incoming()) || (incoming().displayName is string && incoming().displayName.size() <= 256))
+          && (!('photoURL' in incoming()) || (incoming().photoURL is string && incoming().photoURL.size() <= 1000))
+          && (!('activeEventId' in incoming()) || (incoming().activeEventId is string && incoming().activeEventId.size() <= 128))
+          && (!('lastLoginAt' in incoming()) || (incoming().lastLoginAt is string && incoming().lastLoginAt.size() <= 64))
+          && (!('role' in incoming())
+              || incoming().role == 'editor'
+              || incoming().role == 'user'
+              || (incoming().role == 'admin'
+                  && request.auth.token.email_verified == true
+                  && request.auth.token.email == 'yoeurn.seyha@diu.edu.kh')))
       );
-      allow delete: if request.auth != null
-        && request.auth.token.email_verified == true
-        && request.auth.token.email == 'seyhayoeurn2017@gmail.com';
+      allow delete: if isVerifiedOwner();
     }
 
-    // Guests collection: Wedding guest list presets and attendees
+    // Guests collection: Per-user isolated wedding guest list presets and attendees
     match /guests/{guestId} {
-      allow read: if true;
-      allow create, update: if isValidId(guestId)
-        && request.resource.data.name is string
-        && request.resource.data.name.size() <= 256
-        && request.resource.data.name.size() > 0;
+      allow get: if isValidId(guestId);
+      allow list: if existing().name is string && existing().ownerId is string;
+      allow create: if isValidId(guestId)
+        && isValidGuest(incoming())
+        && incoming().ownerId is string
+        && incoming().ownerId.size() > 0;
+      allow update: if isValidId(guestId)
+        && isValidGuest(incoming())
+        && (!('ownerId' in existing()) || existing().ownerId == '' || incoming().ownerId == existing().ownerId || isVerifiedAdmin());
       allow delete: if isValidId(guestId);
     }
 
-    // Wishes collection: Digital guestbook messages and blessings
+    // Wishes collection: Per-event digital guestbook messages and blessings
     match /wishes/{wishId} {
-      allow read: if true;
-      allow create: if isValidId(wishId)
-        && request.resource.data.name is string
-        && request.resource.data.name.size() <= 200
-        && request.resource.data.name.size() > 0
-        && request.resource.data.message is string
-        && request.resource.data.message.size() <= 2000
-        && request.resource.data.message.size() > 0;
+      allow get: if isValidId(wishId);
+      allow list: if existing().name is string && existing().message is string;
+      allow create: if isValidId(wishId) && isValidWish(incoming());
       allow update: if isValidId(wishId)
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likes'])
-        && request.resource.data.likes is number;
+        && isValidWish(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['likes'])
+        && incoming().likes is number;
       allow delete: if isValidId(wishId);
     }
 
-    // RSVPs collection: Guest RSVP responses
+    // RSVPs collection: Per-event guest RSVP responses
     match /rsvps/{rsvpId} {
-      allow read: if true;
-      allow create, update: if isValidId(rsvpId)
-        && request.resource.data.name is string
-        && request.resource.data.name.size() <= 200
-        && request.resource.data.name.size() > 0
-        && request.resource.data.attending is string
-        && (request.resource.data.attending == 'yes' || request.resource.data.attending == 'no');
+      allow get: if isValidId(rsvpId);
+      allow list: if existing().name is string && existing().attending is string;
+      allow create: if isValidId(rsvpId) && isValidRSVP(incoming());
+      allow update: if isValidId(rsvpId)
+        && isValidRSVP(incoming())
+        && (!('ownerId' in existing()) || existing().ownerId == '' || incoming().ownerId == existing().ownerId || isVerifiedAdmin());
       allow delete: if false;
     }
 
-    // Events collection: Shared wedding event settings and configuration
+    // Events collection: Per-user isolated wedding event settings and public shared invitation read
     match /events/{eventId} {
-      allow read: if true;
-      allow create, update: if isValidId(eventId)
-        && request.resource.data.name is string
-        && request.resource.data.name.size() > 0
-        && request.resource.data.name.size() <= 300;
-      allow delete: if isValidId(eventId);
+      allow get: if isValidId(eventId);
+      allow list: if existing().name is string && existing().ownerId is string && existing().ownerId.size() > 0;
+      allow create: if isValidId(eventId) && isValidWeddingEvent(incoming());
+      allow update: if isValidId(eventId)
+        && isValidWeddingEvent(incoming())
+        && (!('ownerId' in existing()) || existing().ownerId == '' || incoming().ownerId == existing().ownerId || isVerifiedAdmin());
+      allow delete: if isValidId(eventId) && (!isGlobalPresetId(eventId) || isVerifiedOwner());
     }
 
     // System Users collection: Registered system user security verification records
     match /system_users/{userId} {
-      allow read: if true;
-      allow write: if isValidId(userId);
+      allow get: if isValidId(userId);
+      allow list: if existing().name is string && existing().email is string;
+      allow create, update: if isValidId(userId) && isValidSystemUser(incoming());
+      allow delete: if isValidId(userId);
     }
 
-    // Notifications collection: Owner dashboard alerts & email trigger logs
+    // Notifications collection: Per-owner dashboard alerts & RSVP trigger logs
     match /notifications/{notificationId} {
-      allow read: if true;
-      allow write: if isValidId(notificationId);
+      allow get: if isValidId(notificationId);
+      allow list: if existing().title is string && existing().message is string;
+      allow create, update: if isValidId(notificationId) && isValidNotification(incoming());
+      allow delete: if isValidId(notificationId);
+    }
+
+    // Short Links collection: Publicly resolvable short links for sharing invitations
+    match /short_links/{code} {
+      allow get: if isValidId(code);
+      allow list: if existing().code is string && existing().url is string;
+      allow create, update: if isValidId(code) && isValidShortLink(code, incoming());
+      allow delete: if false;
     }
   }
 }
