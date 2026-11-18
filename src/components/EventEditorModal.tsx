@@ -55,6 +55,9 @@ import {
   resolveUserScope,
   stripScopedEventId,
 } from '../lib/userScope';
+import { fetchEventFromFirebase } from '../lib/firebaseServices';
+import { sanitizeWeddingEvent } from '../utils/sanitizeEvent';
+import { getEventTimestampMs } from '../utils/saveHelpers';
 
 function generateDayTitlesFromDate(dateStr: string, shiftIndex: number) {
   if (!dateStr) return null;
@@ -142,7 +145,7 @@ interface EventEditorModalProps {
   isOpen: boolean;
   onClose: () => void;
   event: WeddingEvent;
-  onSave: (updatedEvent: WeddingEvent, refreshEnvelope?: boolean) => Promise<boolean | void> | void;
+  onSave: (updatedEvent: WeddingEvent, refreshEnvelope?: boolean) => Promise<WeddingEvent | boolean | void> | void;
   onReset: () => void;
   theme?: ThemeMode;
   initialTab?: TabType;
@@ -384,6 +387,53 @@ export default function EventEditorModal({
       setFormData(event);
     }
   }, [event, isOpen]);
+
+  // When modal opens, check database for any fresher saved record and load it into the editor
+  const hasCheckedDbOnOpenRef = useRef(false);
+  useEffect(() => {
+    if (!isOpen) {
+      hasCheckedDbOnOpenRef.current = false;
+      return;
+    }
+    if (hasCheckedDbOnOpenRef.current) return;
+    hasCheckedDbOnOpenRef.current = true;
+
+    let cancelled = false;
+    const syncFromDatabaseOnOpen = async () => {
+      try {
+        const idToFetch = getScopedEventId(event.id || 'cmgrawhnk0003le0434762j7n', effectiveScope);
+        const ownerArg = effectiveScope && effectiveScope !== 'guest_public' ? effectiveScope : undefined;
+        const dbEvent = await fetchEventFromFirebase(idToFetch, ownerArg, {
+          includeServerApi: true,
+          templateType: event.eventType || undefined,
+        });
+        if (cancelled || !dbEvent) return;
+        const dbMs = getEventTimestampMs(dbEvent);
+        const propMs = getEventTimestampMs(event);
+        if (dbMs > propMs) {
+          const normalized = sanitizeWeddingEvent({
+            ...dbEvent,
+            id: dbEvent.id || idToFetch,
+            ...(effectiveScope !== 'guest_public' ? { ownerId: dbEvent.ownerId || effectiveScope } : {}),
+          });
+          setFormData(normalized);
+          setSavedRetrievedInfo(normalized);
+          if (normalized.updatedAt) {
+            try {
+              setLastRetrievedTime(new Date(normalized.updatedAt).toLocaleTimeString('km-KH'));
+            } catch {}
+          }
+        }
+      } catch {
+        // silent background check
+      }
+    };
+    syncFromDatabaseOnOpen();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, event, effectiveScope]);
 
   // Gallery Photos list
   const galleryPhotos =
@@ -1102,51 +1152,63 @@ export default function EventEditorModal({
     setTimeout(() => setSyncFeedback(null), 3500);
   };
 
-  const fetchSavedInformation = async (targetId?: string, targetType?: string) => {
+  const fetchSavedInformation = async (
+    targetId?: string,
+    targetType?: string,
+    options?: { quietToast?: boolean }
+  ) => {
     const rawId = targetId || formData.id || 'cmgrawhnk0003le0434762j7n';
     const idToFetch = getScopedEventId(rawId, effectiveScope);
     const typeToFetch = targetType || currentTemplateType;
-    const ownerQuery = effectiveScope && effectiveScope !== 'guest_public' ? `&ownerId=${encodeURIComponent(effectiveScope)}` : '';
+    const ownerArg = effectiveScope && effectiveScope !== 'guest_public' ? effectiveScope : undefined;
     setIsFetchingSavedInfo(true);
     try {
-      // 1. Check server API by scoped ID first
-      let res = await fetch(`/api/event?id=${encodeURIComponent(idToFetch)}${ownerQuery}`);
-      let data = res.ok ? await res.json() : null;
+      // 1. Query both Firebase Firestore (user_databases + events) and Server API, selecting newest persisted DB record
+      const dbEvent = await fetchEventFromFirebase(idToFetch, ownerArg, {
+        includeServerApi: true,
+        templateType: typeToFetch,
+        ownerEmail: formData.ownerEmail,
+      });
 
-      // 2. If not found by ID, query by template type + ownerId
-      if ((!data || !data.event) && typeToFetch) {
-        res = await fetch(`/api/event?type=${encodeURIComponent(typeToFetch)}${ownerQuery}`);
-        data = res.ok ? await res.json() : null;
-      }
-
-      if (data?.success && data.event) {
-        const scopedEvt = {
-          ...data.event,
-          id: idToFetch,
-          ...(effectiveScope !== 'guest_public' ? { ownerId: effectiveScope } : {}),
-        };
+      if (dbEvent) {
+        const scopedEvt = sanitizeWeddingEvent({
+          ...dbEvent,
+          id: dbEvent.id || idToFetch,
+          ...(effectiveScope !== 'guest_public' ? { ownerId: dbEvent.ownerId || effectiveScope } : {}),
+        });
         setFormData(scopedEvt);
         setSavedRetrievedInfo(scopedEvt);
         const timeStr = new Date().toLocaleTimeString('km-KH');
         setLastRetrievedTime(timeStr);
-        setSyncFeedback(`បានទាញយកទិន្នន័យពី Server ជោគជ័យ! (${timeStr})`);
-        setTimeout(() => setSyncFeedback(null), 3000);
+        try {
+          localStorage.setItem(getUserStorageKey('wedding_custom_event_data', effectiveScope), JSON.stringify(scopedEvt));
+          localStorage.setItem(getUserStorageKey(`wedding_template_saved_${idToFetch}`, effectiveScope), JSON.stringify(scopedEvt));
+          if (typeToFetch) {
+            localStorage.setItem(getUserStorageKey(`wedding_template_type_${typeToFetch}`, effectiveScope), JSON.stringify(scopedEvt));
+          }
+        } catch {}
+        if (!options?.quietToast) {
+          setSyncFeedback(`បានទាញយកទិន្នន័យពី Database ជោគជ័យ! (${timeStr})`);
+          setTimeout(() => setSyncFeedback(null), 3000);
+        }
         return scopedEvt;
       }
 
-      // 3. Fallback to user-scoped localStorage
+      // 2. Fallback to user-scoped localStorage only when no database record exists yet
       const localSpecific = localStorage.getItem(getUserStorageKey(`wedding_template_saved_${idToFetch}`, effectiveScope)) ||
                             localStorage.getItem(getUserStorageKey(`wedding_template_saved_${rawId}`, effectiveScope)) ||
                             localStorage.getItem(getUserStorageKey(`wedding_template_type_${typeToFetch}`, effectiveScope)) ||
                             localStorage.getItem(getUserStorageKey('wedding_custom_event_data', effectiveScope));
       if (localSpecific) {
-        const parsed = JSON.parse(localSpecific);
+        const parsed = sanitizeWeddingEvent(JSON.parse(localSpecific));
         setFormData(parsed);
         setSavedRetrievedInfo(parsed);
         const timeStr = new Date().toLocaleTimeString('km-KH');
         setLastRetrievedTime(timeStr);
-        setSyncFeedback(`បានទាញយកទិន្នន័យពី Storage ជោគជ័យ! (${timeStr})`);
-        setTimeout(() => setSyncFeedback(null), 3000);
+        if (!options?.quietToast) {
+          setSyncFeedback(`បានទាញយកទិន្នន័យពី Storage ជោគជ័យ! (${timeStr})`);
+          setTimeout(() => setSyncFeedback(null), 3000);
+        }
         return parsed;
       }
     } catch (err) {
@@ -1161,16 +1223,16 @@ export default function EventEditorModal({
     try {
       setIsSaving(true);
       const timestamp = new Date().toISOString();
-      const updated: WeddingEvent = {
+      const updated: WeddingEvent = sanitizeWeddingEvent({
         ...formData,
         id: getScopedEventId(formData.id || 'cmgrawhnk0003le0434762j7n', effectiveScope),
         ...(effectiveScope !== 'guest_public' ? { ownerId: effectiveScope } : {}),
         eventType: currentTemplateType,
         updatedAt: timestamp,
-      };
+      });
 
-      // 1. Send once to parent onSave (updates React state, caches localStorage, syncs Server API, and triggers bounded background Firestore sync)
-      await onSave(updated, false);
+      // 1. Save to Firestore + Server API via parent onSave (which also retrieves confirmed DB state)
+      const savedResult = await onSave(updated, false);
 
       // 2. Update apply-to-all preset caches scoped strictly to THIS user
       if (applyToAllTypes) {
@@ -1196,14 +1258,19 @@ export default function EventEditorModal({
         }
       }
 
-      // 3. Immediately update UI feedback
-      setFormData(updated);
+      // 3. Fetch persisted data back from Database to display confirmed DB information
+      const dbRetrieved = await fetchSavedInformation(updated.id, currentTemplateType, { quietToast: true });
+      const confirmedEvent =
+        dbRetrieved ||
+        (savedResult && typeof savedResult === 'object' ? (savedResult as WeddingEvent) : updated);
+
+      setFormData(confirmedEvent);
       const timeStr = new Date().toLocaleTimeString('km-KH');
       setLastRetrievedTime(timeStr);
-      setSavedRetrievedInfo(updated);
+      setSavedRetrievedInfo(confirmedEvent);
       setShowSavedToast(true);
       setSyncFeedback(
-        `បានរក្សាទុកទៅកាន់ Server, Database និង Website (${updated.name || currentTemplatePreset.titleKh}) រួចរាល់!`
+        `បានរក្សាទុក និងទាញយកទិន្នន័យពី Database (${confirmedEvent.name || currentTemplatePreset.titleKh}) រួចរាល់!`
       );
     } catch (err) {
       console.error('Save to template failed:', err);

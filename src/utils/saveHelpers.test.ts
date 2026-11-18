@@ -4,6 +4,8 @@ import {
   shouldSkipImageRecompression,
   needsFirestoreCompaction,
   raceWithTimeout,
+  getEventTimestampMs,
+  pickNewestDatabaseEvent,
 } from './saveHelpers';
 
 test('shouldSkipImageRecompression skips non-data URLs and small data images', () => {
@@ -39,3 +41,17 @@ test('raceWithTimeout returns resolved value when fast', async () => {
   assert.equal(res.timedOut, false);
   assert.equal(res.value, 'synced');
 });
+
+test('pickNewestDatabaseEvent picks the candidate with newest updatedAt timestamp', () => {
+  const older = { updatedAt: '2026-05-01T10:00:00.000Z', image: 'old.jpg', config: { cover_monogram_bride: 'A' } };
+  const newer = { updatedAt: '2026-05-01T10:05:00.000Z', image: 'new.jpg', config: { cover_monogram_bride: 'B' } };
+  assert.equal(pickNewestDatabaseEvent([null, older, newer, undefined]), newer);
+});
+
+test('pickNewestDatabaseEvent prefers richer payload when timestamps match', () => {
+  const compact = { updatedAt: '2026-05-01T10:05:00.000Z', image: 'small', config: { cover_monogram_bride: 'B' } };
+  const full = { updatedAt: '2026-05-01T10:05:00.000Z', image: 'data:image/jpeg;base64,' + 'x'.repeat(200), config: { cover_monogram_bride: 'B' } };
+  assert.equal(getEventTimestampMs(compact), getEventTimestampMs(full));
+  assert.equal(pickNewestDatabaseEvent([compact, full]), full);
+});
+

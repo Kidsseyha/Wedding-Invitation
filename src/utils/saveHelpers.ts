@@ -43,3 +43,39 @@ export async function raceWithTimeout<T>(
     }
   }
 }
+
+export function getEventTimestampMs(event: { updatedAt?: string } | null | undefined): number {
+  if (!event || !event.updatedAt) return 0;
+  const ms = Date.parse(event.updatedAt);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+export function pickNewestDatabaseEvent<
+  T extends { updatedAt?: string; image?: string; config?: Record<string, any> }
+>(candidates: Array<T | null | undefined>): T | null {
+  let best: T | null = null;
+  let bestMs = -1;
+
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== 'object') continue;
+    const ms = getEventTimestampMs(candidate);
+    if (!best) {
+      best = candidate;
+      bestMs = ms;
+      continue;
+    }
+    if (ms > bestMs) {
+      best = candidate;
+      bestMs = ms;
+    } else if (ms === bestMs) {
+      const bestSize = JSON.stringify(best).length;
+      const candSize = JSON.stringify(candidate).length;
+      if (candSize > bestSize) {
+        best = candidate;
+      }
+    }
+  }
+
+  return best;
+}
+

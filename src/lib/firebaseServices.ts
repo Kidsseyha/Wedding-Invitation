@@ -18,6 +18,8 @@ import {
   shouldSkipImageRecompression,
   needsFirestoreCompaction,
   raceWithTimeout,
+  pickNewestDatabaseEvent,
+  getEventTimestampMs,
 } from '../utils/saveHelpers';
 
 const USER_DATABASES_COLLECTION = 'user_databases';
@@ -325,6 +327,25 @@ async function prepareFirestorePayload(event: WeddingEvent): Promise<WeddingEven
           ).then((photos) => { cfg.galleryPhotos = photos; })
         : Promise.resolve(),
     ]);
+  }
+
+  // Pass 3 safeguard: if still near Firestore 1MB limit, trim bulky inline base64 gallery extras
+  // while preserving portrait image and all text/monogram settings
+  if (JSON.stringify(safeEvent).length > 900_000 && safeEvent.config) {
+    const cfg = safeEvent.config;
+    if (Array.isArray(cfg.galleryPhotos)) {
+      const compactGallery: string[] = [];
+      for (const p of cfg.galleryPhotos) {
+        if (typeof p !== 'string') continue;
+        if (!p.startsWith('data:image/') || compactGallery.length < 4) {
+          compactGallery.push(p);
+        }
+      }
+      cfg.galleryPhotos = compactGallery;
+    }
+    if (JSON.stringify(safeEvent).length > 900_000 && Array.isArray(cfg.galleryPhotos)) {
+      cfg.galleryPhotos = cfg.galleryPhotos.filter((p) => typeof p === 'string' && !p.startsWith('data:'));
+    }
   }
 
   return safeEvent;
@@ -668,49 +689,75 @@ export async function fetchUserEvent(userId: string): Promise<WeddingEvent | nul
 }
 
 /**
- * Fetch wedding event from Firestore or fallback to REST API
+ * Fetch wedding event from Firestore (personal user_databases + top-level events) & Server REST API,
+ * returning the newest persisted database record (ignoring untouched presets).
  */
-export async function fetchEventFromFirebase(eventId: string, ownerId?: string): Promise<WeddingEvent | null> {
+export async function fetchEventFromFirebase(
+  eventId: string,
+  ownerId?: string,
+  options?: { includeServerApi?: boolean; templateType?: string; ownerEmail?: string }
+): Promise<WeddingEvent | null> {
   const targetId = eventId || DEFAULT_PRESET_EVENT_ID;
-  const targetDbId = resolveRecordDatabaseId({ ownerId, eventId: targetId });
+  const targetDbId = resolveRecordDatabaseId({
+    ownerId,
+    ownerEmail: options?.ownerEmail,
+    eventId: targetId,
+  });
 
-  // Try fetching from user's personal database subcollection first, then top-level `/events`
-  if (!IS_FIRESTORE_WRITE_DISABLED) {
-    if (targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE) {
-      try {
-        const scopedDocRef = doc(db, USER_DATABASES_COLLECTION, targetDbId, 'events', targetId);
-        const scopedSnap = await getDoc(scopedDocRef);
-        if (scopedSnap.exists()) {
-          return scopedSnap.data() as WeddingEvent;
+  const scopedFsPromise =
+    !IS_FIRESTORE_WRITE_DISABLED && targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE
+      ? getDoc(doc(db, USER_DATABASES_COLLECTION, targetDbId, 'events', targetId))
+          .then((snap) => (snap.exists() ? (snap.data() as WeddingEvent) : null))
+          .catch(() => null)
+      : Promise.resolve(null);
+
+  const topFsPromise = !IS_FIRESTORE_WRITE_DISABLED
+    ? getDoc(doc(db, 'events', targetId))
+        .then((snap) => (snap.exists() ? (snap.data() as WeddingEvent) : null))
+        .catch((error) => {
+          handleFirestoreError(error, OperationType.GET, `events/${targetId}`);
+          return null;
+        })
+    : Promise.resolve(null);
+
+  const includeServerApi = options?.includeServerApi !== false;
+  const serverApiPromise: Promise<WeddingEvent | null> = includeServerApi
+    ? (async () => {
+        try {
+          const ownerParam = ownerId && ownerId !== GUEST_PUBLIC_SCOPE ? `&ownerId=${encodeURIComponent(ownerId)}` : '';
+          const typeParam = options?.templateType ? `&type=${encodeURIComponent(options.templateType)}` : '';
+          const res = await fetch(`/api/event?id=${encodeURIComponent(targetId)}${typeParam}${ownerParam}`);
+          if (res.ok) {
+            const json = await res.json();
+            if (json?.success && json.event && json.source !== 'preset') {
+              return json.event as WeddingEvent;
+            }
+          }
+          if (options?.templateType) {
+            const typeRes = await fetch(
+              `/api/event?type=${encodeURIComponent(options.templateType)}${ownerParam}`
+            );
+            if (typeRes.ok) {
+              const typeJson = await typeRes.json();
+              if (typeJson?.success && typeJson.event && typeJson.source !== 'preset') {
+                return typeJson.event as WeddingEvent;
+              }
+            }
+          }
+        } catch (error) {
+          console.warn('REST API fetch event error:', error);
         }
-      } catch {
-        // fallback to top-level events
-      }
-    }
+        return null;
+      })()
+    : Promise.resolve(null);
 
-    try {
-      const docRef = doc(db, 'events', targetId);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        return docSnap.data() as WeddingEvent;
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.GET, `events/${targetId}`);
-    }
-  }
+  const [scopedDoc, topDoc, apiDoc] = await Promise.all([
+    scopedFsPromise,
+    topFsPromise,
+    serverApiPromise,
+  ]);
 
-  // Fallback to server REST API
-  try {
-    const ownerParam = ownerId ? `&ownerId=${encodeURIComponent(ownerId)}` : '';
-    const res = await fetch(`/api/event?id=${encodeURIComponent(targetId)}${ownerParam}`);
-    if (res.ok) {
-      const json = await res.json();
-      if (json.success && json.event) return json.event;
-    }
-  } catch (error) {
-    console.warn('REST API fetch event error:', error);
-  }
-  return null;
+  return pickNewestDatabaseEvent<WeddingEvent>([scopedDoc, topDoc, apiDoc]);
 }
 
 /**
@@ -832,7 +879,7 @@ export async function saveEventToFirebase(
       }
     })();
 
-    const timeoutMs = options?.writeTimeoutMs ?? 1200;
+    const timeoutMs = options?.writeTimeoutMs ?? 5000;
     await raceWithTimeout(writePromise, timeoutMs, undefined);
   }
 
@@ -875,22 +922,70 @@ export async function deleteEventFromFirebase(eventId: string, ownerId?: string)
 }
 
 /**
- * Real-time listener for events (prefers Firestore, falls back to polling API)
+ * Real-time listener for events (subscribes to both personal user_databases and top-level /events,
+ * falls back to polling API)
  */
-export function subscribeToEvent(eventId: string, callback: (event: WeddingEvent) => void) {
+export function subscribeToEvent(
+  eventId: string,
+  callback: (event: WeddingEvent) => void,
+  ownerId?: string
+) {
   const targetId = eventId || 'cmgrawhnk0003le0434762j7n';
+  const targetDbId = resolveRecordDatabaseId({ ownerId, eventId: targetId });
 
   // If writes/reads are enabled, subscribe to Firestore real-time updates
   if (!IS_FIRESTORE_WRITE_DISABLED) {
     try {
-      const docRef = doc(db, 'events', targetId);
-      return onSnapshot(docRef, (snap) => {
-        if (snap.exists()) {
-          callback(snap.data() as WeddingEvent);
+      let latestMs = -1;
+      const emitIfFresh = (incoming: WeddingEvent) => {
+        const ms = getEventTimestampMs(incoming);
+        if (latestMs < 0 || ms >= latestMs) {
+          latestMs = ms;
+          callback(incoming);
         }
-      }, (error) => {
-        handleFirestoreError(error, OperationType.GET, `events/${targetId}`);
-      });
+      };
+
+      const unsubs: Array<() => void> = [];
+
+      if (targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE) {
+        const scopedRef = doc(db, USER_DATABASES_COLLECTION, targetDbId, 'events', targetId);
+        unsubs.push(
+          onSnapshot(
+            scopedRef,
+            (snap) => {
+              if (snap.exists()) {
+                emitIfFresh(snap.data() as WeddingEvent);
+              }
+            },
+            () => {
+              // fallback handled by top-level listener
+            }
+          )
+        );
+      }
+
+      const docRef = doc(db, 'events', targetId);
+      unsubs.push(
+        onSnapshot(
+          docRef,
+          (snap) => {
+            if (snap.exists()) {
+              emitIfFresh(snap.data() as WeddingEvent);
+            }
+          },
+          (error) => {
+            handleFirestoreError(error, OperationType.GET, `events/${targetId}`);
+          }
+        )
+      );
+
+      return () => {
+        unsubs.forEach((unsub) => {
+          try {
+            unsub();
+          } catch {}
+        });
+      };
     } catch (e) {
       console.warn('Firestore subscription failed, falling back to REST polling:', e);
     }
@@ -899,10 +994,11 @@ export function subscribeToEvent(eventId: string, callback: (event: WeddingEvent
   // Fallback server REST polling (highly resilient)
   const intervalId = setInterval(async () => {
     try {
-      const res = await fetch(`/api/event?id=${targetId}`);
+      const ownerParam = ownerId && ownerId !== GUEST_PUBLIC_SCOPE ? `&ownerId=${encodeURIComponent(ownerId)}` : '';
+      const res = await fetch(`/api/event?id=${encodeURIComponent(targetId)}${ownerParam}`);
       if (res.ok) {
         const json = await res.json();
-        if (json.success && json.event) callback(json.event);
+        if (json.success && json.event && json.source !== 'preset') callback(json.event);
       }
     } catch (e) {
       // ignore

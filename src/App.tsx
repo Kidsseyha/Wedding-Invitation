@@ -57,6 +57,7 @@ import { buildInvitationMeta, normalizeCategoryString } from './utils/shareMeta'
 import { PUBLIC_APP_URL } from './lib/shareUrl';
 import { Language, WeddingEvent } from './types';
 import { formatKhmerDate, formatEnDate } from './utils/khmerHelpers';
+import { getEventTimestampMs } from './utils/saveHelpers';
 import { testFirestoreConnection, auth, db } from './lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, User } from 'firebase/auth';
@@ -1404,11 +1405,13 @@ export default function App() {
   // Read guest name and event ID from URL query parameters, and fetch latest user-isolated event from server/Firestore
   const [guestName, setGuestName] = useState('Your Name');
   const hasSavedLocallyRef = useRef(false);
+  const lastSavedAtRef = useRef<number>(0);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     let cancelled = false;
     hasSavedLocallyRef.current = false;
+    lastSavedAtRef.current = 0;
 
     const scopeId = activeUserScope.scopeId;
     const params = new URLSearchParams(window.location.search);
@@ -1527,26 +1530,36 @@ export default function App() {
       return candidate.ownerId === scopeId || (Boolean(authUser?.uid) && candidate.ownerId === authUser?.uid);
     };
 
-    const unsubscribeEvent = subscribeToEvent(fetchId, (fbEvent) => {
-      if (cancelled || hasSavedLocallyRef.current) return;
-      if (fbEvent && isMatchingUrlCategory(fbEvent) && isOwnedByCurrentScope(fbEvent)) {
-        const sanitized = sanitizeWeddingEvent({
-          ...fbEvent,
-          ownerId: fbEvent.ownerId || (activeUserScope.isAuthenticated && !isFromShareLink ? scopeId : undefined),
-        });
-        setEvent(sanitized);
-        if (!isFromShareLink) {
-          try {
-            localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(sanitized));
-            localStorage.setItem(getUserStorageKey(`wedding_template_saved_${sanitized.id}`, scopeId), JSON.stringify(sanitized));
-          } catch {}
+    const unsubscribeEvent = subscribeToEvent(
+      fetchId,
+      (fbEvent) => {
+        if (cancelled) return;
+        const incomingMs = getEventTimestampMs(fbEvent);
+        if (hasSavedLocallyRef.current && incomingMs <= lastSavedAtRef.current) return;
+        if (fbEvent && isMatchingUrlCategory(fbEvent) && isOwnedByCurrentScope(fbEvent)) {
+          const sanitized = sanitizeWeddingEvent({
+            ...fbEvent,
+            ownerId: fbEvent.ownerId || (activeUserScope.isAuthenticated && !isFromShareLink ? scopeId : undefined),
+          });
+          setEvent(sanitized);
+          if (!isFromShareLink) {
+            try {
+              localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(sanitized));
+              localStorage.setItem(getUserStorageKey(`wedding_template_saved_${sanitized.id}`, scopeId), JSON.stringify(sanitized));
+            } catch {}
+          }
         }
-      }
-    });
+      },
+      targetOwnerFilter || undefined
+    );
 
     const fetchServerData = async () => {
       try {
-        let fbEvent = await fetchEventFromFirebase(fetchId, targetOwnerFilter || undefined);
+        let fbEvent = await fetchEventFromFirebase(fetchId, targetOwnerFilter || undefined, {
+          includeServerApi: true,
+          templateType: urlTypeParam || undefined,
+          ownerEmail: activeUserScope.ownerEmail || undefined,
+        });
         // Legacy Google UID migration fallback if user has no scoped doc yet
         if (!fbEvent && activeUserScope.isAuthenticated && !isFromShareLink && authUser?.uid) {
           const legacyEvent = await fetchEventFromFirebase(`event_${authUser.uid}`);
@@ -1568,7 +1581,7 @@ export default function App() {
           }
         }
 
-        if (cancelled || hasSavedLocallyRef.current) return;
+        if (cancelled || (hasSavedLocallyRef.current && getEventTimestampMs(fbEvent) <= lastSavedAtRef.current)) return;
         if (fbEvent && isMatchingUrlCategory(fbEvent) && isOwnedByCurrentScope(fbEvent)) {
           const sanitized = sanitizeWeddingEvent({
             ...fbEvent,
@@ -1871,7 +1884,7 @@ export default function App() {
     scrollPosRef.current = 0;
   };
 
-  const handleSaveEvent = async (updatedEvent: WeddingEvent, refreshEnvelope: boolean = true) => {
+  const handleSaveEvent = async (updatedEvent: WeddingEvent, refreshEnvelope: boolean = true): Promise<WeddingEvent> => {
     hasSavedLocallyRef.current = true;
     const scopeId = activeUserScope.scopeId;
     const validatedType = updatedEvent.eventType || validateCurrentTemplateType(updatedEvent);
@@ -1879,7 +1892,7 @@ export default function App() {
     const userEventId = activeUserScope.isAuthenticated
       ? getScopedEventId(updatedEvent.id || rawBaseId, scopeId)
       : (updatedEvent.id || DEFAULT_PRESET_EVENT_ID);
-    const preparedEvent: WeddingEvent = {
+    const preparedEvent: WeddingEvent = sanitizeWeddingEvent({
       ...updatedEvent,
       id: userEventId,
       templateId: rawBaseId,
@@ -1887,6 +1900,30 @@ export default function App() {
       ownerEmail: activeUserScope.isAuthenticated ? (activeUserScope.ownerEmail || authUser?.email || updatedEvent.ownerEmail || '') : updatedEvent.ownerEmail,
       eventType: validatedType,
       updatedAt: updatedEvent.updatedAt || new Date().toISOString(),
+    });
+    lastSavedAtRef.current = getEventTimestampMs(preparedEvent) || Date.now();
+
+    const persistLocalCaches = (targetEvt: WeddingEvent) => {
+      try {
+        localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(targetEvt));
+        if (targetEvt.id) {
+          localStorage.setItem(getUserStorageKey(`wedding_template_saved_${targetEvt.id}`, scopeId), JSON.stringify(targetEvt));
+          localStorage.setItem(getUserStorageKey(`wedding_template_saved_${rawBaseId}`, scopeId), JSON.stringify(targetEvt));
+          localStorage.setItem(getUserStorageKey('wedding_last_active_template_id', scopeId), targetEvt.id);
+        }
+        if (targetEvt.templateId) {
+          localStorage.setItem(getUserStorageKey('wedding_last_active_preset_id', scopeId), targetEvt.templateId);
+        }
+        if (validatedType) {
+          localStorage.setItem(getUserStorageKey(`wedding_template_type_${validatedType}`, scopeId), JSON.stringify(targetEvt));
+          localStorage.setItem(getUserStorageKey('wedding_last_template_type', scopeId), validatedType);
+        }
+        if (targetEvt.config) {
+          localStorage.setItem(getUserStorageKey('wedding_last_custom_design_config', scopeId), JSON.stringify(targetEvt.config));
+        }
+      } catch (e) {
+        console.warn('Failed to save local event data:', e);
+      }
     };
 
     setEvent(preparedEvent);
@@ -1895,50 +1932,71 @@ export default function App() {
       setShowEnvelopeModal(true);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-    // 1. Instant per-user local cache save (active event, per-template cache, per-template-type cache, and active design settings)
+    // 1. Instant per-user local cache save
+    persistLocalCaches(preparedEvent);
+
+    // 2. Persist simultaneously to Firebase Firestore and Server API
+    const saveServerApi = async () => {
+      try {
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timerId = controller ? setTimeout(() => controller.abort(), 8000) : null;
+        const response = await fetch('/api/event', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(preparedEvent),
+          signal: controller?.signal,
+        });
+        if (timerId !== null) clearTimeout(timerId);
+        if (!response.ok) {
+          console.error('Server responded with error:', response.status);
+        }
+      } catch (err) {
+        console.error('Failed to sync event with server:', err);
+      }
+    };
+
+    await Promise.allSettled([
+      saveEventToFirebase(preparedEvent, { skipRestApi: true, writeTimeoutMs: 5500 }).catch(err => {
+        console.warn('Firebase save fallback:', err);
+      }),
+      saveServerApi(),
+    ]);
+
+    // 3. Read back the persisted record directly from the database so UI displays confirmed DB data
+    let confirmedDbEvent: WeddingEvent = preparedEvent;
     try {
-      localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(preparedEvent));
-      if (preparedEvent.id) {
-        localStorage.setItem(getUserStorageKey(`wedding_template_saved_${preparedEvent.id}`, scopeId), JSON.stringify(preparedEvent));
-        localStorage.setItem(getUserStorageKey(`wedding_template_saved_${rawBaseId}`, scopeId), JSON.stringify(preparedEvent));
-        localStorage.setItem(getUserStorageKey('wedding_last_active_template_id', scopeId), preparedEvent.id);
+      const dbFetched = await fetchEventFromFirebase(
+        preparedEvent.id,
+        preparedEvent.ownerId || (activeUserScope.isAuthenticated ? scopeId : undefined),
+        {
+          includeServerApi: true,
+          templateType: validatedType,
+          ownerEmail: preparedEvent.ownerEmail,
+        }
+      );
+      if (dbFetched) {
+        const dbMs = getEventTimestampMs(dbFetched);
+        const preparedMs = getEventTimestampMs(preparedEvent);
+        if (dbMs >= preparedMs || preparedMs === 0) {
+          confirmedDbEvent = sanitizeWeddingEvent({
+            ...dbFetched,
+            id: dbFetched.id || preparedEvent.id,
+            templateId: dbFetched.templateId || preparedEvent.templateId,
+            ownerId: dbFetched.ownerId || preparedEvent.ownerId,
+            ownerEmail: dbFetched.ownerEmail || preparedEvent.ownerEmail,
+            eventType: dbFetched.eventType || validatedType,
+          });
+        }
       }
-      if (preparedEvent.templateId) {
-        localStorage.setItem(getUserStorageKey('wedding_last_active_preset_id', scopeId), preparedEvent.templateId);
-      }
-      if (validatedType) {
-        localStorage.setItem(getUserStorageKey(`wedding_template_type_${validatedType}`, scopeId), JSON.stringify(preparedEvent));
-        localStorage.setItem(getUserStorageKey('wedding_last_template_type', scopeId), validatedType);
-      }
-      if (preparedEvent.config) {
-        localStorage.setItem(getUserStorageKey('wedding_last_custom_design_config', scopeId), JSON.stringify(preparedEvent.config));
-      }
-    } catch (e) {
-      console.warn('Failed to save local event data:', e);
+    } catch (fetchErr) {
+      console.warn('Post-save database fetch fallback:', fetchErr);
     }
 
-    // 2. Firebase Firestore Database Sync (non-blocking; REST API below already persists full payload)
-    saveEventToFirebase(preparedEvent, { skipRestApi: true }).catch(err => {
-      console.warn('Firebase save fallback:', err);
-    });
+    lastSavedAtRef.current = getEventTimestampMs(confirmedDbEvent) || lastSavedAtRef.current;
+    setEvent(confirmedDbEvent);
+    persistLocalCaches(confirmedDbEvent);
 
-    // 3. Server API Sync so anyone who opens the shared URL sees all updates
-    try {
-      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      const timerId = controller ? setTimeout(() => controller.abort(), 8000) : null;
-      const response = await fetch('/api/event', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(preparedEvent),
-        signal: controller?.signal,
-      });
-      if (timerId !== null) clearTimeout(timerId);
-      if (!response.ok) {
-        console.error('Server responded with error:', response.status);
-      }
-    } catch (err) {
-      console.error('Failed to sync event with server:', err);
-    }
+    return confirmedDbEvent;
   };
 
   const handleResetEvent = async () => {
