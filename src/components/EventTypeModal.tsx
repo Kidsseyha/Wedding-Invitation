@@ -531,13 +531,13 @@ export default function EventTypeModal({
     if (window.confirm(language === 'kh' ? `តើអ្នកប្រាកដជាចង់លុបគំរូធៀប "${title}" នេះចេញពី Database និង Website ឬ?` : `Are you sure you want to delete template "${title}" from database and website?`)) {
       try {
         if (scopedSampleId && !isGlobalSharedPresetId(scopedSampleId)) {
-          await deleteEventFromFirebase(scopedSampleId);
+          await deleteEventFromFirebase(scopedSampleId, effectiveScope);
         }
         if (sampleId && !isGlobalSharedPresetId(sampleId) && sampleId !== scopedSampleId) {
-          await deleteEventFromFirebase(sampleId);
+          await deleteEventFromFirebase(sampleId, effectiveScope);
         }
         if (presetId && !isGlobalSharedPresetId(presetId)) {
-          await deleteEventFromFirebase(presetId);
+          await deleteEventFromFirebase(presetId, effectiveScope);
         }
       } catch (e) {
         console.warn('Error deleting template from backend:', e);

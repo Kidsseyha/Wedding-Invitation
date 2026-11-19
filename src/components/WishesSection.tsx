@@ -101,20 +101,66 @@ export default function WishesSection({
       setWishes(effectiveEventId === DEFAULT_PRESET_EVENT_ID ? INITIAL_WISHES : []);
     }
 
-    const unsubscribe = subscribeToWishes(effectiveEventId, (liveWishes) => {
-      if (Array.isArray(liveWishes)) {
-        if (liveWishes.length > 0 || effectiveEventId !== DEFAULT_PRESET_EVENT_ID) {
-          setWishes(liveWishes);
-          try {
-            localStorage.setItem(wishesStorageKey, JSON.stringify(liveWishes));
-          } catch {
-            // ignore
+    const unsubscribe = subscribeToWishes(
+      effectiveEventId,
+      (liveWishes) => {
+        if (Array.isArray(liveWishes)) {
+          if (liveWishes.length > 0 || effectiveEventId !== DEFAULT_PRESET_EVENT_ID) {
+            setWishes(liveWishes);
+            try {
+              localStorage.setItem(wishesStorageKey, JSON.stringify(liveWishes));
+            } catch {
+              // ignore
+            }
           }
         }
+      },
+      effectiveOwnerId
+    );
+
+    const handleWsEvent = (e: Event) => {
+      const msg = (e as CustomEvent)?.detail;
+      if (!msg) return;
+      const matchesEvent =
+        !msg.eventId ||
+        msg.eventId === effectiveEventId ||
+        (effectiveEventId === DEFAULT_PRESET_EVENT_ID && !msg.eventId);
+      const matchesOwner =
+        !effectiveOwnerId ||
+        effectiveOwnerId === 'guest_public' ||
+        !msg.ownerId ||
+        msg.ownerId === effectiveOwnerId;
+      if (!matchesEvent || !matchesOwner) return;
+
+      if (msg.type === 'wishes:new' && msg.wish?.id) {
+        setWishes((prev) => {
+          const existsIdx = prev.findIndex((w) => w.id === msg.wish.id);
+          const next =
+            existsIdx >= 0
+              ? prev.map((w) => (w.id === msg.wish.id ? msg.wish : w))
+              : [msg.wish, ...prev];
+          try {
+            localStorage.setItem(wishesStorageKey, JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+      } else if (msg.type === 'wishes:deleted' && msg.id) {
+        setWishes((prev) => {
+          const next = prev.filter((w) => w.id !== msg.id);
+          try {
+            localStorage.setItem(wishesStorageKey, JSON.stringify(next));
+          } catch {}
+          return next;
+        });
       }
-    });
-    return () => unsubscribe();
-  }, [effectiveEventId, wishesStorageKey]);
+    };
+
+    window.addEventListener('wedding:ws', handleWsEvent);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('wedding:ws', handleWsEvent);
+    };
+  }, [effectiveEventId, effectiveOwnerId, wishesStorageKey]);
 
   useEffect(() => {
     if (defaultGuestName) {
@@ -202,7 +248,7 @@ export default function WishesSection({
     );
 
     // Sync like to Firestore & REST
-    await likeWishInFirebase(id, effectiveEventId);
+    await likeWishInFirebase(id, effectiveEventId, effectiveOwnerId);
   };
 
   const handleClickDelete = (id: string) => {
@@ -266,7 +312,7 @@ export default function WishesSection({
       });
 
       // 2. Server & Firestore sync
-      await deleteWishInFirebase(id, effectiveEventId);
+      await deleteWishInFirebase(id, effectiveEventId, effectiveOwnerId);
 
       setDeleteToast(
         language === 'kh'

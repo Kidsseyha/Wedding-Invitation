@@ -1,5 +1,7 @@
 import { EVENT_PRESETS, EventTypePreset, findTemplatePreset, getCategoryCoverImage } from '../data/eventTemplates.js';
-import { getUserStorageKey, resolveUserScope, stripScopedEventId } from '../lib/userScope.js';
+import { GUEST_PUBLIC_SCOPE, getUserStorageKey, resolveUserScope, stripScopedEventId } from '../lib/userScope.js';
+import { resolveRecordDatabaseId } from '../lib/userDatabase.js';
+import { pickNewestDatabaseEvent } from './saveHelpers.js';
 
 export type InvitationCategory = 'wedding' | 'engagement' | 'housewarming' | 'birthday' | 'anniversary';
 
@@ -692,40 +694,60 @@ export async function fetchEventFromFirestoreRest(options: {
   projectId: string;
   databaseId?: string;
   eventId: string;
+  ownerId?: string | null;
+  ownerEmail?: string | null;
   apiKey?: string;
   timeoutMs?: number;
 }): Promise<Record<string, any> | null> {
-  const { projectId, databaseId = '(default)', eventId, apiKey, timeoutMs = 2500 } = options;
+  const { projectId, databaseId = '(default)', eventId, ownerId, ownerEmail, apiKey, timeoutMs = 2500 } = options;
   if (!projectId || !eventId) return null;
 
   const dbSegment = databaseId || '(default)';
   const keyParam = apiKey ? `?key=${encodeURIComponent(apiKey)}` : '';
-  const endpoint = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
-    projectId
-  )}/databases/${encodeURIComponent(dbSegment)}/documents/events/${encodeURIComponent(eventId)}${keyParam}`;
+  const targetDbId = resolveRecordDatabaseId({ ownerId, ownerEmail, eventId });
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const fetchDocAtPath = async (docPath: string): Promise<Record<string, any> | null> => {
+    const endpoint = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+      projectId
+    )}/databases/${encodeURIComponent(dbSegment)}/documents/${docPath}${keyParam}`;
 
-  try {
-    let res = await fetch(endpoint, { signal: controller.signal });
-    if (!res.ok && dbSegment !== '(default)') {
-      const fallbackEndpoint = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
-        projectId
-      )}/databases/(default)/documents/events/${encodeURIComponent(eventId)}${keyParam}`;
-      res = await fetch(fallbackEndpoint, { signal: controller.signal });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      let res = await fetch(endpoint, { signal: controller.signal });
+      if (!res.ok && dbSegment !== '(default)') {
+        const fallbackEndpoint = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+          projectId
+        )}/databases/(default)/documents/${docPath}${keyParam}`;
+        res = await fetch(fallbackEndpoint, { signal: controller.signal });
+      }
+      if (!res.ok) return null;
+      const json = (await res.json()) as { fields?: Record<string, any> };
+      if (!json || !json.fields) return null;
+      const parsed = parseFirestoreDocumentFields(json.fields);
+      if (!parsed.id) parsed.id = eventId;
+      return parsed;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
     }
-    if (!res.ok) return null;
-    const json = (await res.json()) as { fields?: Record<string, any> };
-    if (!json || !json.fields) return null;
-    const parsed = parseFirestoreDocumentFields(json.fields);
-    if (!parsed.id) parsed.id = eventId;
-    return parsed;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+  };
+
+  const scopedPromise =
+    targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE
+      ? fetchDocAtPath(`user_databases/${encodeURIComponent(targetDbId)}/events/${encodeURIComponent(eventId)}`)
+      : Promise.resolve(null);
+  const topPromise = fetchDocAtPath(`events/${encodeURIComponent(eventId)}`);
+
+  const [scopedDoc, topDoc] = await Promise.all([scopedPromise, topPromise]);
+  const validTopDoc =
+    topDoc && targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE && topDoc.ownerId && topDoc.ownerId !== targetDbId
+      ? null
+      : topDoc;
+
+  return pickNewestDatabaseEvent([scopedDoc, validTopDoc]);
 }
 
 export async function fetchShortLinkFromFirestoreRest(options: {

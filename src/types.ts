@@ -88,6 +88,7 @@ export interface TemplateConfig {
   cover_monogram_groom?: string;
   cover_monogram_bride?: string;
   cover_monogram_font_family?: string;
+  cover_monogram_font_family_en?: string;
   cover_monogram_color?: string;
   cover_monogram_font_size?: string;
   groom_name_kh?: string;

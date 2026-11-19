@@ -1,10 +1,12 @@
 import { Sparkles, RefreshCw, Check, Save } from 'lucide-react';
-import { TemplateConfig } from '../types';
+import { Language, TemplateConfig } from '../types';
 import { ThemeMode } from './ThemeToggle';
 import {
   getFirstNameInitial,
   MONOGRAM_COLOR_PRESETS,
-  MONOGRAM_FONT_PRESETS,
+  MONOGRAM_FONT_PRESETS_EN,
+  MONOGRAM_FONT_PRESETS_KH,
+  resolveMonogramFontFamily,
 } from '../utils/monogramHelpers';
 
 interface CoverMonogramSettingsCardProps {
@@ -15,6 +17,7 @@ interface CoverMonogramSettingsCardProps {
   groomEn?: string;
   brideEn?: string;
   singlePerson?: boolean;
+  language?: Language;
   theme?: ThemeMode;
   onSave?: () => Promise<void> | void;
   isSaving?: boolean;
@@ -30,29 +33,56 @@ export default function CoverMonogramSettingsCard({
   groomEn = '',
   brideEn = '',
   singlePerson = false,
+  language = 'kh',
   theme = 'dark',
   onSave,
   isSaving = false,
   justSaved = false,
   compact = false,
 }: CoverMonogramSettingsCardProps) {
-  const autoGroomEn = getFirstNameInitial(groomEn, groom, 'R');
-  const autoBrideEn = getFirstNameInitial(brideEn, bride, 'U');
-  const autoGroomKh = getFirstNameInitial(groom, groomEn, 'រ');
-  const autoBrideKh = getFirstNameInitial(bride, brideEn, 'អ');
+  const isKhmer = language === 'kh';
+  const autoGroomEn = getFirstNameInitial(groomEn, groom, 'M');
+  const autoBrideEn = getFirstNameInitial(brideEn, bride, 'V');
+  const autoGroomKh = getFirstNameInitial(groom, groomEn, 'ម');
+  const autoBrideKh = getFirstNameInitial(bride, brideEn, 'វ');
 
-  const effectiveGroomInit = (config.cover_monogram_groom || '').trim() || autoGroomKh;
-  const effectiveBrideInit = (config.cover_monogram_bride || '').trim() || autoBrideKh;
+  const customGroom = (config.cover_monogram_groom || '').trim();
+  const customBride = (config.cover_monogram_bride || '').trim();
+  const effectiveGroomInit = isKhmer
+    ? customGroom || autoGroomKh
+    : customGroom && !/[\u1780-\u17FF]/.test(customGroom)
+    ? customGroom
+    : autoGroomEn;
+  const effectiveBrideInit = isKhmer
+    ? customBride || autoBrideKh
+    : customBride && !/[\u1780-\u17FF]/.test(customBride)
+    ? customBride
+    : autoBrideEn;
   const monogramColor = config.cover_monogram_color || '#9c732d';
   const monogramSize = parseInt(config.cover_monogram_font_size || '34', 10) || 34;
   const isLatinPreview =
     /^[A-Za-z0-9.\s]+$/.test(effectiveGroomInit) &&
     (singlePerson || /^[A-Za-z0-9.\s]+$/.test(effectiveBrideInit));
-  const effectiveFontFamily =
-    config.cover_monogram_font_family ||
-    (isLatinPreview
-      ? "'Playfair Display', 'Cinzel', Georgia, serif"
-      : "'Moulpali', 'Moul', 'Noto Serif Khmer', serif");
+  const effectiveFontFamily = resolveMonogramFontFamily(
+    language,
+    config.cover_monogram_font_family,
+    config.cover_monogram_font_family_en,
+    isLatinPreview
+  );
+  const activePresets = isKhmer ? MONOGRAM_FONT_PRESETS_KH : MONOGRAM_FONT_PRESETS_EN;
+  const activeFontKey: 'cover_monogram_font_family' | 'cover_monogram_font_family_en' = isKhmer
+    ? 'cover_monogram_font_family'
+    : 'cover_monogram_font_family_en';
+  const activeSelectedFont = isKhmer
+    ? (config.cover_monogram_font_family &&
+      MONOGRAM_FONT_PRESETS_KH.some((p) => p.fontFamily === config.cover_monogram_font_family)
+        ? config.cover_monogram_font_family
+        : '')
+    : (config.cover_monogram_font_family_en ??
+      (config.cover_monogram_font_family &&
+      MONOGRAM_FONT_PRESETS_EN.some((p) => p.fontFamily === config.cover_monogram_font_family)
+        ? config.cover_monogram_font_family
+        : ''));
 
   return (
     <div
@@ -337,19 +367,22 @@ export default function CoverMonogramSettingsCard({
               theme === 'light' ? 'text-amber-950' : 'text-amber-200'
             }`}
           >
-            ម៉ូតអក្សរកាត់ (Monogram Font Style):
+            {isKhmer
+              ? 'ម៉ូតអក្សរកាត់ (Monogram Font Style - ខ្មែរ):'
+              : 'Monogram Font Style (EN):'}
           </label>
-          <span className="text-[10px] font-khmer opacity-75">ចុចដើម្បីប្តូរម៉ូតអក្សរ</span>
+          <span className="text-[10px] font-khmer opacity-75">
+            {isKhmer ? 'ចុចដើម្បីប្តូរម៉ូតអក្សរ' : 'Click to switch EN style'}
+          </span>
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {MONOGRAM_FONT_PRESETS.map((font) => {
-            const currentFont = config.cover_monogram_font_family || '';
-            const isSelected = currentFont === font.fontFamily;
+          {activePresets.map((font) => {
+            const isSelected = activeSelectedFont === font.fontFamily;
             return (
               <button
-                key={`mono-font-${font.id}`}
+                key={`mono-font-${language}-${font.id}`}
                 type="button"
-                onClick={() => onUpdateConfig('cover_monogram_font_family', font.fontFamily)}
+                onClick={() => onUpdateConfig(activeFontKey, font.fontFamily)}
                 className={`p-2 rounded-xl border text-left transition-all flex flex-col gap-0.5 active:scale-95 cursor-pointer ${
                   isSelected
                     ? 'border-amber-400 ring-2 ring-amber-400/40 font-bold bg-amber-400/20 ' +
@@ -363,7 +396,11 @@ export default function CoverMonogramSettingsCard({
                 <span
                   className="text-base truncate leading-tight"
                   style={{
-                    fontFamily: font.fontFamily || effectiveFontFamily,
+                    fontFamily:
+                      font.fontFamily ||
+                      (isKhmer
+                        ? "'Moulpali', 'Moul', 'Noto Serif Khmer', serif"
+                        : "'Playfair Display', 'Cinzel', Georgia, serif"),
                     color: monogramColor,
                   }}
                 >

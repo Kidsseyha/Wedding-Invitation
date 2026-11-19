@@ -1231,7 +1231,7 @@ export default function EventEditorModal({
         updatedAt: timestamp,
       });
 
-      // 1. Save to Firestore + Server API via parent onSave (which also retrieves confirmed DB state)
+      // 1. Save to Firestore + Server API in parallel via parent onSave (returns confirmed DB state)
       const savedResult = await onSave(updated, false);
 
       // 2. Update apply-to-all preset caches scoped strictly to THIS user
@@ -1258,11 +1258,9 @@ export default function EventEditorModal({
         }
       }
 
-      // 3. Fetch persisted data back from Database to display confirmed DB information
-      const dbRetrieved = await fetchSavedInformation(updated.id, currentTemplateType, { quietToast: true });
+      // 3. Apply confirmed database state directly without redundant second read-back
       const confirmedEvent =
-        dbRetrieved ||
-        (savedResult && typeof savedResult === 'object' ? (savedResult as WeddingEvent) : updated);
+        savedResult && typeof savedResult === 'object' ? (savedResult as WeddingEvent) : updated;
 
       setFormData(confirmedEvent);
       const timeStr = new Date().toLocaleTimeString('km-KH');
@@ -1270,11 +1268,12 @@ export default function EventEditorModal({
       setSavedRetrievedInfo(confirmedEvent);
       setShowSavedToast(true);
       setSyncFeedback(
-        `បានរក្សាទុក និងទាញយកទិន្នន័យពី Database (${confirmedEvent.name || currentTemplatePreset.titleKh}) រួចរាល់!`
+        `បានរក្សាទុកទៅកាន់ Database (${confirmedEvent.name || currentTemplatePreset.titleKh}) រួចរាល់!`
       );
     } catch (err) {
       console.error('Save to template failed:', err);
-      alert('រក្សាទុកមិនបានជោគជ័យ សូមព្យាយាមម្តងទៀត / Failed to save to template, please try again.');
+      setShowSavedToast(false);
+      setSyncFeedback('រក្សាទុកមិនបានជោគជ័យ សូមព្យាយាមម្តងទៀត / Failed to save to database, please try again.');
     } finally {
       setIsSaving(false);
     }
@@ -1899,12 +1898,13 @@ export default function EventEditorModal({
                     theme={theme}
                     onSave={handleSaveAll}
                     isSaving={isSaving}
-                    currentCategory={currentCategory}
+                    currentCategory={currentTemplateType}
                     groom={formData.groom}
                     bride={formData.bride}
                     groomEn={formData.groomEn}
                     brideEn={formData.brideEn}
                     singlePerson={formData.singlePerson}
+                    language={language}
                   >
                     {/* EDITABLE COVER INFORMATION OF INVITATION (Live Preview placed below header) */}
                     <CoverInfoEditor
@@ -1921,18 +1921,22 @@ export default function EventEditorModal({
               {/* TAB 1: COUPLE & GENERAL INFO */}
               {activeTab === 'couple' && (
                 <div className="space-y-4">
-                  <CoverMonogramSettingsCard
-                    config={formData.config}
-                    onUpdateConfig={handleUpdateConfig}
-                    groom={formData.groom}
-                    bride={formData.bride}
-                    groomEn={formData.groomEn}
-                    brideEn={formData.brideEn}
-                    singlePerson={formData.singlePerson}
-                    theme={theme}
-                    onSave={handleSaveAll}
-                    isSaving={isSaving}
-                  />
+                  {currentTemplateType === 'wedding' &&
+                    currentCategory === 'wedding' && (
+                    <CoverMonogramSettingsCard
+                      config={formData.config}
+                      onUpdateConfig={handleUpdateConfig}
+                      groom={formData.groom}
+                      bride={formData.bride}
+                      groomEn={formData.groomEn}
+                      brideEn={formData.brideEn}
+                      singlePerson={formData.singlePerson}
+                      language={language}
+                      theme={theme}
+                      onSave={handleSaveAll}
+                      isSaving={isSaving}
+                    />
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">

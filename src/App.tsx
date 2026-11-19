@@ -63,6 +63,7 @@ import { doc, setDoc } from 'firebase/firestore';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, User } from 'firebase/auth';
 import {
   saveEventToFirebase,
+  saveEventReliable,
   fetchEventFromFirebase,
   fetchUserTemplatesFromFirebase,
   subscribeToEvent,
@@ -84,6 +85,7 @@ import {
   resolveUserScope,
   stripScopedEventId,
 } from './lib/userScope';
+import { shouldAcceptWebSocketEventUpdate } from './lib/serverIsolation';
 import AudioPlayer from './components/AudioPlayer';
 import LanguageToggle from './components/LanguageToggle';
 import ThemeToggle, { ThemeMode } from './components/ThemeToggle';
@@ -136,11 +138,66 @@ export default function App() {
   });
   const [isThemeTransitioning, setIsThemeTransitioning] = useState(false);
 
-  // Real-time WebSocket connection for live guest presence & instant updates
+  const wsContextRef = useRef<{
+    eventId: string;
+    ownerId?: string;
+    scopeId: string;
+    isAuthenticated: boolean;
+    isFromShareLink: boolean;
+    lastSavedAtMs: number;
+  }>({
+    eventId: DEFAULT_PRESET_EVENT_ID,
+    scopeId: GUEST_PUBLIC_SCOPE,
+    isAuthenticated: false,
+    isFromShareLink: false,
+    lastSavedAtMs: 0,
+  });
+
+  // Real-time WebSocket connection for live guest presence & per-user instant server updates
   const { isConnected: isWsConnected, onlineCount: wsOnlineCount } = useWebSocket(useCallback((msg) => {
-    if (msg.type === 'wishes:new' && msg.wish) {
-      // New real-time wish received
-      console.log('[WebSocket] Live wish received:', msg.wish.name);
+    if (msg.type === 'event:update' && msg.event) {
+      const ctx = wsContextRef.current;
+      const accepted = shouldAcceptWebSocketEventUpdate({
+        incomingEvent: msg.event,
+        incomingEventId: msg.eventId,
+        incomingOwnerId: msg.ownerId,
+        currentEventId: ctx.eventId,
+        currentOwnerId: ctx.ownerId,
+        activeScopeId: ctx.scopeId,
+        isAuthenticated: ctx.isAuthenticated,
+        isFromShareLink: ctx.isFromShareLink,
+        lastSavedAtMs: ctx.lastSavedAtMs,
+      });
+      if (accepted) {
+        const sanitized = sanitizeWeddingEvent({
+          ...msg.event,
+          id: msg.event.id || msg.eventId || ctx.eventId,
+          ownerId: msg.event.ownerId || msg.ownerId || (ctx.isAuthenticated && !ctx.isFromShareLink ? ctx.scopeId : undefined),
+        });
+        const incomingMs = getEventTimestampMs(sanitized);
+        if (incomingMs > 0) {
+          lastSavedAtRef.current = Math.max(lastSavedAtRef.current, incomingMs);
+        }
+        setEvent(sanitized);
+        if (!ctx.isFromShareLink) {
+          try {
+            const rawBase = sanitized.templateId || stripScopedEventId(sanitized.id || DEFAULT_PRESET_EVENT_ID);
+            localStorage.setItem(getUserStorageKey('wedding_custom_event_data', ctx.scopeId), JSON.stringify(sanitized));
+            localStorage.setItem(getUserStorageKey(`wedding_template_saved_${sanitized.id}`, ctx.scopeId), JSON.stringify(sanitized));
+            localStorage.setItem(getUserStorageKey(`wedding_template_saved_${rawBase}`, ctx.scopeId), JSON.stringify(sanitized));
+            if (sanitized.eventType) {
+              localStorage.setItem(getUserStorageKey(`wedding_template_type_${sanitized.eventType}`, ctx.scopeId), JSON.stringify(sanitized));
+            }
+          } catch {}
+        }
+      }
+      return;
+    }
+
+    if (msg.type === 'wishes:new' || msg.type === 'wishes:deleted' || msg.type === 'wishes:like') {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('wedding:ws', { detail: msg }));
+      }
     }
   }, []));
 
@@ -1546,6 +1603,15 @@ export default function App() {
   const hasSavedLocallyRef = useRef(false);
   const lastSavedAtRef = useRef<number>(0);
 
+  wsContextRef.current = {
+    eventId: event.id,
+    ownerId: event.ownerId,
+    scopeId: activeUserScope.scopeId,
+    isAuthenticated: activeUserScope.isAuthenticated,
+    isFromShareLink,
+    lastSavedAtMs: lastSavedAtRef.current,
+  };
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     let cancelled = false;
@@ -1694,11 +1760,40 @@ export default function App() {
 
     const fetchServerData = async () => {
       try {
-        let fbEvent = await fetchEventFromFirebase(fetchId, targetOwnerFilter || undefined, {
-          includeServerApi: true,
-          templateType: urlTypeParam || undefined,
-          ownerEmail: activeUserScope.ownerEmail || undefined,
-        });
+        const hadLocalActiveTemplate = Boolean(
+          localStorage.getItem(getUserStorageKey('wedding_last_active_template_id', scopeId)) ||
+          localStorage.getItem(getUserStorageKey('wedding_custom_event_data', scopeId))
+        );
+        const ownerEmailQuery =
+          activeUserScope.isAuthenticated && !isFromShareLink && activeUserScope.ownerEmail
+            ? `&ownerEmail=${encodeURIComponent(activeUserScope.ownerEmail)}`
+            : '';
+
+        const [primaryFbEvent, ownerDefaultApiEvent] = await Promise.all([
+          fetchEventFromFirebase(fetchId, targetOwnerFilter || undefined, {
+            includeServerApi: true,
+            templateType: urlTypeParam || undefined,
+            ownerEmail: activeUserScope.ownerEmail || undefined,
+          }),
+          activeUserScope.isAuthenticated && !isFromShareLink && !urlIdParam && !urlTypeParam && !hadLocalActiveTemplate
+            ? fetch(`/api/event?ownerId=${encodeURIComponent(scopeId)}${ownerEmailQuery}`)
+                .then(async (r) => {
+                  if (!r.ok) return null;
+                  const j = await r.json();
+                  return j?.success && j.event && j.source !== 'preset' ? (j.event as WeddingEvent) : null;
+                })
+                .catch(() => null)
+            : Promise.resolve(null),
+        ]);
+
+        let fbEvent: WeddingEvent | null = primaryFbEvent;
+        if (
+          ownerDefaultApiEvent &&
+          (!fbEvent || getEventTimestampMs(ownerDefaultApiEvent) > getEventTimestampMs(fbEvent))
+        ) {
+          fbEvent = ownerDefaultApiEvent;
+        }
+
         // Legacy Google UID migration fallback if user has no scoped doc yet
         if (!fbEvent && activeUserScope.isAuthenticated && !isFromShareLink && authUser?.uid) {
           const legacyEvent = await fetchEventFromFirebase(`event_${authUser.uid}`);
@@ -1729,8 +1824,15 @@ export default function App() {
           setEvent(sanitized);
           if (!isFromShareLink) {
             try {
+              const rawBase = sanitized.templateId || stripScopedEventId(sanitized.id || DEFAULT_PRESET_EVENT_ID);
               localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(sanitized));
               localStorage.setItem(getUserStorageKey(`wedding_template_saved_${sanitized.id}`, scopeId), JSON.stringify(sanitized));
+              localStorage.setItem(getUserStorageKey(`wedding_template_saved_${rawBase}`, scopeId), JSON.stringify(sanitized));
+              localStorage.setItem(getUserStorageKey('wedding_last_active_template_id', scopeId), sanitized.id);
+              if (sanitized.eventType) {
+                localStorage.setItem(getUserStorageKey(`wedding_template_type_${sanitized.eventType}`, scopeId), JSON.stringify(sanitized));
+                localStorage.setItem(getUserStorageKey('wedding_last_template_type', scopeId), sanitized.eventType);
+              }
             } catch {}
           }
           return;
@@ -1743,7 +1845,11 @@ export default function App() {
 
       try {
         const ownerParam = targetOwnerFilter ? `&ownerId=${encodeURIComponent(targetOwnerFilter)}` : '';
-        const apiQuery = `id=${encodeURIComponent(fetchId)}${urlTypeParam ? `&type=${encodeURIComponent(urlTypeParam)}` : ''}${ownerParam}`;
+        const ownerEmailParam =
+          activeUserScope.isAuthenticated && !isFromShareLink && activeUserScope.ownerEmail
+            ? `&ownerEmail=${encodeURIComponent(activeUserScope.ownerEmail)}`
+            : '';
+        const apiQuery = `id=${encodeURIComponent(fetchId)}${urlTypeParam ? `&type=${encodeURIComponent(urlTypeParam)}` : ''}${ownerParam}${ownerEmailParam}`;
         const res = await fetch(`/api/event?${apiQuery}`);
         if (cancelled || hasSavedLocallyRef.current) return;
         if (res.ok) {
@@ -2074,62 +2180,61 @@ export default function App() {
     // 1. Instant per-user local cache save
     persistLocalCaches(preparedEvent);
 
-    // 2. Persist simultaneously to Firebase Firestore and Server API
-    const saveServerApi = async () => {
+    // 2. Persist simultaneously to Firebase Firestore and Server API with exact verification
+    const saveServerApi = async (): Promise<{ ok: boolean; event?: WeddingEvent; error?: string }> => {
+      const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      const timerId = controller ? setTimeout(() => controller.abort(), 7000) : null;
       try {
-        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-        const timerId = controller ? setTimeout(() => controller.abort(), 8000) : null;
         const response = await fetch('/api/event', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(preparedEvent),
           signal: controller?.signal,
         });
-        if (timerId !== null) clearTimeout(timerId);
         if (!response.ok) {
           console.error('Server responded with error:', response.status);
+          return { ok: false, error: `HTTP ${response.status}` };
         }
+        const json = await response.json().catch(() => null);
+        if (json?.success) {
+          return {
+            ok: true,
+            event: json.event && typeof json.event === 'object' ? (json.event as WeddingEvent) : preparedEvent,
+          };
+        }
+        return { ok: false, error: json?.error || 'Server rejected event save' };
       } catch (err) {
         console.error('Failed to sync event with server:', err);
+        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+      } finally {
+        if (timerId !== null) clearTimeout(timerId);
       }
     };
 
-    await Promise.allSettled([
-      saveEventToFirebase(preparedEvent, { skipRestApi: true, writeTimeoutMs: 5500 }).catch(err => {
-        console.warn('Firebase save fallback:', err);
-      }),
+    const [firestoreResult, serverResult] = await Promise.all([
+      saveEventReliable(preparedEvent, { skipRestApi: true, writeTimeoutMs: 5500 }).catch((err) => ({
+        event: preparedEvent,
+        serverOk: false,
+        firestoreOk: false,
+        error: err instanceof Error ? err.message : String(err),
+      })),
       saveServerApi(),
     ]);
 
-    // 3. Read back the persisted record directly from the database so UI displays confirmed DB data
-    let confirmedDbEvent: WeddingEvent = preparedEvent;
-    try {
-      const dbFetched = await fetchEventFromFirebase(
-        preparedEvent.id,
-        preparedEvent.ownerId || (activeUserScope.isAuthenticated ? scopeId : undefined),
-        {
-          includeServerApi: true,
-          templateType: validatedType,
-          ownerEmail: preparedEvent.ownerEmail,
-        }
-      );
-      if (dbFetched) {
-        const dbMs = getEventTimestampMs(dbFetched);
-        const preparedMs = getEventTimestampMs(preparedEvent);
-        if (dbMs >= preparedMs || preparedMs === 0) {
-          confirmedDbEvent = sanitizeWeddingEvent({
-            ...dbFetched,
-            id: dbFetched.id || preparedEvent.id,
-            templateId: dbFetched.templateId || preparedEvent.templateId,
-            ownerId: dbFetched.ownerId || preparedEvent.ownerId,
-            ownerEmail: dbFetched.ownerEmail || preparedEvent.ownerEmail,
-            eventType: dbFetched.eventType || validatedType,
-          });
-        }
-      }
-    } catch (fetchErr) {
-      console.warn('Post-save database fetch fallback:', fetchErr);
+    if (!serverResult.ok && !firestoreResult.firestoreOk) {
+      throw new Error(serverResult.error || firestoreResult.error || 'Failed to save to Database and Server');
     }
+
+    // 3. Use directly confirmed database payload without redundant read-back round-trip
+    const confirmedSource = serverResult.ok && serverResult.event ? serverResult.event : preparedEvent;
+    const confirmedDbEvent: WeddingEvent = sanitizeWeddingEvent({
+      ...confirmedSource,
+      id: confirmedSource.id || preparedEvent.id,
+      templateId: confirmedSource.templateId || preparedEvent.templateId,
+      ownerId: confirmedSource.ownerId || preparedEvent.ownerId,
+      ownerEmail: confirmedSource.ownerEmail || preparedEvent.ownerEmail,
+      eventType: confirmedSource.eventType || validatedType,
+    });
 
     lastSavedAtRef.current = getEventTimestampMs(confirmedDbEvent) || lastSavedAtRef.current;
     setEvent(confirmedDbEvent);
@@ -2412,6 +2517,7 @@ export default function App() {
         coverMonogramGroom={config.cover_monogram_groom}
         coverMonogramBride={config.cover_monogram_bride}
         coverMonogramFontFamily={config.cover_monogram_font_family}
+        coverMonogramFontFamilyEn={config.cover_monogram_font_family_en}
         coverMonogramColor={config.cover_monogram_color}
         coverMonogramFontSize={config.cover_monogram_font_size}
         eventDate={event.date || config.invitation_en?.date_time || config.invitation_kh?.date_time}

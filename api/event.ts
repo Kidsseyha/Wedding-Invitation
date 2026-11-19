@@ -76,6 +76,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
   const firebaseCfg = loadFirebaseConfig();
   const parsedUrl = new URL(req.url || '/api/event', 'https://localhost');
   const eventId = getParam(parsedUrl.searchParams, req, 'id').trim();
+  const ownerId = getParam(parsedUrl.searchParams, req, 'ownerId').trim();
   const rawType = getParam(parsedUrl.searchParams, req, 'type').trim();
   const eventType = normalizeCategoryString(rawType) || rawType;
 
@@ -84,6 +85,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       projectId: firebaseCfg.projectId,
       databaseId: firebaseCfg.firestoreDatabaseId,
       eventId,
+      ownerId: ownerId || undefined,
       apiKey: firebaseCfg.apiKey,
     });
     if (fbEvent) {

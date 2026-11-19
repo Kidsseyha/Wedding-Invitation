@@ -3598,12 +3598,18 @@ export function HangingFloralGarlands({ className = '' }: { className?: string }
 export function RococoYinYangMonogramSeal({
   groomInitial = 'ធ',
   brideInitial = 'ន',
+  language = 'kh',
+  fontFamily,
   className = 'w-32 h-32 sm:w-36 sm:h-36',
 }: {
   groomInitial?: string;
   brideInitial?: string;
+  language?: string;
+  fontFamily?: string;
   className?: string;
 }) {
+  const isLatinGroom = language !== 'kh' && /^[A-Za-z0-9.\s]+$/.test(groomInitial);
+  const isLatinBride = language !== 'kh' && /^[A-Za-z0-9.\s]+$/.test(brideInitial);
   return (
     <div className={`relative ${className} select-none flex items-center justify-center filter drop-shadow-[0_4px_12px_rgba(112,26,43,0.3)]`}>
       <svg viewBox="0 0 160 160" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full overflow-visible">
@@ -3690,7 +3696,11 @@ export function RococoYinYangMonogramSeal({
           dominantBaseline="central"
           fill="#701a2b"
           style={{
-            fontFamily: "'Khmer OS Muol Light', 'Moul', serif",
+            fontFamily:
+              fontFamily ||
+              (isLatinGroom
+                ? "'Playfair Display', 'Cinzel', Georgia, serif"
+                : "'Khmer OS Muol Light', 'Moul', serif"),
             fontSize: '19px',
             fontWeight: 'bold',
           }}
@@ -3706,7 +3716,11 @@ export function RococoYinYangMonogramSeal({
           dominantBaseline="central"
           fill="#ffffff"
           style={{
-            fontFamily: "'Khmer OS Muol Light', 'Moul', serif",
+            fontFamily:
+              fontFamily ||
+              (isLatinBride
+                ? "'Playfair Display', 'Cinzel', Georgia, serif"
+                : "'Khmer OS Muol Light', 'Moul', serif"),
             fontSize: '19px',
             fontWeight: 'bold',
           }}
@@ -3863,6 +3877,8 @@ export function KhmerRoyalModernWeddingCover({
   guestName = 'ភ្ញៀវកិត្តិយស',
   titleShape = 'straight',
   language = 'kh',
+  coverMonogramFontFamily,
+  coverMonogramFontFamilyEn,
   onOpenInvitation,
   isOpening = false,
   isAdmin = false,
@@ -3879,6 +3895,8 @@ export function KhmerRoyalModernWeddingCover({
   guestName?: string;
   titleShape?: 'straight' | 'arch-up' | 'arch-down' | 'wave';
   language?: string;
+  coverMonogramFontFamily?: string;
+  coverMonogramFontFamilyEn?: string;
   onOpenInvitation?: () => void;
   isOpening?: boolean;
   isAdmin?: boolean;
@@ -3890,8 +3908,13 @@ export function KhmerRoyalModernWeddingCover({
   const [isEditingInlineGuest, setIsEditingInlineGuest] = useState(false);
   const [tempGuestInput, setTempGuestInput] = useState(guestName || '');
 
-  const groomInitial = getKhmerInitial(groom, 'ដ');
-  const brideInitial = getKhmerInitial(bride, 'ប');
+  const isKhmer = language === 'kh';
+  const groomInitial = isKhmer
+    ? getKhmerInitial(groom, 'ដ')
+    : extractNameInitial(groomEn || 'Chea Dara', groom, 'D');
+  const brideInitial = isKhmer
+    ? getKhmerInitial(bride, 'ប')
+    : extractNameInitial(brideEn || 'Sok Bopha', bride, 'B');
   const rawGuest =
     guestName && guestName !== 'Your Name'
       ? guestName.trim()
@@ -3956,6 +3979,19 @@ export function KhmerRoyalModernWeddingCover({
           <RococoYinYangMonogramSeal
             groomInitial={groomInitial}
             brideInitial={brideInitial}
+            language={language}
+            fontFamily={
+              isKhmer
+                ? (coverMonogramFontFamily &&
+                  !/(Playfair Display|Cinzel|Great Vibes|Alex Brush|Norican|Dancing Script|Parisienne|Satisfy)/i.test(coverMonogramFontFamily)
+                    ? coverMonogramFontFamily
+                    : undefined)
+                : (coverMonogramFontFamilyEn ||
+                  (coverMonogramFontFamily &&
+                  !/(Moulpali|Moul|Angkor|Bokor|Battambang|Taprom|Freehand|Khmer|AKbalthom|Kantumruy|Siemreap|Dangrek|Content|Fasthand)/i.test(coverMonogramFontFamily)
+                    ? coverMonogramFontFamily
+                    : undefined))
+            }
             className="w-32 h-32 sm:w-36 sm:h-36"
           />
         </motion.div>

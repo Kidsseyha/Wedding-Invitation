@@ -21,6 +21,8 @@ import {
   raceWithTimeout,
   pickNewestDatabaseEvent,
   getEventTimestampMs,
+  getUtf8ByteLength,
+  enforceFirestoreEventBounds,
 } from '../utils/saveHelpers';
 
 const USER_DATABASES_COLLECTION = 'user_databases';
@@ -40,19 +42,21 @@ export async function ensureUserDatabaseInFirebase(account: {
   forceSync?: boolean;
   skipRestApi?: boolean;
 }): Promise<UserDatabaseRecord | null> {
-  const cleanEmail = (account.email || '').trim().toLowerCase();
+  const cleanEmail = (account.email || '').trim().toLowerCase().slice(0, 256);
   const dbId = getEmailDatabaseId(account.scopeId || cleanEmail || account.uid || account.name);
   if (!dbId || dbId === GUEST_PUBLIC_SCOPE) return null;
 
-  const now = new Date().toISOString();
-  const resolvedRole =
+  const now = new Date().toISOString().slice(0, 64);
+  const resolvedRole = (
     account.role ||
     (cleanEmail === 'seyhayoeurn2017@gmail.com'
       ? 'owner'
       : cleanEmail === 'yoeurn.seyha@diu.edu.kh'
       ? 'admin'
-      : 'user');
-  const resolvedName = (account.displayName || account.name || cleanEmail.split('@')[0] || 'User').trim();
+      : 'user')
+  ).slice(0, 50);
+  const resolvedName = (account.displayName || account.name || cleanEmail.split('@')[0] || 'User').trim().slice(0, 256);
+  const cleanUid = account.uid ? String(account.uid).trim().slice(0, 128) : undefined;
 
   const record: UserDatabaseRecord = {
     id: dbId,
@@ -60,7 +64,7 @@ export async function ensureUserDatabaseInFirebase(account: {
     displayName: resolvedName,
     role: resolvedRole,
     ownerId: dbId,
-    ...(account.uid ? { uid: account.uid } : {}),
+    ...(cleanUid ? { uid: cleanUid } : {}),
     status: 'active',
     createdAt: now,
     updatedAt: now,
@@ -77,7 +81,7 @@ export async function ensureUserDatabaseInFirebase(account: {
           name: resolvedName,
           displayName: resolvedName,
           role: resolvedRole,
-          uid: account.uid,
+          uid: cleanUid,
           scopeId: dbId,
         }),
       });
@@ -104,9 +108,9 @@ export async function ensureUserDatabaseInFirebase(account: {
       if (cleanEmail) firestorePayload.email = cleanEmail;
       if (resolvedName) firestorePayload.displayName = resolvedName;
       if (resolvedRole) firestorePayload.role = resolvedRole;
-      if (account.uid) firestorePayload.uid = account.uid;
+      if (cleanUid) firestorePayload.uid = cleanUid;
       if (!provisionedDbIds.has(dbId)) {
-        firestorePayload.createdAt = serverDbRecord?.createdAt || now;
+        firestorePayload.createdAt = (serverDbRecord?.createdAt || now).slice(0, 64);
       }
       await setDoc(dbRef, firestorePayload, { merge: true });
       provisionedDbIds.add(dbId);
@@ -233,24 +237,30 @@ async function downsampleBase64Image(base64Str: string, maxWidth = 650, maxHeigh
 
 /**
  * Prepares a safe, compact payload specifically bounded for Firestore's 1MB document limit
+ * and validated against Firestore Security Rules (`isValidWeddingEvent` & UTF-8 size).
  */
-async function prepareFirestorePayload(event: WeddingEvent): Promise<WeddingEvent> {
-  const rawStr = JSON.stringify(event);
-  const safeEvent: WeddingEvent = JSON.parse(rawStr);
+async function prepareFirestorePayload(
+  event: WeddingEvent,
+  forcedOwnerId?: string
+): Promise<WeddingEvent> {
+  const safeEvent = enforceFirestoreEventBounds(
+    JSON.parse(JSON.stringify(event)) as WeddingEvent,
+    forcedOwnerId
+  );
 
-  // Strip oversized inline video data URLs (> 200KB) from single Firestore doc
+  // Strip oversized inline video data URLs (> 180KB) from single Firestore doc
   if (Array.isArray(safeEvent.config?.galleryPhotos)) {
     safeEvent.config.galleryPhotos = safeEvent.config.galleryPhotos.filter(
-      (p) => Boolean(p) && !(typeof p === 'string' && p.startsWith('data:video/') && p.length > 200_000)
+      (p) => Boolean(p) && !(typeof p === 'string' && p.startsWith('data:video/') && p.length > 180_000)
     );
   }
 
-  // Fast path: skip expensive canvas downsampling if payload already fits comfortably under Firestore limits
-  if (!needsFirestoreCompaction(rawStr.length)) {
+  // Fast path: check actual UTF-8 byte length (Khmer text is 3 bytes/char)
+  if (!needsFirestoreCompaction(getUtf8ByteLength(JSON.stringify(safeEvent)), 500_000)) {
     return safeEvent;
   }
 
-  // Pass 1: Parallel downsampling of oversized fields
+  // Pass 1: Parallel downsampling of oversized image fields
   const tasks: Promise<void>[] = [];
   if (safeEvent.image && !shouldSkipImageRecompression(safeEvent.image)) {
     tasks.push(
@@ -296,7 +306,7 @@ async function prepareFirestorePayload(event: WeddingEvent): Promise<WeddingEven
         Promise.all(
           cfg.galleryPhotos.map((p) =>
             typeof p === 'string' && !shouldSkipImageRecompression(p)
-              ? downsampleBase64Image(p, 550, 550, 0.55)
+              ? downsampleBase64Image(p, 520, 520, 0.55)
               : Promise.resolve(p)
           )
         ).then((photos) => {
@@ -308,21 +318,30 @@ async function prepareFirestorePayload(event: WeddingEvent): Promise<WeddingEven
 
   await Promise.all(tasks);
 
-  // Pass 2 only if payload still exceeds 650KB
-  const jsonStr = JSON.stringify(safeEvent);
-  if (jsonStr.length > 650_000 && safeEvent.config) {
+  // Pass 2 only if UTF-8 bytes still exceed 700KB
+  if (getUtf8ByteLength(JSON.stringify(safeEvent)) > 700_000 && safeEvent.config) {
     const cfg = safeEvent.config;
     await Promise.all([
-      cfg.main_background ? downsampleBase64Image(cfg.main_background, 400, 400, 0.45).then((r) => { cfg.main_background = r; }) : Promise.resolve(),
-      cfg.cover_background ? downsampleBase64Image(cfg.cover_background, 400, 400, 0.45).then((r) => { cfg.cover_background = r; }) : Promise.resolve(),
-      cfg.details_background ? downsampleBase64Image(cfg.details_background, 400, 400, 0.45).then((r) => { cfg.details_background = r; }) : Promise.resolve(),
-      cfg.event_location ? downsampleBase64Image(cfg.event_location, 400, 400, 0.45).then((r) => { cfg.event_location = r; }) : Promise.resolve(),
-      safeEvent.image ? downsampleBase64Image(safeEvent.image, 400, 400, 0.45).then((r) => { safeEvent.image = r; }) : Promise.resolve(),
+      cfg.main_background && !shouldSkipImageRecompression(cfg.main_background, 40_000)
+        ? downsampleBase64Image(cfg.main_background, 400, 400, 0.45).then((r) => { cfg.main_background = r; })
+        : Promise.resolve(),
+      cfg.cover_background && !shouldSkipImageRecompression(cfg.cover_background, 40_000)
+        ? downsampleBase64Image(cfg.cover_background, 400, 400, 0.45).then((r) => { cfg.cover_background = r; })
+        : Promise.resolve(),
+      cfg.details_background && !shouldSkipImageRecompression(cfg.details_background, 40_000)
+        ? downsampleBase64Image(cfg.details_background, 400, 400, 0.45).then((r) => { cfg.details_background = r; })
+        : Promise.resolve(),
+      cfg.event_location && !shouldSkipImageRecompression(cfg.event_location, 40_000)
+        ? downsampleBase64Image(cfg.event_location, 400, 400, 0.45).then((r) => { cfg.event_location = r; })
+        : Promise.resolve(),
+      safeEvent.image && !shouldSkipImageRecompression(safeEvent.image, 40_000)
+        ? downsampleBase64Image(safeEvent.image, 400, 400, 0.45).then((r) => { safeEvent.image = r; })
+        : Promise.resolve(),
       Array.isArray(cfg.galleryPhotos)
         ? Promise.all(
-            cfg.galleryPhotos.slice(0, 10).map((p) =>
-              typeof p === 'string' && p.startsWith('data:image/')
-                ? downsampleBase64Image(p, 380, 380, 0.45)
+            cfg.galleryPhotos.slice(0, 8).map((p) =>
+              typeof p === 'string' && !shouldSkipImageRecompression(p, 40_000)
+                ? downsampleBase64Image(p, 360, 360, 0.42)
                 : p
             )
           ).then((photos) => { cfg.galleryPhotos = photos; })
@@ -330,26 +349,49 @@ async function prepareFirestorePayload(event: WeddingEvent): Promise<WeddingEven
     ]);
   }
 
-  // Pass 3 safeguard: if still near Firestore 1MB limit, trim bulky inline base64 gallery extras
-  // while preserving portrait image and all text/monogram settings
-  if (JSON.stringify(safeEvent).length > 900_000 && safeEvent.config) {
+  // Pass 3 safeguard: guarantee UTF-8 size fits safely under Firestore's 1,048,576 byte ceiling
+  if (getUtf8ByteLength(JSON.stringify(safeEvent)) > 820_000 && safeEvent.config) {
     const cfg = safeEvent.config;
     if (Array.isArray(cfg.galleryPhotos)) {
       const compactGallery: string[] = [];
       for (const p of cfg.galleryPhotos) {
         if (typeof p !== 'string') continue;
-        if (!p.startsWith('data:image/') || compactGallery.length < 4) {
+        if (!p.startsWith('data:image/') || compactGallery.length < 3) {
           compactGallery.push(p);
         }
       }
       cfg.galleryPhotos = compactGallery;
     }
-    if (JSON.stringify(safeEvent).length > 900_000 && Array.isArray(cfg.galleryPhotos)) {
+    if (getUtf8ByteLength(JSON.stringify(safeEvent)) > 820_000 && Array.isArray(cfg.galleryPhotos)) {
       cfg.galleryPhotos = cfg.galleryPhotos.filter((p) => typeof p === 'string' && !p.startsWith('data:'));
+    }
+    // Progressive fallback for oversized inline background/QR base64 fields if still over 820KB
+    const trimOrder: Array<'details_background' | 'main_background' | 'cover_background' | 'event_location' | 'envelope_header_image' | 'qr_code_riel' | 'qr_code'> = [
+      'details_background',
+      'main_background',
+      'cover_background',
+      'event_location',
+      'envelope_header_image',
+      'qr_code_riel',
+      'qr_code',
+    ];
+    for (const key of trimOrder) {
+      if (getUtf8ByteLength(JSON.stringify(safeEvent)) <= 820_000) break;
+      const val = cfg[key];
+      if (typeof val === 'string' && val.startsWith('data:image/')) {
+        const tiny = await downsampleBase64Image(val, 260, 260, 0.35);
+        cfg[key] = tiny;
+        if (getUtf8ByteLength(JSON.stringify(safeEvent)) > 820_000 && cfg[key].length > 50_000) {
+          delete cfg[key];
+        }
+      }
+    }
+    if (getUtf8ByteLength(JSON.stringify(safeEvent)) > 820_000 && typeof safeEvent.image === 'string' && safeEvent.image.startsWith('data:image/')) {
+      safeEvent.image = await downsampleBase64Image(safeEvent.image, 260, 260, 0.35);
     }
   }
 
-  return safeEvent;
+  return enforceFirestoreEventBounds(safeEvent, forcedOwnerId);
 }
 
 /**
@@ -425,9 +467,13 @@ export async function addWishToFirebase(wish: any) {
 /**
  * Increment heart likes on a wish
  */
-export async function likeWishInFirebase(wishId: string, eventId?: string) {
+export async function likeWishInFirebase(wishId: string, eventId?: string, ownerId?: string) {
   let updatedWish: any = null;
-  const querySuffix = eventId ? `?eventId=${encodeURIComponent(eventId)}` : '';
+  const effectiveOwner = ownerId || extractScopeFromEventId(eventId) || '';
+  const queryParams = new URLSearchParams();
+  if (eventId) queryParams.set('eventId', eventId);
+  if (effectiveOwner && effectiveOwner !== GUEST_PUBLIC_SCOPE) queryParams.set('ownerId', effectiveOwner);
+  const querySuffix = queryParams.toString() ? `?${queryParams.toString()}` : '';
 
   // 1. Local/Server API update
   try {
@@ -437,6 +483,9 @@ export async function likeWishInFirebase(wishId: string, eventId?: string) {
     const wish = wishes.find((w: any) => w.id === wishId);
     if (wish) {
       wish.likes = (wish.likes || 0) + 1;
+      if (!wish.ownerId && effectiveOwner) {
+        wish.ownerId = effectiveOwner;
+      }
       updatedWish = wish;
       await fetch('/api/wishes', {
         method: 'POST',
@@ -455,6 +504,7 @@ export async function likeWishInFirebase(wishId: string, eventId?: string) {
       const snap = await getDoc(docRef);
       const resolvedOwner =
         updatedWish?.ownerId ||
+        effectiveOwner ||
         (snap.exists() ? snap.data()?.ownerId : '') ||
         extractScopeFromEventId(updatedWish?.eventId || eventId || '') ||
         '';
@@ -526,7 +576,12 @@ export async function likeWishInFirebase(wishId: string, eventId?: string) {
  * Delete a wish from both server and Firestore (top-level + personal email database)
  */
 export async function deleteWishInFirebase(wishId: string, eventId?: string, ownerId?: string): Promise<void> {
-  const querySuffix = eventId ? `?eventId=${encodeURIComponent(eventId)}` : '';
+  const effectiveOwner = ownerId || extractScopeFromEventId(eventId) || '';
+  const queryParams = new URLSearchParams();
+  if (eventId) queryParams.set('eventId', eventId);
+  if (effectiveOwner && effectiveOwner !== GUEST_PUBLIC_SCOPE) queryParams.set('ownerId', effectiveOwner);
+  const querySuffix = queryParams.toString() ? `?${queryParams.toString()}` : '';
+
   // 1. Delete from REST API
   try {
     await fetch(`/api/wishes/${encodeURIComponent(wishId)}${querySuffix}`, {
@@ -541,7 +596,7 @@ export async function deleteWishInFirebase(wishId: string, eventId?: string, own
     try {
       const docRef = doc(db, 'wishes', wishId);
       await deleteDoc(docRef);
-      const targetDbId = resolveRecordDatabaseId({ ownerId, eventId });
+      const targetDbId = resolveRecordDatabaseId({ ownerId: effectiveOwner, eventId });
       if (targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE) {
         try {
           await deleteDoc(doc(db, USER_DATABASES_COLLECTION, targetDbId, 'wishes', wishId));
@@ -711,11 +766,19 @@ export async function fetchEventFromFirebase(
     ownerEmail: options?.ownerEmail,
     eventId: targetId,
   });
-  const branchTimeoutMs = options?.timeoutMs ?? (options?.forceServer ? 1400 : 2500);
+  const branchTimeoutMs = options?.timeoutMs ?? (options?.forceServer ? 600 : 900);
+
+  const isBelongingToTargetOwner = (cand: WeddingEvent | null | undefined): cand is WeddingEvent => {
+    if (!cand || typeof cand !== 'object') return false;
+    if (!targetDbId || targetDbId === GUEST_PUBLIC_SCOPE) {
+      return !cand.ownerId || cand.ownerId === GUEST_PUBLIC_SCOPE || cand.ownerId === extractScopeFromEventId(targetId);
+    }
+    return !cand.ownerId || cand.ownerId === targetDbId || cand.ownerId === ownerId;
+  };
 
   let fastBest: WeddingEvent | null = null;
   const considerFastResult = (cand: WeddingEvent | null) => {
-    if (!cand || !options?.onFastResult) return cand;
+    if (!isBelongingToTargetOwner(cand) || !options?.onFastResult) return cand;
     const picked = pickNewestDatabaseEvent<WeddingEvent>([fastBest, cand]);
     if (picked && picked !== fastBest) {
       fastBest = picked;
@@ -765,14 +828,17 @@ export async function fetchEventFromFirebase(
       ? readDocFast(doc(db, USER_DATABASES_COLLECTION, targetDbId, 'events', targetId)).then(considerFastResult)
       : Promise.resolve(null);
 
-  const topFsPromise: Promise<WeddingEvent | null> = !IS_FIRESTORE_WRITE_DISABLED
-    ? readDocFast(doc(db, 'events', targetId))
-        .catch((error) => {
-          handleFirestoreError(error, OperationType.GET, `events/${targetId}`);
-          return null;
-        })
-        .then(considerFastResult)
-    : Promise.resolve(null);
+  const shouldSkipGlobalTopDoc = Boolean(targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE && isGlobalSharedPresetId(targetId));
+  const topFsPromise: Promise<WeddingEvent | null> =
+    !IS_FIRESTORE_WRITE_DISABLED && !shouldSkipGlobalTopDoc
+      ? readDocFast(doc(db, 'events', targetId))
+          .catch((error) => {
+            handleFirestoreError(error, OperationType.GET, `events/${targetId}`);
+            return null;
+          })
+          .then((docData) => (isBelongingToTargetOwner(docData) ? docData : null))
+          .then(considerFastResult)
+      : Promise.resolve(null);
 
   const includeServerApi = options?.includeServerApi !== false;
   const serverApiPromise: Promise<WeddingEvent | null> = includeServerApi
@@ -781,6 +847,7 @@ export async function fetchEventFromFirebase(
         const timerId = controller ? setTimeout(() => controller.abort(), branchTimeoutMs) : null;
         try {
           const ownerParam = ownerId && ownerId !== GUEST_PUBLIC_SCOPE ? `&ownerId=${encodeURIComponent(ownerId)}` : '';
+          const ownerEmailParam = options?.ownerEmail ? `&ownerEmail=${encodeURIComponent(options.ownerEmail)}` : '';
           const typeParam = options?.templateType ? `&type=${encodeURIComponent(options.templateType)}` : '';
           const cacheBust = options?.forceServer ? `&_t=${Date.now()}` : '';
           const fetchOpts: RequestInit = {
@@ -789,23 +856,23 @@ export async function fetchEventFromFirebase(
           };
 
           const res = await fetch(
-            `/api/event?id=${encodeURIComponent(targetId)}${typeParam}${ownerParam}${cacheBust}`,
+            `/api/event?id=${encodeURIComponent(targetId)}${typeParam}${ownerParam}${ownerEmailParam}${cacheBust}`,
             fetchOpts
           );
           if (res.ok) {
             const json = await res.json();
-            if (json?.success && json.event && json.source !== 'preset') {
+            if (json?.success && json.event && json.source !== 'preset' && isBelongingToTargetOwner(json.event)) {
               return json.event as WeddingEvent;
             }
             // Only query ?type= separately if the ID lookup found nothing at all (not_found)
             if (options?.templateType && json?.source === 'not_found') {
               const typeRes = await fetch(
-                `/api/event?type=${encodeURIComponent(options.templateType)}${ownerParam}${cacheBust}`,
+                `/api/event?type=${encodeURIComponent(options.templateType)}${ownerParam}${ownerEmailParam}${cacheBust}`,
                 fetchOpts
               );
               if (typeRes.ok) {
                 const typeJson = await typeRes.json();
-                if (typeJson?.success && typeJson.event && typeJson.source !== 'preset') {
+                if (typeJson?.success && typeJson.event && typeJson.source !== 'preset' && isBelongingToTargetOwner(typeJson.event)) {
                   return typeJson.event as WeddingEvent;
                 }
               }
@@ -828,7 +895,11 @@ export async function fetchEventFromFirebase(
     serverApiPromise,
   ]);
 
-  return pickNewestDatabaseEvent<WeddingEvent>([scopedDoc, topDoc, apiDoc]);
+  return pickNewestDatabaseEvent<WeddingEvent>([
+    scopedDoc,
+    isBelongingToTargetOwner(topDoc) ? topDoc : null,
+    isBelongingToTargetOwner(apiDoc) ? apiDoc : null,
+  ]);
 }
 
 /**
@@ -921,6 +992,162 @@ export async function fetchUserTemplatesFromFirebase(
   return Array.from(results.values());
 }
 
+export interface SaveEventReliableResult {
+  event: WeddingEvent;
+  serverOk: boolean;
+  firestoreOk: boolean;
+  serverEvent?: WeddingEvent | null;
+  error?: string;
+}
+
+/**
+ * Save wedding event config to both Server and Firestore in parallel with exact status reporting,
+ * strict rules boundary enforcement, and self-healing per-user database provisioning.
+ */
+export async function saveEventReliable(
+  event: WeddingEvent,
+  options?: { skipRestApi?: boolean; writeTimeoutMs?: number }
+): Promise<SaveEventReliableResult> {
+  const safeEventId =
+    String(event.id || DEFAULT_PRESET_EVENT_ID)
+      .replace(/[^a-zA-Z0-9_-]/g, '_')
+      .slice(0, 128) || DEFAULT_PRESET_EVENT_ID;
+
+  const targetDbId = resolveRecordDatabaseId({
+    ownerId: event.ownerId,
+    ownerEmail: event.ownerEmail,
+    eventId: safeEventId,
+  });
+
+  const serverPayload: WeddingEvent = {
+    ...event,
+    id: safeEventId,
+    name: (event.name || 'អាពាហ៍ពិពាហ៍').slice(0, 300),
+    slug: (event.slug || 'wedding').slice(0, 128),
+    groom: (event.groom || '').slice(0, 200),
+    bride: (event.bride || '').slice(0, 200),
+    ...(targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE ? { ownerId: targetDbId } : {}),
+    updatedAt: event.updatedAt || new Date().toISOString(),
+  };
+
+  let serverOk = Boolean(options?.skipRestApi);
+  let serverEvent: WeddingEvent | null = null;
+  let firestoreOk = false;
+  let lastError: string | undefined;
+
+  const serverPromise: Promise<void> = !options?.skipRestApi
+    ? (async () => {
+        const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        const timerId = controller ? setTimeout(() => controller.abort(), options?.writeTimeoutMs ?? 7000) : null;
+        try {
+          const res = await fetch('/api/event', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(serverPayload),
+            signal: controller?.signal,
+          });
+          if (res.ok) {
+            const json = await res.json().catch(() => null);
+            if (json?.success) {
+              serverOk = true;
+              if (json.event && typeof json.event === 'object') {
+                serverEvent = json.event as WeddingEvent;
+              }
+            }
+          } else {
+            lastError = `Server responded with HTTP ${res.status}`;
+          }
+        } catch (e) {
+          lastError = e instanceof Error ? e.message : String(e);
+          console.warn('REST API save event error:', e);
+        } finally {
+          if (timerId !== null) clearTimeout(timerId);
+        }
+      })()
+    : Promise.resolve();
+
+  const firestorePromise: Promise<void> = !IS_FIRESTORE_WRITE_DISABLED
+    ? (async () => {
+        const writeWork = async () => {
+          try {
+            const scopedOwner = targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE ? targetDbId : undefined;
+            const firestorePayload = await prepareFirestorePayload(serverPayload, scopedOwner);
+
+            const writePromises: Promise<boolean>[] = [];
+
+            if (scopedOwner) {
+              if (!provisionedDbIds.has(scopedOwner)) {
+                await ensureUserDatabaseInFirebase({
+                  scopeId: scopedOwner,
+                  email: serverPayload.ownerEmail,
+                  skipRestApi: true,
+                });
+              }
+
+              const scopedRef = doc(db, USER_DATABASES_COLLECTION, scopedOwner, 'events', safeEventId);
+              const writeScoped = async () => {
+                try {
+                  await setDoc(scopedRef, firestorePayload);
+                  return true;
+                } catch (err: any) {
+                  // Self-heal if user_databases root doc was missing or not yet provisioned in Firestore
+                  const msg = String(err?.message || err?.code || '');
+                  if (msg.includes('permission-denied') || msg.includes('Missing or insufficient permissions')) {
+                    provisionedDbIds.delete(scopedOwner);
+                    await ensureUserDatabaseInFirebase({
+                      scopeId: scopedOwner,
+                      email: serverPayload.ownerEmail,
+                      forceSync: true,
+                      skipRestApi: true,
+                    });
+                    await setDoc(scopedRef, firestorePayload);
+                    return true;
+                  }
+                  throw err;
+                }
+              };
+              writePromises.push(writeScoped());
+            }
+
+            if (!scopedOwner || !isGlobalSharedPresetId(safeEventId)) {
+              const docRef = doc(db, 'events', safeEventId);
+              writePromises.push(
+                setDoc(docRef, firestorePayload)
+                  .then(() => true)
+                  .catch((err) => {
+                    // Only treat top-level write failure as fatal when there is no scoped DB target
+                    if (!scopedOwner) throw err;
+                    console.warn('Firestore top-level mirror notice:', err);
+                    return false;
+                  })
+              );
+            }
+
+            const results = await Promise.all(writePromises);
+            firestoreOk = results.some(Boolean);
+          } catch (error) {
+            lastError = error instanceof Error ? error.message : String(error);
+            console.warn('Firestore write event error (handled defensively):', error);
+            handleFirestoreError(error, OperationType.WRITE, `events/${safeEventId}`);
+          }
+        };
+
+        const timeoutMs = options?.writeTimeoutMs ?? 5500;
+        await raceWithTimeout(writeWork(), timeoutMs, undefined);
+      })()
+    : Promise.resolve();
+
+  await Promise.all([serverPromise, firestorePromise]);
+
+  return {
+    event: serverEvent || serverPayload,
+    serverOk,
+    firestoreOk,
+    serverEvent,
+    error: lastError,
+  };
+}
+
 /**
  * Save wedding event config to both Server and Firestore with defensive size enforcement
  */
@@ -928,63 +1155,8 @@ export async function saveEventToFirebase(
   event: WeddingEvent,
   options?: { skipRestApi?: boolean; writeTimeoutMs?: number }
 ) {
-  const eventId = event.id || 'cmgrawhnk0003le0434762j7n';
-
-  // 1. Sync full rich data with server API (supports up to 50MB payload) unless caller already synced it
-  const serverPayload: WeddingEvent = {
-    ...event,
-    id: eventId,
-    name: event.name || 'អាពាហ៍ពិពាហ៍',
-    slug: event.slug || 'wedding',
-    groom: event.groom || '',
-    bride: event.bride || '',
-    updatedAt: event.updatedAt || new Date().toISOString(),
-  };
-
-  if (!options?.skipRestApi) {
-    try {
-      await fetch('/api/event', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(serverPayload),
-      });
-    } catch (e) {
-      console.warn('REST API save event error:', e);
-    }
-  }
-
-  // 2. Sync with Firestore safely with bounded wait (writes to both personal /user_databases/{dbId}/events & /events)
-  if (!IS_FIRESTORE_WRITE_DISABLED) {
-    const writePromise = (async () => {
-      try {
-        const firestorePayload = await prepareFirestorePayload(serverPayload);
-        const targetDbId = resolveRecordDatabaseId({
-          ownerId: serverPayload.ownerId,
-          ownerEmail: serverPayload.ownerEmail,
-          eventId,
-        });
-        if (targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE) {
-          await ensureUserDatabaseInFirebase({
-            scopeId: targetDbId,
-            email: serverPayload.ownerEmail,
-            skipRestApi: true,
-          });
-          const scopedRef = doc(db, USER_DATABASES_COLLECTION, targetDbId, 'events', eventId);
-          await setDoc(scopedRef, { ...firestorePayload, ownerId: firestorePayload.ownerId || targetDbId }, { merge: true });
-        }
-        const docRef = doc(db, 'events', eventId);
-        await setDoc(docRef, firestorePayload, { merge: true });
-      } catch (error) {
-        console.warn('Firestore write event error (handled defensively):', error);
-        handleFirestoreError(error, OperationType.WRITE, `events/${eventId}`);
-      }
-    })();
-
-    const timeoutMs = options?.writeTimeoutMs ?? 5000;
-    await raceWithTimeout(writePromise, timeoutMs, undefined);
-  }
-
-  return serverPayload;
+  const result = await saveEventReliable(event, options);
+  return result.event;
 }
 
 /**
@@ -1034,11 +1206,20 @@ export function subscribeToEvent(
   const targetId = eventId || 'cmgrawhnk0003le0434762j7n';
   const targetDbId = resolveRecordDatabaseId({ ownerId, eventId: targetId });
 
+  const isOwnedByTarget = (incoming: WeddingEvent | null | undefined): incoming is WeddingEvent => {
+    if (!incoming || typeof incoming !== 'object') return false;
+    if (!targetDbId || targetDbId === GUEST_PUBLIC_SCOPE) {
+      return !incoming.ownerId || incoming.ownerId === GUEST_PUBLIC_SCOPE || incoming.ownerId === extractScopeFromEventId(targetId);
+    }
+    return !incoming.ownerId || incoming.ownerId === targetDbId || incoming.ownerId === ownerId;
+  };
+
   // If writes/reads are enabled, subscribe to Firestore real-time updates
   if (!IS_FIRESTORE_WRITE_DISABLED) {
     try {
       let latestMs = -1;
       const emitIfFresh = (incoming: WeddingEvent) => {
+        if (!isOwnedByTarget(incoming)) return;
         const ms = getEventTimestampMs(incoming);
         if (latestMs < 0 || ms >= latestMs) {
           latestMs = ms;
@@ -1065,20 +1246,22 @@ export function subscribeToEvent(
         );
       }
 
-      const docRef = doc(db, 'events', targetId);
-      unsubs.push(
-        onSnapshot(
-          docRef,
-          (snap) => {
-            if (snap.exists()) {
-              emitIfFresh(snap.data() as WeddingEvent);
+      if (!targetDbId || targetDbId === GUEST_PUBLIC_SCOPE || !isGlobalSharedPresetId(targetId)) {
+        const docRef = doc(db, 'events', targetId);
+        unsubs.push(
+          onSnapshot(
+            docRef,
+            (snap) => {
+              if (snap.exists()) {
+                emitIfFresh(snap.data() as WeddingEvent);
+              }
+            },
+            (error) => {
+              handleFirestoreError(error, OperationType.GET, `events/${targetId}`);
             }
-          },
-          (error) => {
-            handleFirestoreError(error, OperationType.GET, `events/${targetId}`);
-          }
-        )
-      );
+          )
+        );
+      }
 
       return () => {
         unsubs.forEach((unsub) => {
@@ -1099,7 +1282,9 @@ export function subscribeToEvent(
       const res = await fetch(`/api/event?id=${encodeURIComponent(targetId)}${ownerParam}`);
       if (res.ok) {
         const json = await res.json();
-        if (json.success && json.event && json.source !== 'preset') callback(json.event);
+        if (json.success && json.event && json.source !== 'preset' && isOwnedByTarget(json.event)) {
+          callback(json.event);
+        }
       }
     } catch (e) {
       // ignore
@@ -1110,11 +1295,12 @@ export function subscribeToEvent(
 }
 
 /**
- * Real-time listener for wishes/blessings scoped to a specific eventId
+ * Real-time listener for wishes/blessings scoped strictly to a specific eventId & ownerId
  */
 export function subscribeToWishes(
   eventIdOrCallback: string | ((wishes: any[]) => void),
-  maybeCallback?: (wishes: any[]) => void
+  maybeCallback?: (wishes: any[]) => void,
+  ownerId?: string
 ) {
   const targetEventId =
     typeof eventIdOrCallback === 'string' && eventIdOrCallback
@@ -1124,41 +1310,93 @@ export function subscribeToWishes(
     typeof eventIdOrCallback === 'function'
       ? eventIdOrCallback
       : maybeCallback!;
+  const targetDbId = resolveRecordDatabaseId({ ownerId, eventId: targetEventId });
 
   if (!IS_FIRESTORE_WRITE_DISABLED) {
     try {
+      const filterAndSort = (rawList: any[]) => {
+        const seen = new Map<string, any>();
+        for (const data of rawList) {
+          if (!data || typeof data !== 'object') continue;
+          const matchesEvent =
+            targetEventId === DEFAULT_PRESET_EVENT_ID
+              ? !data.eventId || data.eventId === targetEventId
+              : data.eventId === targetEventId;
+          const matchesOwner =
+            targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE
+              ? !data.ownerId || data.ownerId === targetDbId
+              : !data.ownerId || data.ownerId === GUEST_PUBLIC_SCOPE;
+          if (matchesEvent && matchesOwner && data.id) {
+            seen.set(data.id, data);
+          }
+        }
+        const merged = Array.from(seen.values());
+        merged.sort((a, b) => new Date(b.createdAt || b.timestamp || 0).getTime() - new Date(a.createdAt || a.timestamp || 0).getTime());
+        return merged;
+      };
+
+      let subWishes: any[] = [];
+      let topWishes: any[] = [];
+      const emitMerged = () => callback(filterAndSort([...topWishes, ...subWishes]));
+
+      const unsubs: Array<() => void> = [];
+
+      if (targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE) {
+        const scopedCol = collection(db, USER_DATABASES_COLLECTION, targetDbId, 'wishes');
+        const scopedQuery =
+          targetEventId === DEFAULT_PRESET_EVENT_ID
+            ? scopedCol
+            : query(scopedCol, where('eventId', '==', targetEventId));
+        unsubs.push(
+          onSnapshot(
+            scopedQuery,
+            (snap) => {
+              subWishes = snap.docs.map((d) => ({ ...d.data(), id: d.data().id || d.id }));
+              emitMerged();
+            },
+            () => {
+              // ignore scoped subcollection listener errors
+            }
+          )
+        );
+      }
+
       const wishesCol = collection(db, 'wishes');
       const sourceQuery =
         targetEventId === DEFAULT_PRESET_EVENT_ID
           ? wishesCol
           : query(wishesCol, where('eventId', '==', targetEventId));
 
-      return onSnapshot(sourceQuery, (snap) => {
-        const wishes: any[] = [];
-        snap.forEach((docSnap) => {
-          const data = docSnap.data();
-          if (targetEventId === DEFAULT_PRESET_EVENT_ID) {
-            if (!data.eventId || data.eventId === targetEventId) {
-              wishes.push(data);
-            }
-          } else if (data.eventId === targetEventId) {
-            wishes.push(data);
+      unsubs.push(
+        onSnapshot(
+          sourceQuery,
+          (snap) => {
+            topWishes = snap.docs.map((d) => ({ ...d.data(), id: d.data().id || d.id }));
+            emitMerged();
+          },
+          (error) => {
+            handleFirestoreError(error, OperationType.GET, 'wishes');
           }
+        )
+      );
+
+      return () => {
+        unsubs.forEach((u) => {
+          try {
+            u();
+          } catch {}
         });
-        wishes.sort((a, b) => new Date(b.createdAt || b.timestamp || 0).getTime() - new Date(a.createdAt || a.timestamp || 0).getTime());
-        callback(wishes);
-      }, (error) => {
-        handleFirestoreError(error, OperationType.GET, 'wishes');
-      });
+      };
     } catch (e) {
       console.warn('Firestore subscription for wishes failed, falling back to REST polling:', e);
     }
   }
 
-  // Fallback polling scoped by eventId
+  // Fallback polling scoped by eventId & ownerId
   const pollWishes = async () => {
     try {
-      const res = await fetch(`/api/wishes?eventId=${encodeURIComponent(targetEventId)}`);
+      const ownerParam = targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE ? `&ownerId=${encodeURIComponent(targetDbId)}` : '';
+      const res = await fetch(`/api/wishes?eventId=${encodeURIComponent(targetEventId)}${ownerParam}`);
       if (res.ok) {
         const json = await res.json();
         if (json.success && json.wishes) callback(json.wishes);

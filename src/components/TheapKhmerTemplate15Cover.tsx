@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { ChevronDown, Check, X } from 'lucide-react';
-import { getFirstNameInitial } from '../utils/monogramHelpers';
+import { getFirstNameInitial, resolveMonogramFontFamily } from '../utils/monogramHelpers';
 
 interface TheapKhmerTemplate15CoverProps {
   groom?: string;
@@ -14,6 +14,7 @@ interface TheapKhmerTemplate15CoverProps {
   coverMonogramGroom?: string;
   coverMonogramBride?: string;
   coverMonogramFontFamily?: string;
+  coverMonogramFontFamilyEn?: string;
   coverMonogramColor?: string;
   coverMonogramFontSize?: string;
   guestName?: string;
@@ -59,6 +60,7 @@ export default function TheapKhmerTemplate15Cover({
   coverMonogramGroom,
   coverMonogramBride,
   coverMonogramFontFamily,
+  coverMonogramFontFamilyEn,
   coverMonogramColor,
   coverMonogramFontSize,
   guestName = 'លោក វ៉ាន់ សុខា',
@@ -85,19 +87,26 @@ export default function TheapKhmerTemplate15Cover({
       : 'Honored Guest';
 
   const isKhmer = language === 'kh';
-  const groomInit =
-    (coverMonogramGroom && coverMonogramGroom.trim()) ||
-    (isKhmer ? getFirstNameInitial(groom, groomEn, 'រ') : getFirstNameInitial(groomEn, groom, 'R'));
-  const brideInit =
-    (coverMonogramBride && coverMonogramBride.trim()) ||
-    (isKhmer ? getFirstNameInitial(bride, brideEn, 'អ') : getFirstNameInitial(brideEn, bride, 'U'));
+  const customGroom = (coverMonogramGroom || '').trim();
+  const customBride = (coverMonogramBride || '').trim();
+  const groomInit = isKhmer
+    ? customGroom || getFirstNameInitial(groom, groomEn, 'ម')
+    : customGroom && !/[\u1780-\u17FF]/.test(customGroom)
+    ? customGroom
+    : getFirstNameInitial(groomEn, groom, 'M');
+  const brideInit = isKhmer
+    ? customBride || getFirstNameInitial(bride, brideEn, 'វ')
+    : customBride && !/[\u1780-\u17FF]/.test(customBride)
+    ? customBride
+    : getFirstNameInitial(brideEn, bride, 'V');
   const isLatinMonogram =
     /^[A-Za-z0-9.\s]+$/.test(groomInit) && (singlePerson || /^[A-Za-z0-9.\s]+$/.test(brideInit));
-  const monogramFontFamily =
-    coverMonogramFontFamily ||
-    (isLatinMonogram
-      ? "'Playfair Display', 'Cinzel', Georgia, serif"
-      : "'Moulpali', 'Moul', 'Noto Serif Khmer', serif");
+  const monogramFontFamily = resolveMonogramFontFamily(
+    language,
+    coverMonogramFontFamily,
+    coverMonogramFontFamilyEn,
+    isLatinMonogram
+  );
   const monogramColor = coverMonogramColor || '#9c732d';
   const monogramSizePx = parseInt(coverMonogramFontSize || '', 10) || (isLatinMonogram ? 34 : 28);
 

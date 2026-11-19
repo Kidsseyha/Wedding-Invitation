@@ -20,7 +20,7 @@ import {
   Play,
   Pause,
 } from 'lucide-react';
-import { TemplateConfig } from '../types';
+import { Language, TemplateConfig } from '../types';
 import { FRAME_PRESETS } from '../data/framePresets';
 import { ThemeMode } from './ThemeToggle';
 import CoverMonogramSettingsCard from './CoverMonogramSettingsCard';
@@ -72,6 +72,7 @@ interface DesignSettingsSectionProps {
   groomEn?: string;
   brideEn?: string;
   singlePerson?: boolean;
+  language?: Language;
 }
 
 // Preset Colors for Cover Invitation EN Name
@@ -502,6 +503,7 @@ export default function DesignSettingsSection({
   groomEn = '',
   brideEn = '',
   singlePerson = false,
+  language = 'kh',
 }: DesignSettingsSectionProps) {
   const frontColor = config.primaryColor || '#f5b80f';
   const bottomColor = config.textColor || '#f5b80f';
@@ -1156,19 +1158,25 @@ export default function DesignSettingsSection({
       </div>
 
       {/* 2.6. អក្សរកាត់ឈ្មោះកូនប្រុស និងកូនស្រីលើ Cover (Cover Monogram Short Text & Styles) */}
-      <CoverMonogramSettingsCard
-        config={config}
-        onUpdateConfig={onUpdateConfig}
-        groom={groom}
-        bride={bride}
-        groomEn={groomEn}
-        brideEn={brideEn}
-        singlePerson={singlePerson}
-        theme={theme}
-        onSave={onSave ? handleSaveToDatabase : undefined}
-        isSaving={isSaving}
-        justSaved={justSaved}
-      />
+      {currentCategory !== 'birthday' &&
+        currentCategory !== 'housewarming' &&
+        currentCategory !== 'anniversary' &&
+        currentCategory !== 'engagement' && (
+        <CoverMonogramSettingsCard
+          config={config}
+          onUpdateConfig={onUpdateConfig}
+          groom={groom}
+          bride={bride}
+          groomEn={groomEn}
+          brideEn={brideEn}
+          singlePerson={singlePerson}
+          language={language}
+          theme={theme}
+          onSave={onSave ? handleSaveToDatabase : undefined}
+          isSaving={isSaving}
+          justSaved={justSaved}
+        />
+      )}
 
       {/* 3. រូបថតគូស្នេហ៍ចម្បង (Hero Portrait Photo) */}
       <DesignFilePicker

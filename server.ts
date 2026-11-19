@@ -18,7 +18,16 @@ import {
   resolveRecordDatabaseId,
   type UserDatabaseRecord,
 } from './src/lib/userDatabase';
-import { GUEST_PUBLIC_SCOPE } from './src/lib/userScope';
+import {
+  GUEST_PUBLIC_SCOPE,
+  extractScopeFromEventId,
+  isGlobalSharedPresetId,
+  stripScopedEventId,
+} from './src/lib/userScope';
+import {
+  findUserDbEvent,
+  shouldIncludePublicRecord,
+} from './src/lib/serverIsolation';
 import rawFirebaseConfig from './firebase-applet-config.json';
 
 // Guard against unhandled errors terminating process
@@ -93,6 +102,8 @@ wss.on('connection', (ws: WebSocket, req) => {
         broadcastWebSocket({
           type: 'wishes:like',
           wishId: parsed.wishId,
+          eventId: parsed.eventId,
+          ownerId: parsed.ownerId,
           timestamp: new Date().toISOString(),
         });
         return;
@@ -101,6 +112,8 @@ wss.on('connection', (ws: WebSocket, req) => {
         broadcastWebSocket({
           type: 'wishes:new',
           wish: parsed.wish,
+          eventId: parsed.wish?.eventId || parsed.eventId,
+          ownerId: parsed.wish?.ownerId || parsed.ownerId,
           timestamp: new Date().toISOString(),
         });
         return;
@@ -156,6 +169,12 @@ function getSafeUserDbDir(dbId: string): string | null {
   return path.join(USER_DATABASES_DIR, cleanId);
 }
 
+function userDbFileExists(dbId: string, filename: string): boolean {
+  const dir = getSafeUserDbDir(dbId);
+  if (!dir) return false;
+  return fs.existsSync(path.join(dir, filename));
+}
+
 function readUserDbJson<T>(dbId: string, filename: string, fallback: T): T {
   const dir = getSafeUserDbDir(dbId);
   if (!dir) return fallback;
@@ -170,14 +189,15 @@ function readUserDbJson<T>(dbId: string, filename: string, fallback: T): T {
   return fallback;
 }
 
-function writeUserDbJson<T>(dbId: string, filename: string, data: T): void {
+function writeUserDbJson<T>(dbId: string, filename: string, data: T, compact = false): void {
   const dir = getSafeUserDbDir(dbId);
   if (!dir) return;
   try {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(path.join(dir, filename), JSON.stringify(data, null, 2), 'utf-8');
+    const serialized = compact ? JSON.stringify(data) : JSON.stringify(data, null, 2);
+    fs.writeFileSync(path.join(dir, filename), serialized, 'utf-8');
   } catch (err) {
     console.error(`Error writing user DB file ${filename} for ${dbId}:`, err);
   }
@@ -439,14 +459,76 @@ function saveShortLink(code: string, url: string) {
 async function resolveTargetEvent(options: {
   eventId?: string | null;
   eventType?: string | null;
+  ownerId?: string | null;
+  ownerEmail?: string | null;
 }): Promise<any> {
   const eventId = (options.eventId || '').trim();
   const eventType = normalizeCategoryString(options.eventType);
+  const ownerId = (options.ownerId || '').trim();
+  const ownerEmail = (options.ownerEmail || '').trim();
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail, eventId });
   const events = getSavedEvents();
 
   let targetEvent: any = null;
 
-  if (eventId && events[eventId]) {
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
+    const userDbEvents = readUserDbJson<Record<string, any>>(dbId, 'events.json', {});
+    targetEvent = findUserDbEvent(userDbEvents, {
+      eventId,
+      eventType,
+      dbId,
+    });
+
+    if (!targetEvent) {
+      // One-time fallback to legacy entries in global saved_events.json strictly owned by dbId
+      const ownedEvents: Record<string, any> = {};
+      for (const [k, evt] of Object.entries(events)) {
+        if (evt && typeof evt === 'object' && (evt.ownerId === dbId || (ownerEmail && String(evt.ownerEmail || '').toLowerCase() === ownerEmail.toLowerCase()))) {
+          ownedEvents[k] = evt;
+        }
+      }
+      targetEvent = findUserDbEvent(ownedEvents, { eventId, eventType, dbId });
+    }
+
+    if (!targetEvent && eventId) {
+      targetEvent = await fetchEventFromFirestoreRest({
+        projectId: rawFirebaseConfig.projectId,
+        databaseId: (rawFirebaseConfig as any).firestoreDatabaseId || '(default)',
+        eventId,
+        ownerId: dbId,
+        ownerEmail,
+      });
+    }
+
+    if (eventType) {
+      const loadedCat = targetEvent
+        ? normalizeCategoryString(targetEvent.eventType || targetEvent.id || targetEvent.name)
+        : null;
+      if (!targetEvent || (loadedCat && loadedCat !== eventType)) {
+        const userCatMatch = findUserDbEvent(userDbEvents, { eventType, dbId });
+        if (userCatMatch) {
+          targetEvent = userCatMatch;
+        } else {
+          const preset = findTemplatePreset(eventType);
+          if (preset) targetEvent = preset.sampleEvent;
+        }
+      }
+    }
+
+    if (!targetEvent && eventId) {
+      const preset = findTemplatePreset(stripScopedEventId(eventId));
+      if (preset) targetEvent = preset.sampleEvent;
+    }
+
+    if (!targetEvent) {
+      targetEvent = findTemplatePreset('wedding')?.sampleEvent;
+    }
+
+    return targetEvent;
+  }
+
+  // Public / unscoped lookup (never leak authenticated users' private events)
+  if (eventId && events[eventId] && shouldIncludePublicRecord(events[eventId])) {
     targetEvent = events[eventId];
   }
 
@@ -463,11 +545,11 @@ async function resolveTargetEvent(options: {
       ? normalizeCategoryString(targetEvent.eventType || targetEvent.id || targetEvent.name)
       : null;
     if (!targetEvent || (loadedCat && loadedCat !== eventType)) {
-      if (events[`type_${eventType}`]) {
+      if (events[`type_${eventType}`] && shouldIncludePublicRecord(events[`type_${eventType}`])) {
         targetEvent = events[`type_${eventType}`];
       } else {
         const matchByType = Object.values(events).find(
-          (e: any) => normalizeCategoryString(e?.eventType || e?.id || e?.name) === eventType
+          (e: any) => shouldIncludePublicRecord(e) && normalizeCategoryString(e?.eventType || e?.id || e?.name) === eventType
         );
         if (matchByType) {
           targetEvent = matchByType;
@@ -480,16 +562,19 @@ async function resolveTargetEvent(options: {
   }
 
   if (!targetEvent && eventId) {
-    if (events[`type_${eventId}`]) {
+    if (events[`type_${eventId}`] && shouldIncludePublicRecord(events[`type_${eventId}`])) {
       targetEvent = events[`type_${eventId}`];
     } else {
-      const preset = findTemplatePreset(eventId);
+      const preset = findTemplatePreset(stripScopedEventId(eventId));
       if (preset) targetEvent = preset.sampleEvent;
     }
   }
 
   if (!targetEvent) {
-    targetEvent = events['default'] || Object.values(events)[0] || findTemplatePreset('wedding')?.sampleEvent;
+    const publicDefault =
+      (events['default'] && shouldIncludePublicRecord(events['default']) ? events['default'] : null) ||
+      Object.values(events).find((e: any) => shouldIncludePublicRecord(e));
+    targetEvent = publicDefault || findTemplatePreset('wedding')?.sampleEvent;
   }
 
   return targetEvent;
@@ -513,6 +598,8 @@ async function getInjectedHtmlAsync(
     guestName?: string | null;
     eventId?: string | null;
     eventType?: string | null;
+    ownerId?: string | null;
+    ownerEmail?: string | null;
     origin: string;
     pageUrl: string;
   }
@@ -520,6 +607,8 @@ async function getInjectedHtmlAsync(
   const targetEvent = await resolveTargetEvent({
     eventId: options.eventId,
     eventType: options.eventType,
+    ownerId: options.ownerId,
+    ownerEmail: options.ownerEmail,
   });
 
   const meta = buildInvitationMeta({
@@ -554,7 +643,7 @@ function saveEvents(events: Record<string, any>) {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
     }
-    fs.writeFileSync(EVENTS_FILE, JSON.stringify(events, null, 2), 'utf-8');
+    fs.writeFileSync(EVENTS_FILE, JSON.stringify(events), 'utf-8');
   } catch (err) {
     console.error('Error writing saved events file:', err);
   }
@@ -661,21 +750,38 @@ app.get('/api/health', (req, res) => {
 
 const DEFAULT_PRESET_ID = 'cmgrawhnk0003le0434762j7n';
 
-// Wishes API (scoped per-email DB + mirrored fallback)
+// Wishes API (strictly isolated per user DB when dbId is known; public wishes filtered cleanly otherwise)
 app.get('/api/wishes', (req, res) => {
   const eventId = (req.query.eventId as string | undefined)?.trim();
   const ownerId = (req.query.ownerId as string | undefined)?.trim();
-  const dbId = resolveRecordDatabaseId({ ownerId, eventId });
-  const dbWishes = dbId ? readUserDbJson<any[]>(dbId, 'wishes.json', []) : [];
-  const wishes = dbWishes.length > 0 ? dbWishes : getSavedWishes();
+  const ownerEmail = (req.query.ownerEmail as string | undefined)?.trim();
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail, eventId });
+
+  let wishes: any[];
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
+    if (userDbFileExists(dbId, 'wishes.json')) {
+      wishes = readUserDbJson<any[]>(dbId, 'wishes.json', []);
+    } else {
+      const legacy = getSavedWishes().filter(
+        (w: any) => w && (w.ownerId === dbId || extractScopeFromEventId(w.eventId) === dbId)
+      );
+      wishes = legacy;
+    }
+  } else {
+    wishes = getSavedWishes().filter((w: any) => shouldIncludePublicRecord(w));
+  }
+
   if (!eventId) {
     return res.json({ success: true, wishes });
   }
+
+  const strippedId = stripScopedEventId(eventId);
   const filtered = wishes.filter((w: any) => {
-    if (eventId === DEFAULT_PRESET_ID) {
-      return !w.eventId || w.eventId === DEFAULT_PRESET_ID;
+    if (w.eventId === eventId) return true;
+    if (eventId === DEFAULT_PRESET_ID || strippedId === DEFAULT_PRESET_ID) {
+      return !w.eventId || w.eventId === DEFAULT_PRESET_ID || w.eventId === eventId;
     }
-    return w.eventId === eventId;
+    return false;
   });
   res.json({ success: true, wishes: filtered });
 });
@@ -685,24 +791,34 @@ app.post('/api/wishes', (req, res) => {
   if (!wish || !wish.id) {
     return res.status(400).json({ error: 'Invalid wish data' });
   }
-  const dbId = resolveRecordDatabaseId({ ownerId: wish.ownerId, eventId: wish.eventId });
-  if (dbId) {
+  const dbId = resolveRecordDatabaseId({ ownerId: wish.ownerId, ownerEmail: wish.ownerEmail, eventId: wish.eventId });
+  const normalizedWish = dbId && dbId !== GUEST_PUBLIC_SCOPE ? { ...wish, ownerId: wish.ownerId || dbId } : wish;
+
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
+    ensureUserDatabaseOnDisk({ scopeId: dbId, email: wish.ownerEmail });
     const dbWishes = readUserDbJson<any[]>(dbId, 'wishes.json', []);
-    const idx = dbWishes.findIndex((w: any) => w.id === wish.id);
-    if (idx >= 0) dbWishes[idx] = wish;
-    else dbWishes.unshift(wish);
+    const idx = dbWishes.findIndex((w: any) => w.id === normalizedWish.id);
+    if (idx >= 0) dbWishes[idx] = normalizedWish;
+    else dbWishes.unshift(normalizedWish);
     writeUserDbJson(dbId, 'wishes.json', dbWishes);
-  }
-  const wishes = getSavedWishes();
-  const existingIdx = wishes.findIndex((w: any) => w.id === wish.id);
-  if (existingIdx >= 0) {
-    wishes[existingIdx] = wish;
   } else {
-    wishes.unshift(wish);
+    const wishes = getSavedWishes();
+    const existingIdx = wishes.findIndex((w: any) => w.id === normalizedWish.id);
+    if (existingIdx >= 0) {
+      wishes[existingIdx] = normalizedWish;
+    } else {
+      wishes.unshift(normalizedWish);
+    }
+    saveWishes(wishes);
   }
-  saveWishes(wishes);
-  broadcastWebSocket({ type: 'wishes:new', wish });
-  res.json({ success: true, wish });
+
+  broadcastWebSocket({
+    type: 'wishes:new',
+    wish: normalizedWish,
+    eventId: normalizedWish.eventId,
+    ownerId: dbId || normalizedWish.ownerId || GUEST_PUBLIC_SCOPE,
+  });
+  res.json({ success: true, wish: normalizedWish });
 });
 
 app.delete('/api/wishes/:id', (req, res) => {
@@ -713,36 +829,57 @@ app.delete('/api/wishes/:id', (req, res) => {
     return res.status(400).json({ error: 'Invalid wish ID' });
   }
   const dbId = resolveRecordDatabaseId({ ownerId, eventId });
-  if (dbId) {
+  let deleted = false;
+
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
     const dbWishes = readUserDbJson<any[]>(dbId, 'wishes.json', []);
     const nextDbWishes = dbWishes.filter((w: any) => {
       if (w.id !== id) return true;
       if (eventId && w.eventId && w.eventId !== eventId) return true;
       return false;
     });
+    deleted = nextDbWishes.length < dbWishes.length;
     writeUserDbJson(dbId, 'wishes.json', nextDbWishes);
+  } else {
+    let wishes = getSavedWishes();
+    const initialLength = wishes.length;
+    wishes = wishes.filter((w: any) => {
+      if (w.id !== id) return true;
+      if (eventId && w.eventId && w.eventId !== eventId) return true;
+      return false;
+    });
+    deleted = wishes.length < initialLength;
+    saveWishes(wishes);
   }
-  let wishes = getSavedWishes();
-  const initialLength = wishes.length;
-  wishes = wishes.filter((w: any) => {
-    if (w.id !== id) return true;
-    if (eventId && w.eventId && w.eventId !== eventId) return true;
-    return false;
+
+  broadcastWebSocket({
+    type: 'wishes:deleted',
+    id,
+    eventId,
+    ownerId: dbId || ownerId || GUEST_PUBLIC_SCOPE,
   });
-  saveWishes(wishes);
-  broadcastWebSocket({ type: 'wishes:deleted', id, eventId });
-  res.json({ success: true, deleted: wishes.length < initialLength, id });
+  res.json({ success: true, deleted, id });
 });
 
-// RSVPs API (scoped per-email DB + mirrored fallback)
+// RSVPs API (strictly isolated per user DB)
 app.get('/api/rsvps', (req, res) => {
   const eventId = (req.query.eventId as string | undefined)?.trim();
   const ownerId = (req.query.ownerId as string | undefined)?.trim();
-  const dbId = resolveRecordDatabaseId({ ownerId, eventId });
-  const source = dbId ? readUserDbJson<any[]>(dbId, 'rsvps.json', []) : getSavedRSVPs();
-  const rsvps = (source.length > 0 ? source : getSavedRSVPs()).filter((r: any) => {
+  const ownerEmail = (req.query.ownerEmail as string | undefined)?.trim();
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail, eventId });
+
+  let source: any[];
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
+    source = userDbFileExists(dbId, 'rsvps.json')
+      ? readUserDbJson<any[]>(dbId, 'rsvps.json', [])
+      : getSavedRSVPs().filter((r: any) => r && (r.ownerId === dbId || extractScopeFromEventId(r.eventId) === dbId));
+  } else {
+    source = getSavedRSVPs().filter((r: any) => shouldIncludePublicRecord(r));
+  }
+
+  const rsvps = source.filter((r: any) => {
     if (eventId && r.eventId !== eventId) return false;
-    if (ownerId && r.ownerId !== ownerId) return false;
+    if (ownerId && ownerId !== GUEST_PUBLIC_SCOPE && r.ownerId && r.ownerId !== ownerId) return false;
     return true;
   });
   res.json({ success: true, rsvps });
@@ -753,28 +890,48 @@ app.post('/api/rsvps', (req, res) => {
   if (!rsvp) {
     return res.status(400).json({ error: 'Invalid rsvp data' });
   }
-  const dbId = resolveRecordDatabaseId({ ownerId: rsvp.ownerId, eventId: rsvp.eventId });
-  if (dbId) {
+  const dbId = resolveRecordDatabaseId({ ownerId: rsvp.ownerId, ownerEmail: rsvp.ownerEmail, eventId: rsvp.eventId });
+  const normalizedRsvp = dbId && dbId !== GUEST_PUBLIC_SCOPE ? { ...rsvp, ownerId: rsvp.ownerId || dbId } : rsvp;
+
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
+    ensureUserDatabaseOnDisk({ scopeId: dbId, email: rsvp.ownerEmail });
     const dbRsvps = readUserDbJson<any[]>(dbId, 'rsvps.json', []);
-    dbRsvps.push(rsvp);
+    dbRsvps.push(normalizedRsvp);
     writeUserDbJson(dbId, 'rsvps.json', dbRsvps);
+  } else {
+    const rsvps = getSavedRSVPs();
+    rsvps.push(normalizedRsvp);
+    saveRSVPs(rsvps);
   }
-  const rsvps = getSavedRSVPs();
-  rsvps.push(rsvp);
-  saveRSVPs(rsvps);
-  broadcastWebSocket({ type: 'rsvps:new', rsvp });
-  res.json({ success: true, rsvp });
+
+  broadcastWebSocket({
+    type: 'rsvps:new',
+    rsvp: normalizedRsvp,
+    eventId: normalizedRsvp.eventId,
+    ownerId: dbId || normalizedRsvp.ownerId || GUEST_PUBLIC_SCOPE,
+  });
+  res.json({ success: true, rsvp: normalizedRsvp });
 });
 
-// Notifications API (Owner Dashboard Alert & Email Trigger, scoped per-email DB)
+// Notifications API (Owner Dashboard Alert & Email Trigger, strictly isolated per user DB)
 app.get('/api/notifications', (req, res) => {
   const eventId = (req.query.eventId as string | undefined)?.trim();
   const ownerId = (req.query.ownerId as string | undefined)?.trim();
-  const dbId = resolveRecordDatabaseId({ ownerId, eventId });
-  const source = dbId ? readUserDbJson<any[]>(dbId, 'notifications.json', []) : getSavedNotifications();
-  const notifications = (source.length > 0 ? source : getSavedNotifications()).filter((n: any) => {
+  const ownerEmail = (req.query.ownerEmail as string | undefined)?.trim();
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail, eventId });
+
+  let source: any[];
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
+    source = userDbFileExists(dbId, 'notifications.json')
+      ? readUserDbJson<any[]>(dbId, 'notifications.json', [])
+      : getSavedNotifications().filter((n: any) => n && (n.ownerId === dbId || extractScopeFromEventId(n.eventId) === dbId));
+  } else {
+    source = getSavedNotifications().filter((n: any) => shouldIncludePublicRecord(n));
+  }
+
+  const notifications = source.filter((n: any) => {
     if (eventId && n.eventId !== eventId) return false;
-    if (ownerId && n.ownerId !== ownerId) return false;
+    if (ownerId && ownerId !== GUEST_PUBLIC_SCOPE && n.ownerId && n.ownerId !== ownerId) return false;
     return true;
   });
   res.json({ success: true, notifications });
@@ -785,34 +942,49 @@ app.post('/api/notifications', (req, res) => {
   if (!notif || !notif.id) {
     return res.status(400).json({ error: 'Invalid notification data' });
   }
-  const dbId = resolveRecordDatabaseId({ ownerId: notif.ownerId, eventId: notif.eventId });
-  if (dbId) {
+  const dbId = resolveRecordDatabaseId({ ownerId: notif.ownerId, ownerEmail: notif.ownerEmail, eventId: notif.eventId });
+  const normalizedNotif = dbId && dbId !== GUEST_PUBLIC_SCOPE ? { ...notif, ownerId: notif.ownerId || dbId } : notif;
+
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
+    ensureUserDatabaseOnDisk({ scopeId: dbId, email: notif.ownerEmail });
     const dbNotifs = readUserDbJson<any[]>(dbId, 'notifications.json', []);
-    dbNotifs.unshift(notif);
+    dbNotifs.unshift(normalizedNotif);
     writeUserDbJson(dbId, 'notifications.json', dbNotifs);
+  } else {
+    const notifications = getSavedNotifications();
+    notifications.unshift(normalizedNotif);
+    saveNotifications(notifications);
   }
-  const notifications = getSavedNotifications();
-  notifications.unshift(notif);
-  saveNotifications(notifications);
-  res.json({ success: true, notification: notif });
+
+  broadcastWebSocket({
+    type: 'notifications:new',
+    notification: normalizedNotif,
+    eventId: normalizedNotif.eventId,
+    ownerId: dbId || normalizedNotif.ownerId || GUEST_PUBLIC_SCOPE,
+  });
+  res.json({ success: true, notification: normalizedNotif });
 });
 
 // Guests API (strictly isolated in each user's personal database directory)
 app.get('/api/guests', (req, res) => {
   const ownerId = (req.query.ownerId as string | undefined)?.trim();
-  if (ownerId && ownerId !== GUEST_PUBLIC_SCOPE) {
-    const dbGuests = readUserDbJson<any[]>(ownerId, 'guests.json', []);
-    if (dbGuests.length > 0) {
+  const ownerEmail = (req.query.ownerEmail as string | undefined)?.trim();
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail });
+
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
+    if (userDbFileExists(dbId, 'guests.json')) {
+      const dbGuests = readUserDbJson<any[]>(dbId, 'guests.json', []);
       return res.json({ success: true, guests: dbGuests });
     }
-    const legacyGuests = getSavedGuests().filter((g: any) => g.ownerId === ownerId);
+    const legacyGuests = getSavedGuests().filter((g: any) => g.ownerId === dbId);
     if (legacyGuests.length > 0) {
-      writeUserDbJson(ownerId, 'guests.json', legacyGuests);
+      writeUserDbJson(dbId, 'guests.json', legacyGuests);
     }
     return res.json({ success: true, guests: legacyGuests });
   }
+
   const allGuests = getSavedGuests();
-  const guests = ownerId ? allGuests.filter((g: any) => g.ownerId === ownerId) : allGuests;
+  const guests = allGuests.filter((g: any) => shouldIncludePublicRecord(g));
   res.json({ success: true, guests });
 });
 
@@ -822,36 +994,50 @@ app.post('/api/guests', (req, res) => {
     return res.status(400).json({ error: 'Invalid guest data' });
   }
   const ownerId = typeof guest.ownerId === 'string' ? guest.ownerId.trim() : '';
-  if (ownerId && ownerId !== GUEST_PUBLIC_SCOPE) {
-    const dbGuests = readUserDbJson<any[]>(ownerId, 'guests.json', []);
-    const dbIdx = dbGuests.findIndex((g: any) => g.id === guest.id);
-    if (dbIdx >= 0) dbGuests[dbIdx] = guest;
-    else dbGuests.push(guest);
-    writeUserDbJson(ownerId, 'guests.json', dbGuests);
-  }
-  const guests = getSavedGuests();
-  const existingIdx = guests.findIndex((g: any) => g.id === guest.id);
-  if (existingIdx >= 0) {
-    guests[existingIdx] = guest;
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail: guest.ownerEmail });
+  const normalizedGuest = dbId && dbId !== GUEST_PUBLIC_SCOPE ? { ...guest, ownerId: dbId } : guest;
+
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
+    ensureUserDatabaseOnDisk({ scopeId: dbId, email: guest.ownerEmail });
+    const dbGuests = readUserDbJson<any[]>(dbId, 'guests.json', []);
+    const dbIdx = dbGuests.findIndex((g: any) => g.id === normalizedGuest.id);
+    if (dbIdx >= 0) dbGuests[dbIdx] = normalizedGuest;
+    else dbGuests.push(normalizedGuest);
+    writeUserDbJson(dbId, 'guests.json', dbGuests);
   } else {
-    guests.push(guest);
+    const guests = getSavedGuests();
+    const existingIdx = guests.findIndex((g: any) => g.id === normalizedGuest.id);
+    if (existingIdx >= 0) {
+      guests[existingIdx] = normalizedGuest;
+    } else {
+      guests.push(normalizedGuest);
+    }
+    saveGuests(guests);
   }
-  saveGuests(guests);
-  res.json({ success: true, guest });
+
+  broadcastWebSocket({
+    type: 'guests:update',
+    ownerId: dbId || GUEST_PUBLIC_SCOPE,
+    guest: normalizedGuest,
+  });
+  res.json({ success: true, guest: normalizedGuest });
 });
 
 app.delete('/api/guests', (req, res) => {
   const id = (req.query.id as string | undefined)?.trim();
   const ownerId = (req.query.ownerId as string | undefined)?.trim();
+  const ownerEmail = (req.query.ownerEmail as string | undefined)?.trim();
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail });
   const clearAll = req.query.all === '1' || req.query.all === 'true';
-  let guests = getSavedGuests();
 
-  if (clearAll && ownerId) {
-    if (ownerId !== GUEST_PUBLIC_SCOPE) {
-      writeUserDbJson(ownerId, 'guests.json', []);
+  if (clearAll && (dbId || ownerId)) {
+    if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
+      writeUserDbJson(dbId, 'guests.json', []);
+    } else {
+      const guests = getSavedGuests().filter((g: any) => g.ownerId !== ownerId && shouldIncludePublicRecord(g));
+      saveGuests(guests);
     }
-    guests = guests.filter((g: any) => g.ownerId !== ownerId);
-    saveGuests(guests);
+    broadcastWebSocket({ type: 'guests:update', ownerId: dbId || ownerId || GUEST_PUBLIC_SCOPE, cleared: true });
     return res.json({ success: true, cleared: true });
   }
 
@@ -859,79 +1045,112 @@ app.delete('/api/guests', (req, res) => {
     return res.status(400).json({ error: 'Missing guest id' });
   }
 
-  if (ownerId && ownerId !== GUEST_PUBLIC_SCOPE) {
-    const dbGuests = readUserDbJson<any[]>(ownerId, 'guests.json', []);
-    writeUserDbJson(ownerId, 'guests.json', dbGuests.filter((g: any) => g.id !== id));
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
+    const dbGuests = readUserDbJson<any[]>(dbId, 'guests.json', []);
+    writeUserDbJson(dbId, 'guests.json', dbGuests.filter((g: any) => g.id !== id));
+  } else {
+    const guests = getSavedGuests().filter((g: any) => {
+      if (g.id !== id) return true;
+      if (!shouldIncludePublicRecord(g)) return true;
+      return false;
+    });
+    saveGuests(guests);
   }
 
-  guests = guests.filter((g: any) => {
-    if (g.id !== id) return true;
-    if (ownerId && g.ownerId && g.ownerId !== ownerId) return true;
-    return false;
-  });
-  saveGuests(guests);
+  broadcastWebSocket({ type: 'guests:update', ownerId: dbId || ownerId || GUEST_PUBLIC_SCOPE, deletedId: id });
   res.json({ success: true });
 });
 
-// Get Event by ID, Type, or ownerId (strictly isolated across per-email DBs)
+// Get Event by ID, Type, or ownerId (strictly isolated across per-user DBs)
 app.get('/api/event', (req, res) => {
   const eventId = (req.query.id as string | undefined)?.trim();
   const eventType = (req.query.type as string | undefined)?.trim();
   const ownerId = (req.query.ownerId as string | undefined)?.trim();
-  const dbId = resolveRecordDatabaseId({ ownerId, eventId });
-  const userDbEvents = dbId ? readUserDbJson<Record<string, any>>(dbId, 'events.json', {}) : {};
+  const ownerEmail = (req.query.ownerEmail as string | undefined)?.trim();
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail, eventId });
   const globalEvents = getSavedEvents();
-  const events = dbId ? { ...globalEvents, ...userDbEvents } : globalEvents;
 
-  // If specific ID is requested
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
+    const userDbEvents = readUserDbJson<Record<string, any>>(dbId, 'events.json', {});
+    let found = findUserDbEvent(userDbEvents, { eventId, eventType, dbId });
+
+    // One-time legacy migration lookup ONLY for records explicitly owned by this dbId
+    if (!found) {
+      const legacyOwned: Record<string, any> = {};
+      for (const [k, evt] of Object.entries(globalEvents)) {
+        if (
+          evt &&
+          typeof evt === 'object' &&
+          (evt.ownerId === dbId ||
+            (ownerEmail && String(evt.ownerEmail || '').toLowerCase() === ownerEmail.toLowerCase()))
+        ) {
+          legacyOwned[k] = evt;
+        }
+      }
+      found = findUserDbEvent(legacyOwned, { eventId, eventType, dbId });
+    }
+
+    if (found) {
+      return res.json({
+        success: true,
+        event: found,
+        source: 'server',
+        ownerId: dbId,
+        ...(eventId ? { requestedId: eventId } : {}),
+        ...(eventType ? { requestedType: eventType } : {}),
+      });
+    }
+
+    if (eventId || eventType) {
+      const preset =
+        (eventType ? findTemplatePreset(eventType) : undefined) ||
+        (eventId ? findTemplatePreset(stripScopedEventId(eventId)) : undefined);
+      if (preset) {
+        return res.json({
+          success: true,
+          event: preset.sampleEvent,
+          source: 'preset',
+          ...(eventId ? { requestedId: eventId } : {}),
+          ...(eventType ? { requestedType: eventType } : {}),
+        });
+      }
+      return res.json({
+        success: true,
+        event: null,
+        source: 'not_found',
+        ...(eventId ? { requestedId: eventId } : {}),
+        ...(eventType ? { requestedType: eventType } : {}),
+      });
+    }
+
+    return res.json({ success: true, event: null, source: 'default', ownerId: dbId });
+  }
+
+  // Unauthenticated public visitor lookup (never returns private user records)
   if (eventId) {
-    if (userDbEvents[eventId]) {
-      return res.json({ success: true, event: userDbEvents[eventId], source: 'server', requestedId: eventId });
+    if (globalEvents[eventId] && shouldIncludePublicRecord(globalEvents[eventId])) {
+      return res.json({ success: true, event: globalEvents[eventId], source: 'server', requestedId: eventId });
     }
-    if (events[eventId]) {
-      return res.json({ success: true, event: events[eventId], source: 'server', requestedId: eventId });
+    if (globalEvents[`type_${eventId}`] && shouldIncludePublicRecord(globalEvents[`type_${eventId}`])) {
+      return res.json({ success: true, event: globalEvents[`type_${eventId}`], source: 'server', requestedId: eventId });
     }
-    if (ownerId) {
-      if (events[`user_${ownerId}_type_${eventId}`]) {
-        return res.json({ success: true, event: events[`user_${ownerId}_type_${eventId}`], source: 'server', requestedId: eventId });
-      }
-      if (eventType && events[`user_${ownerId}_type_${eventType}`]) {
-        return res.json({ success: true, event: events[`user_${ownerId}_type_${eventType}`], source: 'server', requestedId: eventId, requestedType: eventType });
-      }
-    } else {
-      if (events[`type_${eventId}`]) {
-        return res.json({ success: true, event: events[`type_${eventId}`], source: 'server', requestedId: eventId });
-      }
-      if (eventType && events[`type_${eventType}`]) {
-        return res.json({ success: true, event: events[`type_${eventType}`], source: 'server', requestedId: eventId, requestedType: eventType });
-      }
+    if (eventType && globalEvents[`type_${eventType}`] && shouldIncludePublicRecord(globalEvents[`type_${eventType}`])) {
+      return res.json({ success: true, event: globalEvents[`type_${eventType}`], source: 'server', requestedId: eventId, requestedType: eventType });
     }
-    const preset = findTemplatePreset(eventId);
+    const preset = findTemplatePreset(stripScopedEventId(eventId));
     if (preset) {
       return res.json({ success: true, event: preset.sampleEvent, source: 'preset', requestedId: eventId });
     }
     return res.json({ success: true, event: null, requestedId: eventId, source: 'not_found' });
   }
 
-  // If template type is requested
   if (eventType) {
-    if (ownerId) {
-      const userTypeKey = `user_${ownerId}_type_${eventType}`;
-      if (events[userTypeKey]) {
-        return res.json({ success: true, event: events[userTypeKey], source: 'server', requestedType: eventType });
-      }
-      const userMatch = Object.values(events).find((e: any) => e?.ownerId === ownerId && e?.eventType === eventType);
-      if (userMatch) {
-        return res.json({ success: true, event: userMatch, source: 'server', requestedType: eventType });
-      }
-    } else {
-      if (events[`type_${eventType}`]) {
-        return res.json({ success: true, event: events[`type_${eventType}`], source: 'server', requestedType: eventType });
-      }
-      const match = Object.values(events).find((e: any) => e?.eventType === eventType && !e?.ownerId);
-      if (match) {
-        return res.json({ success: true, event: match, source: 'server', requestedType: eventType });
-      }
+    if (globalEvents[`type_${eventType}`] && shouldIncludePublicRecord(globalEvents[`type_${eventType}`])) {
+      return res.json({ success: true, event: globalEvents[`type_${eventType}`], source: 'server', requestedType: eventType });
+    }
+    const match = Object.values(globalEvents).find((e: any) => e?.eventType === eventType && shouldIncludePublicRecord(e));
+    if (match) {
+      return res.json({ success: true, event: match, source: 'server', requestedType: eventType });
     }
     const preset = findTemplatePreset(eventType);
     if (preset) {
@@ -940,54 +1159,58 @@ app.get('/api/event', (req, res) => {
     return res.json({ success: true, event: null, requestedType: eventType, source: 'not_found' });
   }
 
-  // If ownerId is requested with no ID/type, return ONLY that owner's default/first event
-  if (ownerId) {
-    const userDefaultKey = `user_${ownerId}_default`;
-    if (events[userDefaultKey]) {
-      return res.json({ success: true, event: events[userDefaultKey], source: 'server' });
-    }
-    const ownerKeys = Object.keys(events).filter(
-      k => !k.startsWith('type_') && !k.startsWith('user_') && events[k]?.ownerId === ownerId
-    );
-    if (ownerKeys.length > 0) {
-      return res.json({ success: true, event: events[ownerKeys[0]], source: 'server' });
-    }
-    return res.json({ success: true, event: null, source: 'default' });
+  if (globalEvents['default'] && shouldIncludePublicRecord(globalEvents['default'])) {
+    return res.json({ success: true, event: globalEvents['default'], source: 'server' });
   }
 
-  // Fallback for unauthenticated / legacy public visitor
-  if (events['default']) {
-    return res.json({ success: true, event: events['default'], source: 'server' });
-  }
-
-  const keys = Object.keys(events).filter(k => !k.startsWith('type_') && !k.startsWith('user_'));
-  if (keys.length > 0) {
-    return res.json({ success: true, event: events[keys[0]], source: 'server' });
+  const publicKeys = Object.keys(globalEvents).filter(
+    k => !k.startsWith('type_') && !k.startsWith('user_') && shouldIncludePublicRecord(globalEvents[k])
+  );
+  if (publicKeys.length > 0) {
+    return res.json({ success: true, event: globalEvents[publicKeys[0]], source: 'server' });
   }
 
   return res.json({ success: true, event: null, source: 'default' });
 });
 
-// List all saved template IDs on server (strictly filtered by ownerId & reading from per-email DB)
+// List all saved template IDs on server (strictly isolated per user DB)
 app.get('/api/templates', (req, res) => {
   const ownerId = (req.query.ownerId as string | undefined)?.trim();
-  const userDbEvents = ownerId && ownerId !== GUEST_PUBLIC_SCOPE
-    ? readUserDbJson<Record<string, any>>(ownerId, 'events.json', {})
-    : {};
-  const globalEvents = getSavedEvents();
-  const mergedEvents = ownerId ? { ...globalEvents, ...userDbEvents } : globalEvents;
+  const ownerEmail = (req.query.ownerEmail as string | undefined)?.trim();
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail });
 
-  const list = Object.keys(mergedEvents)
+  let sourceEvents: Record<string, any>;
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
+    const userDbEvents = readUserDbJson<Record<string, any>>(dbId, 'events.json', {});
+    const globalEvents = getSavedEvents();
+    const legacyOwned: Record<string, any> = {};
+    for (const [k, evt] of Object.entries(globalEvents)) {
+      if (evt && typeof evt === 'object' && evt.ownerId === dbId) {
+        legacyOwned[k] = evt;
+      }
+    }
+    sourceEvents = { ...legacyOwned, ...userDbEvents };
+  } else {
+    const globalEvents = getSavedEvents();
+    sourceEvents = {};
+    for (const [k, evt] of Object.entries(globalEvents)) {
+      if (shouldIncludePublicRecord(evt)) {
+        sourceEvents[k] = evt;
+      }
+    }
+  }
+
+  const list = Object.keys(sourceEvents)
     .filter(key => !key.startsWith('type_') && !key.startsWith('user_') && key !== 'default')
-    .filter(key => (ownerId ? mergedEvents[key]?.ownerId === ownerId : true))
+    .filter(key => (dbId && dbId !== GUEST_PUBLIC_SCOPE ? !sourceEvents[key]?.ownerId || sourceEvents[key]?.ownerId === dbId : true))
     .map(key => ({
       key,
-      id: mergedEvents[key]?.id,
-      name: mergedEvents[key]?.name,
-      eventType: mergedEvents[key]?.eventType,
-      ownerId: mergedEvents[key]?.ownerId,
-      updatedAt: mergedEvents[key]?.updatedAt,
-      event: mergedEvents[key],
+      id: sourceEvents[key]?.id,
+      name: sourceEvents[key]?.name,
+      eventType: sourceEvents[key]?.eventType,
+      ownerId: sourceEvents[key]?.ownerId,
+      updatedAt: sourceEvents[key]?.updatedAt,
+      event: sourceEvents[key],
     }));
   res.json({ success: true, templates: list });
 });
@@ -1256,78 +1479,124 @@ app.post('/api/verify-email', async (req, res) => {
 });
 
 
-// Save or Update Event (isolated into per-email database directory + shared share-link index)
+// Save or Update Event (strictly isolated per user DB + real-time WebSocket broadcast)
 app.post('/api/event', (req, res) => {
-  const eventData = req.body;
-  if (!eventData || typeof eventData !== 'object') {
+  const rawBody = req.body;
+  if (!rawBody || typeof rawBody !== 'object') {
     return res.status(400).json({ error: 'Invalid event data' });
   }
 
-  const eventId = eventData.id || DEFAULT_PRESET_ID;
-  const eventType = eventData.eventType;
-  const ownerId = typeof eventData.ownerId === 'string' && eventData.ownerId.trim() ? eventData.ownerId.trim() : '';
-  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail: eventData.ownerEmail, eventId });
-  const events = getSavedEvents();
+  const eventId = rawBody.id || DEFAULT_PRESET_ID;
+  const eventType = rawBody.eventType;
+  const ownerId = typeof rawBody.ownerId === 'string' && rawBody.ownerId.trim() ? rawBody.ownerId.trim() : '';
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail: rawBody.ownerEmail, eventId });
+  const nowIso = rawBody.updatedAt || new Date().toISOString();
 
-  events[eventId] = eventData;
+  const eventData =
+    dbId && dbId !== GUEST_PUBLIC_SCOPE
+      ? {
+          ...rawBody,
+          id: eventId,
+          ownerId: ownerId && ownerId !== GUEST_PUBLIC_SCOPE ? ownerId : dbId,
+          updatedAt: nowIso,
+        }
+      : {
+          ...rawBody,
+          id: eventId,
+          updatedAt: nowIso,
+        };
 
-  if (ownerId && ownerId !== GUEST_PUBLIC_SCOPE) {
-    if (eventType) {
-      events[`user_${ownerId}_type_${eventType}`] = eventData;
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
+    if (!userDbFileExists(dbId, 'profile.json')) {
+      ensureUserDatabaseOnDisk({
+        scopeId: dbId,
+        email: eventData.ownerEmail,
+      });
     }
-    events[`user_${ownerId}_default`] = eventData;
-  } else {
-    if (eventType) {
-      events[`type_${eventType}`] = eventData;
-    }
-    events['default'] = eventData;
-  }
-
-  saveEvents(events);
-
-  if (dbId) {
-    ensureUserDatabaseOnDisk({
-      scopeId: dbId,
-      email: eventData.ownerEmail,
-    });
     const userDbEvents = readUserDbJson<Record<string, any>>(dbId, 'events.json', {});
     userDbEvents[eventId] = eventData;
     if (eventType) {
       userDbEvents[`user_${dbId}_type_${eventType}`] = eventData;
     }
     userDbEvents[`user_${dbId}_default`] = eventData;
-    writeUserDbJson(dbId, 'events.json', userDbEvents);
+    writeUserDbJson(dbId, 'events.json', userDbEvents, true);
+
+    // Lightweight profile metadata & eventCount update without re-reading unrelated files
+    const existingProfile = readUserDbJson<Partial<UserDatabaseRecord>>(dbId, 'profile.json', {});
+    if (existingProfile && existingProfile.id === dbId) {
+      const eventCount = Object.keys(userDbEvents).filter(
+        k => !k.startsWith('type_') && !k.startsWith('user_')
+      ).length;
+      writeUserDbJson(dbId, 'profile.json', {
+        ...existingProfile,
+        ...(eventData.ownerEmail ? { email: String(eventData.ownerEmail).trim().toLowerCase() } : {}),
+        eventCount,
+        updatedAt: nowIso,
+      });
+    }
+  } else if (!isGlobalSharedPresetId(eventId) || !ownerId || ownerId === GUEST_PUBLIC_SCOPE) {
+    const events = getSavedEvents();
+    events[eventId] = eventData;
+    if (eventType) {
+      events[`type_${eventType}`] = eventData;
+    }
+    events['default'] = eventData;
+    saveEvents(events);
   }
 
-  res.json({ success: true, event: eventData });
+  broadcastWebSocket({
+    type: 'event:update',
+    eventId,
+    ownerId: dbId || ownerId || GUEST_PUBLIC_SCOPE,
+    event: eventData,
+    timestamp: new Date().toISOString(),
+  });
+
+  res.json({ success: true, event: eventData, ownerId: dbId || ownerId || GUEST_PUBLIC_SCOPE });
 });
 
 app.post('/api/event/reset', (req, res) => {
   const eventId = req.body.eventId || req.body.id || DEFAULT_PRESET_ID;
   const ownerId = typeof req.body.ownerId === 'string' ? req.body.ownerId.trim() : '';
-  const dbId = resolveRecordDatabaseId({ ownerId, eventId });
-  const events = getSavedEvents();
-  if (events[eventId]) {
-    if (!ownerId || !events[eventId].ownerId || events[eventId].ownerId === ownerId) {
-      delete events[eventId];
-    }
-  }
-  if (ownerId && events[`user_${ownerId}_default`] && events[`user_${ownerId}_default`].id === eventId) {
-    delete events[`user_${ownerId}_default`];
-  }
-  if (!ownerId && events['default'] && events['default'].id === eventId) {
-    delete events['default'];
-  }
-  saveEvents(events);
+  const ownerEmail = typeof req.body.ownerEmail === 'string' ? req.body.ownerEmail.trim() : '';
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail, eventId });
 
-  if (dbId) {
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
     const userDbEvents = readUserDbJson<Record<string, any>>(dbId, 'events.json', {});
     delete userDbEvents[eventId];
     if (userDbEvents[`user_${dbId}_default`]?.id === eventId) {
       delete userDbEvents[`user_${dbId}_default`];
     }
     writeUserDbJson(dbId, 'events.json', userDbEvents);
+
+    const events = getSavedEvents();
+    let changedGlobal = false;
+    if (events[eventId] && events[eventId].ownerId === dbId) {
+      delete events[eventId];
+      changedGlobal = true;
+    }
+    if (events[`user_${dbId}_default`]?.id === eventId) {
+      delete events[`user_${dbId}_default`];
+      changedGlobal = true;
+    }
+    if (changedGlobal) saveEvents(events);
+  } else {
+    const events = getSavedEvents();
+    if (events[eventId] && shouldIncludePublicRecord(events[eventId])) {
+      delete events[eventId];
+    }
+    if (events['default'] && events['default'].id === eventId && shouldIncludePublicRecord(events['default'])) {
+      delete events['default'];
+    }
+    saveEvents(events);
   }
+
+  broadcastWebSocket({
+    type: 'event:deleted',
+    eventId,
+    ownerId: dbId || ownerId || GUEST_PUBLIC_SCOPE,
+    timestamp: new Date().toISOString(),
+  });
 
   res.json({ success: true });
 });
@@ -1335,39 +1604,14 @@ app.post('/api/event/reset', (req, res) => {
 app.delete('/api/event', (req, res) => {
   const eventId = (req.query.id as string | undefined)?.trim();
   const ownerId = (req.query.ownerId as string | undefined)?.trim();
+  const ownerEmail = (req.query.ownerEmail as string | undefined)?.trim();
   if (!eventId) {
     return res.status(400).json({ error: 'Missing event id' });
   }
-  const dbId = resolveRecordDatabaseId({ ownerId, eventId });
-  const events = getSavedEvents();
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail, eventId });
   let deleted = false;
-  if (events[eventId] && (!ownerId || !events[eventId].ownerId || events[eventId].ownerId === ownerId)) {
-    delete events[eventId];
-    deleted = true;
-  }
-  if (ownerId) {
-    if (events[`user_${ownerId}_type_${eventId}`]) {
-      delete events[`user_${ownerId}_type_${eventId}`];
-      deleted = true;
-    }
-    if (
-      events[`user_${ownerId}_default`] &&
-      (events[`user_${ownerId}_default`].id === eventId || events[`user_${ownerId}_default`].presetId === eventId)
-    ) {
-      delete events[`user_${ownerId}_default`];
-    }
-  } else {
-    if (events[`type_${eventId}`]) {
-      delete events[`type_${eventId}`];
-      deleted = true;
-    }
-    if (events['default'] && (events['default'].id === eventId || events['default'].presetId === eventId)) {
-      delete events['default'];
-    }
-  }
-  saveEvents(events);
 
-  if (dbId) {
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
     const userDbEvents = readUserDbJson<Record<string, any>>(dbId, 'events.json', {});
     if (userDbEvents[eventId]) {
       delete userDbEvents[eventId];
@@ -1381,7 +1625,39 @@ app.delete('/api/event', (req, res) => {
       delete userDbEvents[`user_${dbId}_default`];
     }
     writeUserDbJson(dbId, 'events.json', userDbEvents);
+
+    const events = getSavedEvents();
+    if (events[eventId] && events[eventId].ownerId === dbId) {
+      delete events[eventId];
+      deleted = true;
+      saveEvents(events);
+    }
+  } else {
+    const events = getSavedEvents();
+    if (events[eventId] && shouldIncludePublicRecord(events[eventId])) {
+      delete events[eventId];
+      deleted = true;
+    }
+    if (events[`type_${eventId}`] && shouldIncludePublicRecord(events[`type_${eventId}`])) {
+      delete events[`type_${eventId}`];
+      deleted = true;
+    }
+    if (
+      events['default'] &&
+      shouldIncludePublicRecord(events['default']) &&
+      (events['default'].id === eventId || events['default'].presetId === eventId)
+    ) {
+      delete events['default'];
+    }
+    saveEvents(events);
   }
+
+  broadcastWebSocket({
+    type: 'event:deleted',
+    eventId,
+    ownerId: dbId || ownerId || GUEST_PUBLIC_SCOPE,
+    timestamp: new Date().toISOString(),
+  });
 
   res.json({ success: true, deleted, id: eventId });
 });
@@ -1389,26 +1665,14 @@ app.delete('/api/event', (req, res) => {
 app.delete('/api/templates/:id', (req, res) => {
   const { id } = req.params;
   const ownerId = (req.query.ownerId as string | undefined)?.trim();
+  const ownerEmail = (req.query.ownerEmail as string | undefined)?.trim();
   if (!id) {
     return res.status(400).json({ error: 'Missing template id' });
   }
-  const dbId = resolveRecordDatabaseId({ ownerId, eventId: id });
-  const events = getSavedEvents();
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail, eventId: id });
   let deleted = false;
-  if (events[id] && (!ownerId || !events[id].ownerId || events[id].ownerId === ownerId)) {
-    delete events[id];
-    deleted = true;
-  }
-  if (ownerId && events[`user_${ownerId}_type_${id}`]) {
-    delete events[`user_${ownerId}_type_${id}`];
-    deleted = true;
-  } else if (!ownerId && events[`type_${id}`]) {
-    delete events[`type_${id}`];
-    deleted = true;
-  }
-  saveEvents(events);
 
-  if (dbId) {
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
     const userDbEvents = readUserDbJson<Record<string, any>>(dbId, 'events.json', {});
     if (userDbEvents[id]) {
       delete userDbEvents[id];
@@ -1419,7 +1683,32 @@ app.delete('/api/templates/:id', (req, res) => {
       deleted = true;
     }
     writeUserDbJson(dbId, 'events.json', userDbEvents);
+
+    const events = getSavedEvents();
+    if (events[id] && events[id].ownerId === dbId) {
+      delete events[id];
+      deleted = true;
+      saveEvents(events);
+    }
+  } else {
+    const events = getSavedEvents();
+    if (events[id] && shouldIncludePublicRecord(events[id])) {
+      delete events[id];
+      deleted = true;
+    }
+    if (events[`type_${id}`] && shouldIncludePublicRecord(events[`type_${id}`])) {
+      delete events[`type_${id}`];
+      deleted = true;
+    }
+    saveEvents(events);
   }
+
+  broadcastWebSocket({
+    type: 'event:deleted',
+    eventId: id,
+    ownerId: dbId || ownerId || GUEST_PUBLIC_SCOPE,
+    timestamp: new Date().toISOString(),
+  });
 
   res.json({ success: true, deleted, id });
 });
@@ -1476,16 +1765,18 @@ app.get('/s/:code', async (req, res) => {
       userAgent.includes('discordbot') ||
       userAgent.includes('viber');
 
-    // Extract guest name, event ID, and category type from target URL if present
+    // Extract guest name, event ID, ownerId, and category type from target URL if present
     let guestName: string | null = null;
     let eventId: string | null = null;
     let eventType: string | null = null;
+    let ownerId: string | null = null;
     let targetOrigin = getRequestPublicOrigin(req);
     try {
       const parsed = new URL(cleanTarget);
       guestName = parsed.searchParams.get('name') || parsed.searchParams.get('i') || parsed.searchParams.get('guest') || parsed.searchParams.get('to');
       eventId = parsed.searchParams.get('id');
       eventType = parsed.searchParams.get('type') || parsed.searchParams.get('category');
+      ownerId = parsed.searchParams.get('ownerId');
       if (parsed.origin && !parsed.origin.includes('localhost') && !parsed.origin.includes('127.0.0.1')) {
         targetOrigin = parsed.origin;
       }
@@ -1505,6 +1796,7 @@ app.get('/s/:code', async (req, res) => {
           guestName,
           eventId,
           eventType,
+          ownerId,
           origin: targetOrigin,
           pageUrl: cleanTarget,
         });
@@ -1671,12 +1963,14 @@ async function startServer() {
         const guestName = (req.query.name || req.query.i || req.query.guest || req.query.to) as string;
         const eventId = req.query.id as string;
         const eventType = (req.query.type || req.query.category) as string;
+        const ownerId = req.query.ownerId as string;
         const origin = getRequestPublicOrigin(req);
 
         const html = await getInjectedHtmlAsync(template, {
           guestName,
           eventId,
           eventType,
+          ownerId,
           origin,
           pageUrl: `${origin}${req.originalUrl}`,
         });
@@ -1706,12 +2000,14 @@ async function startServer() {
         const guestName = (req.query.name || req.query.i || req.query.guest || req.query.to) as string;
         const eventId = req.query.id as string;
         const eventType = (req.query.type || req.query.category) as string;
+        const ownerId = req.query.ownerId as string;
         const origin = getRequestPublicOrigin(req);
 
         html = await getInjectedHtmlAsync(html, {
           guestName,
           eventId,
           eventType,
+          ownerId,
           origin,
           pageUrl: `${origin}${req.originalUrl}`,
         });

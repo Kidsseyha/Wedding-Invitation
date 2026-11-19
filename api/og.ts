@@ -128,6 +128,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
     }
 
     const eventId = getQueryParam(params, req, 'id').trim();
+    const ownerId = getQueryParam(params, req, 'ownerId').trim();
     const rawType = (getQueryParam(params, req, 'type') || getQueryParam(params, req, 'category')).trim();
     const rawGuest = (
       getQueryParam(params, req, 'name') ||
@@ -153,6 +154,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
         projectId: firebaseCfg.projectId,
         databaseId: firebaseCfg.firestoreDatabaseId,
         eventId,
+        ownerId: ownerId || undefined,
         apiKey: firebaseCfg.apiKey,
       });
     }

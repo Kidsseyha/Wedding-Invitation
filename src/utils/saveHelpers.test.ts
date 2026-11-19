@@ -6,6 +6,9 @@ import {
   raceWithTimeout,
   getEventTimestampMs,
   pickNewestDatabaseEvent,
+  getUtf8ByteLength,
+  stripUndefinedDeep,
+  enforceFirestoreEventBounds,
 } from './saveHelpers';
 
 test('shouldSkipImageRecompression skips non-data URLs and small data images', () => {
@@ -53,5 +56,47 @@ test('pickNewestDatabaseEvent prefers richer payload when timestamps match', () 
   const full = { updatedAt: '2026-05-01T10:05:00.000Z', image: 'data:image/jpeg;base64,' + 'x'.repeat(200), config: { cover_monogram_bride: 'B' } };
   assert.equal(getEventTimestampMs(compact), getEventTimestampMs(full));
   assert.equal(pickNewestDatabaseEvent([compact, full]), full);
+});
+
+test('getUtf8ByteLength accurately counts multi-byte Khmer script characters', () => {
+  assert.equal(getUtf8ByteLength('abc'), 3);
+  assert.equal(getUtf8ByteLength('កខគ'), 9);
+});
+
+test('stripUndefinedDeep removes undefined object keys and array entries recursively', () => {
+  const cleaned = stripUndefinedDeep({
+    a: 1,
+    b: undefined,
+    nested: { ok: 'yes', drop: undefined },
+    arr: ['x', undefined, { keep: true, drop: undefined }],
+  });
+  assert.deepEqual(cleaned, {
+    a: 1,
+    nested: { ok: 'yes' },
+    arr: ['x', { keep: true }],
+  });
+});
+
+test('enforceFirestoreEventBounds enforces rules types, non-empty name, id charset, max lengths, and forced ownerId', () => {
+  const normalized = enforceFirestoreEventBounds(
+    {
+      id: 'u_test@bad!id$' + 'x'.repeat(150),
+      name: '   ',
+      groom: 'G'.repeat(250),
+      bride: null,
+      ownerEmail: null,
+      ownerId: 'wrong_owner',
+      config: { keep: true, drop: undefined },
+    },
+    'u_seyha_12345'
+  );
+
+  assert.ok(/^[a-zA-Z0-9_-]{1,128}$/.test(normalized.id));
+  assert.equal(normalized.name, 'អាពាហ៍ពិពាហ៍');
+  assert.equal(normalized.groom.length, 200);
+  assert.equal('bride' in normalized, false);
+  assert.equal('ownerEmail' in normalized, false);
+  assert.equal(normalized.ownerId, 'u_seyha_12345');
+  assert.deepEqual(normalized.config, { keep: true });
 });
 

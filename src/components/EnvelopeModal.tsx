@@ -113,6 +113,7 @@ interface EnvelopeModalProps {
   coverMonogramGroom?: string;
   coverMonogramBride?: string;
   coverMonogramFontFamily?: string;
+  coverMonogramFontFamilyEn?: string;
   coverMonogramColor?: string;
   coverMonogramFontSize?: string;
   eventDate?: string;
@@ -184,6 +185,7 @@ export default function EnvelopeModal({
   coverMonogramGroom,
   coverMonogramBride,
   coverMonogramFontFamily,
+  coverMonogramFontFamilyEn,
   coverMonogramColor,
   coverMonogramFontSize,
   eventDate,
@@ -756,6 +758,8 @@ export default function EnvelopeModal({
                         guestName={guestName && guestName !== 'Your Name' ? guestName : (language === 'kh' ? 'លោក រ៉ូហ្សា\nនិងភរិយាព្រមទាំងបុត្រ' : 'Honored Guest')}
                         titleShape={titleTextShape}
                         language={language}
+                        coverMonogramFontFamily={coverMonogramFontFamily}
+                        coverMonogramFontFamilyEn={coverMonogramFontFamilyEn}
                         onOpenInvitation={handleOpenInvitation}
                         isOpening={isOpening}
                         isAdmin={isAdmin}
@@ -829,6 +833,7 @@ export default function EnvelopeModal({
                         coverMonogramGroom={coverMonogramGroom}
                         coverMonogramBride={coverMonogramBride}
                         coverMonogramFontFamily={coverMonogramFontFamily}
+                        coverMonogramFontFamilyEn={coverMonogramFontFamilyEn}
                         coverMonogramColor={coverMonogramColor}
                         coverMonogramFontSize={coverMonogramFontSize}
                         guestName={guestName && guestName !== 'Your Name' ? guestName : (language === 'kh' ? 'លោក វ៉ាន់ សុខា' : 'Honored Guest')}
