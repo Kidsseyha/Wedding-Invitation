@@ -48,6 +48,7 @@ interface AddGuestModalProps {
   onOpenEnvelopeWithName: (name: string) => void;
   language: Language;
   eventId?: string;
+  eventType?: string;
   ownerId?: string;
   groom?: string;
   bride?: string;
@@ -64,6 +65,7 @@ export default function AddGuestModal({
   onOpenEnvelopeWithName,
   language,
   eventId = 'cmgrawhnk0003le0434762j7n',
+  eventType,
   ownerId,
   groom = 'រ៉ូ ម៉ាឡេ',
   bride = 'លីន វល្ខ័ក',
@@ -627,7 +629,7 @@ export default function AddGuestModal({
     }
   };
 
-  const guestLink = getPublicShareUrl(fullName, eventId);
+  const guestLink = getPublicShareUrl(fullName, eventId, eventType, { ownerId: effectiveOwnerId });
 
   const handleSaveAndApply = (e?: FormEvent) => {
     if (e) e.preventDefault();
@@ -688,7 +690,18 @@ export default function AddGuestModal({
   };
 
   const handleShareTelegram = () => {
-    const text = `សូមគោរពអញ្ជើញ ${fullName} ចូលរួមពិធីសិរីមង្គលអាពាហ៍ពិពាហ៍ ${groom} & ${bride} | Plan Essential Digital Invitation`;
+    const eventLabel =
+      eventType === 'birthday'
+        ? 'ពិធីខួបកំណើត'
+        : eventType === 'housewarming'
+        ? 'ពិធីឡើងគេហដ្ឋានថ្មី'
+        : eventType === 'engagement'
+        ? 'ពិធីភ្ជាប់ពាក្យ'
+        : eventType === 'anniversary'
+        ? 'ពិធីខួបអាពាហ៍ពិពាហ៍'
+        : 'ពិធីសិរីមង្គលអាពាហ៍ពិពាហ៍';
+    const hostDisplay = eventType === 'birthday' || eventType === 'housewarming' ? groom : `${groom} & ${bride}`;
+    const text = `សូមគោរពអញ្ជើញ ${fullName} ចូលរួម${eventLabel} ${hostDisplay} | Plan Essential Digital Invitation`;
     window.open(
       `https://t.me/share/url?url=${encodeURIComponent(guestLink)}&text=${encodeURIComponent(text)}`,
       '_blank'
@@ -1153,7 +1166,7 @@ export default function AddGuestModal({
                                 {language === 'kh' ? 'ជ្រើស' : 'Use'}
                               </button>
                               <a
-                                href={getPublicShareUrl(g.name, eventId)}
+                                href={getPublicShareUrl(g.name, eventId, eventType, { ownerId: effectiveOwnerId })}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className={`p-1 rounded transition-all ${
@@ -1168,7 +1181,7 @@ export default function AddGuestModal({
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  const link = getPublicShareUrl(g.name, eventId);
+                                  const link = getPublicShareUrl(g.name, eventId, eventType, { ownerId: effectiveOwnerId });
                                   const short = await shortenUrl(link);
                                   navigator.clipboard.writeText(short);
                                   showFeedback(language === 'kh' ? `បានចម្លងតំណភ្ជាប់ខ្លីសម្រាប់ "${g.name}"` : `Copied short link for "${g.name}"`);

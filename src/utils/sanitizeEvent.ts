@@ -15,16 +15,44 @@ export function sanitizeWeddingEvent(rawEvent: any): WeddingEvent {
     return WEDDING_EVENT;
   }
 
-  // Detect event type and ID
+  // Detect event type and ID (respect explicit valid eventType first)
   const eventId = (rawEvent.id || '').toLowerCase();
-  const rawEventType = ((rawEvent.eventType || '') as string).toLowerCase();
+  const templateIdLower = (rawEvent.templateId || '').toLowerCase();
+  const rawEventType = ((rawEvent.eventType || '') as string).toLowerCase().trim();
+  const explicitValidTypes = ['wedding', 'engagement', 'housewarming', 'birthday', 'anniversary'] as const;
 
-  const isBirthday = rawEventType === 'birthday' || eventId.includes('birthday') || (rawEvent.name && (rawEvent.name.includes('ខួបកំណើត') || rawEvent.name.toLowerCase().includes('birthday')));
-  const isHousewarming = rawEventType === 'housewarming' || eventId.includes('housewarming') || (rawEvent.name && (rawEvent.name.includes('ឡើងគេហដ្ឋាន') || rawEvent.name.includes('ឡើងផ្ទះ') || rawEvent.name.toLowerCase().includes('housewarming')));
-  const isEngagement = rawEventType === 'engagement' || eventId.includes('engagement') || (rawEvent.name && (rawEvent.name.includes('ភ្ជាប់ពាក្យ') || rawEvent.name.toLowerCase().includes('engagement')));
-  const isAnniversary = rawEventType === 'anniversary' || eventId.includes('anniversary') || (rawEvent.name && (rawEvent.name.includes('ខួបអាពាហ៍ពិពាហ៍') || rawEvent.name.toLowerCase().includes('anniversary')));
+  let resolvedType: 'wedding' | 'engagement' | 'housewarming' | 'birthday' | 'anniversary';
+  if ((explicitValidTypes as readonly string[]).includes(rawEventType)) {
+    resolvedType = rawEventType as typeof resolvedType;
+  } else {
+    const isAnniversary =
+      eventId.includes('anniversary') ||
+      templateIdLower.includes('anniversary') ||
+      (rawEvent.name && (rawEvent.name.includes('ខួបអាពាហ៍ពិពាហ៍') || rawEvent.name.toLowerCase().includes('anniversary')));
+    const isBirthday =
+      !isAnniversary &&
+      (eventId.includes('birthday') ||
+        templateIdLower.includes('birthday') ||
+        (rawEvent.name && (rawEvent.name.includes('ខួបកំណើត') || rawEvent.name.toLowerCase().includes('birthday'))));
+    const isHousewarming =
+      eventId.includes('housewarming') ||
+      templateIdLower.includes('housewarming') ||
+      (rawEvent.name && (rawEvent.name.includes('ឡើងគេហដ្ឋាន') || rawEvent.name.includes('ឡើងផ្ទះ') || rawEvent.name.toLowerCase().includes('housewarming')));
+    const isEngagement =
+      eventId.includes('engagement') ||
+      templateIdLower.includes('engagement') ||
+      (rawEvent.name && (rawEvent.name.includes('ភ្ជាប់ពាក្យ') || rawEvent.name.toLowerCase().includes('engagement')));
 
-  const resolvedType = isBirthday ? 'birthday' : isHousewarming ? 'housewarming' : isEngagement ? 'engagement' : isAnniversary ? 'anniversary' : 'wedding';
+    resolvedType = isAnniversary
+      ? 'anniversary'
+      : isBirthday
+      ? 'birthday'
+      : isHousewarming
+      ? 'housewarming'
+      : isEngagement
+      ? 'engagement'
+      : 'wedding';
+  }
 
   // Ensure category-appropriate cover image
   const defaultCategoryCover = getCategoryCoverImage(resolvedType);

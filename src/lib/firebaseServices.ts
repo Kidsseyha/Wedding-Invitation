@@ -766,7 +766,7 @@ export async function fetchEventFromFirebase(
     ownerEmail: options?.ownerEmail,
     eventId: targetId,
   });
-  const branchTimeoutMs = options?.timeoutMs ?? (options?.forceServer ? 600 : 900);
+  const branchTimeoutMs = options?.timeoutMs ?? (options?.forceServer ? 2200 : 2500);
 
   const isBelongingToTargetOwner = (cand: WeddingEvent | null | undefined): cand is WeddingEvent => {
     if (!cand || typeof cand !== 'object') return false;

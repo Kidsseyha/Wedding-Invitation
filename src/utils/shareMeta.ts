@@ -150,7 +150,7 @@ export function buildAllShareTemplates(params: {
     });
 
     const exactPreset =
-      availablePresets.find((p) => curTemplateId && p.id === curTemplateId) ||
+      availablePresets.find((p) => curTemplateId && (p.id === curTemplateId || p.sampleEvent.id === curTemplateId)) ||
       availablePresets.find(
         (p) =>
           curId &&
@@ -160,7 +160,7 @@ export function buildAllShareTemplates(params: {
             p.id === curBaseId)
       ) ||
       availablePresets.find(
-        (p) => lastActivePresetId && p.id === lastActivePresetId && p.type === curCat
+        (p) => lastActivePresetId && (p.id === lastActivePresetId || p.sampleEvent.id === lastActivePresetId) && p.type === curCat
       ) ||
       availablePresets.find((p) => curName && p.sampleEvent.name === curName);
 
@@ -258,6 +258,10 @@ export function buildAllShareTemplates(params: {
       ? {
           ...p.sampleEvent,
           ...currentEvent,
+          schedules:
+            Array.isArray(currentEvent.schedules) && currentEvent.schedules.length > 0
+              ? currentEvent.schedules
+              : p.sampleEvent.schedules,
           config: {
             ...p.sampleEvent.config,
             ...(currentEvent.config || {}),
@@ -267,6 +271,10 @@ export function buildAllShareTemplates(params: {
       ? {
           ...p.sampleEvent,
           ...saved,
+          schedules:
+            Array.isArray(saved.schedules) && saved.schedules.length > 0
+              ? saved.schedules
+              : p.sampleEvent.schedules,
           config: {
             ...p.sampleEvent.config,
             ...(saved.config || {}),
@@ -347,17 +355,34 @@ export function resolveSelectedShareTemplateId(params: {
   if (!options.length) return 'preset-wedding';
 
   if (currentEvent?.templateId) {
-    const byTpl = options.find((o) => o.templateId === currentEvent.templateId);
+    const byTpl = options.find(
+      (o) =>
+        o.templateId === currentEvent.templateId ||
+        stripScopedEventId(o.eventId) === stripScopedEventId(currentEvent.templateId) ||
+        stripScopedEventId(o.event?.id || '') === stripScopedEventId(currentEvent.templateId)
+    );
     if (byTpl) return byTpl.templateId;
   }
 
   if (currentEvent?.id) {
-    const byId = options.find((o) => o.eventId === currentEvent.id || o.templateId === currentEvent.id);
+    const curStripped = stripScopedEventId(currentEvent.id);
+    const byId = options.find(
+      (o) =>
+        o.eventId === currentEvent.id ||
+        o.templateId === currentEvent.id ||
+        (curStripped && (stripScopedEventId(o.eventId) === curStripped || o.templateId === curStripped))
+    );
     if (byId) return byId.templateId;
   }
 
   if (queryId) {
-    const byQueryId = options.find((o) => o.eventId === queryId || o.templateId === queryId);
+    const qStripped = stripScopedEventId(queryId);
+    const byQueryId = options.find(
+      (o) =>
+        o.eventId === queryId ||
+        o.templateId === queryId ||
+        (qStripped && (stripScopedEventId(o.eventId) === qStripped || o.templateId === qStripped))
+    );
     if (byQueryId) return byQueryId.templateId;
   }
 

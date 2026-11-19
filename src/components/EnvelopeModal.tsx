@@ -90,6 +90,7 @@ interface EnvelopeModalProps {
   brideEn?: string;
   singlePerson?: boolean;
   id?: string;
+  templateId?: string;
   eventType?: string;
   name?: string;
   language: Language;
@@ -162,6 +163,7 @@ export default function EnvelopeModal({
   brideEn,
   singlePerson,
   id,
+  templateId,
   eventType,
   name,
   language,
@@ -248,12 +250,13 @@ export default function EnvelopeModal({
 
   const eventTypeLower = (eventType || '').toLowerCase();
   const idLower = (id || '').toLowerCase();
+  const templateIdLower = (templateId || eventData?.templateId || '').toLowerCase();
   const nameLower = (name || '').toLowerCase();
 
-  const isAnniversary = eventTypeLower === 'anniversary' || idLower.includes('anniversary') || nameLower.includes('ខួបអាពាហ៍ពិពាហ៍') || nameLower.includes('anniversary');
-  const isBirthday = !isAnniversary && (eventTypeLower === 'birthday' || idLower.includes('birthday') || nameLower.includes('ខួបកំណើត') || nameLower.includes('birthday'));
-  const isEngagement = eventTypeLower === 'engagement' || idLower.includes('engagement') || nameLower.includes('ភ្ជាប់ពាក្យ') || nameLower.includes('engage');
-  const isHousewarming = eventTypeLower === 'housewarming' || idLower.includes('housewarming') || nameLower.includes('ឡើងផ្ទះ') || nameLower.includes('house');
+  const isAnniversary = eventTypeLower === 'anniversary' || idLower.includes('anniversary') || templateIdLower.includes('anniversary') || nameLower.includes('ខួបអាពាហ៍ពិពាហ៍') || nameLower.includes('anniversary');
+  const isBirthday = !isAnniversary && (eventTypeLower === 'birthday' || idLower.includes('birthday') || templateIdLower.includes('birthday') || nameLower.includes('ខួបកំណើត') || nameLower.includes('birthday'));
+  const isEngagement = eventTypeLower === 'engagement' || idLower.includes('engagement') || templateIdLower.includes('engagement') || nameLower.includes('ភ្ជាប់ពាក្យ') || nameLower.includes('engage');
+  const isHousewarming = eventTypeLower === 'housewarming' || idLower.includes('housewarming') || templateIdLower.includes('housewarming') || nameLower.includes('ឡើងផ្ទះ') || nameLower.includes('house');
 
   // Directly pull from ចំណងជើងធំ (Main Title) first, or coverSubtitle for Anniversary story headings
   let subtitleKh = isAnniversary
@@ -288,7 +291,7 @@ export default function EnvelopeModal({
     : 'ROYAL WEDDING INVITATION');
 
   const isWeddingStyle = !isBirthday && !isEngagement && !isHousewarming;
-  const isModernWedding = isWeddingStyle && (idLower.includes('modern') || nameLower.includes('សម័យ') || nameLower.includes('modern'));
+  const isModernWedding = isWeddingStyle && (idLower.includes('modern') || templateIdLower.includes('modern') || nameLower.includes('សម័យ') || nameLower.includes('modern'));
   const isTraditionalWedding = isWeddingStyle && !isModernWedding;
 
   // Information label / subtitle customized from Design (ការរចនា)

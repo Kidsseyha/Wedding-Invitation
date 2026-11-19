@@ -40,3 +40,22 @@ test('isSharedInvitationSearch identifies viewer links and preserves owner root 
   assert.equal(isSharedInvitationSearch('?id=u_123__evt', { isAdmin: true }), false);
   assert.equal(isSharedInvitationSearch('', { isAdmin: false, pathname: '/' }), false);
 });
+
+test('getPublicShareUrl includes ownerId only when needed and excludes guest_public', () => {
+  const unscoped = new URL(
+    getPublicShareUrl('Guest', 'modern-wedding-mw001', 'wedding', { ownerId: 'u_alice_123456' })
+  );
+  assert.equal(unscoped.searchParams.get('ownerId'), 'u_alice_123456');
+
+  const scoped = new URL(
+    getPublicShareUrl('Guest', 'u_alice_123456__modern-wedding-mw001', 'wedding', {
+      ownerId: 'u_alice_123456',
+    })
+  );
+  assert.equal(scoped.searchParams.get('ownerId'), null);
+
+  const guestPublic = new URL(
+    getPublicShareUrl('Guest', 'modern-wedding-mw001', 'wedding', { ownerId: 'guest_public' })
+  );
+  assert.equal(guestPublic.searchParams.get('ownerId'), null);
+});

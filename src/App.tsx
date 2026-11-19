@@ -220,11 +220,13 @@ export default function App() {
       // 1. Check URL parameters FIRST so direct links and shared links load the correct template/category immediately
       let urlId: string | null = null;
       let urlType: string | null = null;
+      let urlOwnerId: string | null = null;
       let isShare = false;
       if (typeof window !== 'undefined') {
         const params = new URLSearchParams(window.location.search);
         urlId = params.get('id');
         urlType = params.get('type') || params.get('category');
+        urlOwnerId = params.get('ownerId');
         isShare = Boolean(params.get('name') || params.get('i') || params.get('guest') || params.get('to') || params.get('share'));
       }
 
@@ -237,7 +239,7 @@ export default function App() {
         const storedTemplate =
           localStorage.getItem(getUserStorageKey(`wedding_template_saved_${scopedTargetId}`, scopeId)) ||
           localStorage.getItem(getUserStorageKey(`wedding_template_saved_${stripScopedEventId(targetId)}`, scopeId)) ||
-          (explicitCat ? localStorage.getItem(getUserStorageKey(`wedding_template_type_${explicitCat}`, scopeId)) : null);
+          (!urlId && explicitCat ? localStorage.getItem(getUserStorageKey(`wedding_template_type_${explicitCat}`, scopeId)) : null);
         if (storedTemplate) {
           const parsed = sanitizeWeddingEvent(JSON.parse(storedTemplate));
           const parsedCat = normalizeCategoryString(parsed.eventType || parsed.id || parsed.name);
@@ -246,14 +248,17 @@ export default function App() {
           }
         }
 
-        const preset = (explicitCat ? findTemplatePreset(explicitCat) : null) || findTemplatePreset(stripScopedEventId(targetId));
+        const preset =
+          (urlId ? findTemplatePreset(stripScopedEventId(targetId)) : null) ||
+          (explicitCat ? findTemplatePreset(explicitCat) : null) ||
+          findTemplatePreset(stripScopedEventId(targetId));
         if (preset) {
           const basePreset = preset.sampleEvent;
           return sanitizeWeddingEvent({
             ...basePreset,
             id: initialScope.isAuthenticated && !isShare ? getScopedEventId(basePreset.id, scopeId) : (urlId || basePreset.id),
             templateId: basePreset.id,
-            ownerId: initialScope.isAuthenticated && !isShare ? scopeId : extractScopeFromEventId(urlId) || undefined,
+            ownerId: initialScope.isAuthenticated && !isShare ? scopeId : (urlOwnerId || extractScopeFromEventId(urlId) || undefined),
             ownerEmail: initialScope.isAuthenticated && !isShare ? (initialScope.ownerEmail || undefined) : undefined,
             eventType: preset.type,
           });
@@ -1442,6 +1447,7 @@ export default function App() {
       const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
       let urlIdParam = params?.get('id') || null;
       const urlTypeParam = params?.get('type') || params?.get('category') || null;
+      const urlOwnerParam = params?.get('ownerId')?.trim() || '';
 
       const urlIdOwnerScope = extractScopeFromEventId(urlIdParam);
       if (activeUserScope.isAuthenticated && !isFromShareLink && urlIdOwnerScope && urlIdOwnerScope !== scopeId) {
@@ -1453,7 +1459,7 @@ export default function App() {
 
       if (isFromShareLink || (!activeUserScope.isAuthenticated && (urlIdParam || urlTypeParam))) {
         fetchId = urlIdParam || urlTypeParam || event.id || DEFAULT_PRESET_EVENT_ID;
-        targetOwnerFilter = extractScopeFromEventId(fetchId) || event.ownerId || '';
+        targetOwnerFilter = urlOwnerParam || extractScopeFromEventId(fetchId) || event.ownerId || '';
       } else if (activeUserScope.isAuthenticated) {
         targetOwnerFilter = scopeId;
         const activeTemplateId = localStorage.getItem(getUserStorageKey('wedding_last_active_template_id', scopeId));
@@ -1640,6 +1646,7 @@ export default function App() {
     const toParam = params.get('to');
     let urlIdParam = params.get('id');
     const urlTypeParam = params.get('type') || params.get('category');
+    const urlOwnerParam = params.get('ownerId')?.trim() || '';
 
     // If an authenticated owner opens their dashboard (not a shared link) with a stale ?id= belonging to a different user, clear it
     const urlIdOwnerScope = extractScopeFromEventId(urlIdParam);
@@ -1684,7 +1691,7 @@ export default function App() {
 
     if (isFromShareLink || (!activeUserScope.isAuthenticated && (urlIdParam || urlTypeParam))) {
       fetchId = urlIdParam || urlTypeParam || DEFAULT_PRESET_EVENT_ID;
-      targetOwnerFilter = extractScopeFromEventId(fetchId) || '';
+      targetOwnerFilter = urlOwnerParam || extractScopeFromEventId(fetchId) || '';
     } else if (activeUserScope.isAuthenticated) {
       targetOwnerFilter = scopeId;
       const activeTemplateId = localStorage.getItem(getUserStorageKey('wedding_last_active_template_id', scopeId));
@@ -1720,7 +1727,9 @@ export default function App() {
           }
         } catch {}
       } else {
-        const preset = findTemplatePreset(urlTypeParam || stripScopedEventId(fetchId));
+        const preset =
+          findTemplatePreset(stripScopedEventId(fetchId)) ||
+          (urlTypeParam ? findTemplatePreset(urlTypeParam) : undefined);
         const baseTemplate = preset ? preset.sampleEvent : WEDDING_EVENT;
         const cleanUserDefault = sanitizeWeddingEvent({
           ...baseTemplate,
@@ -1887,7 +1896,9 @@ export default function App() {
       if (cancelled || hasSavedLocallyRef.current) return;
 
       // Fallback to this user's own local saved template or clean preset
-      const preset = findTemplatePreset(urlTypeParam || stripScopedEventId(fetchId)) || findTemplatePreset(stripScopedEventId(fetchId));
+      const preset =
+        findTemplatePreset(stripScopedEventId(fetchId)) ||
+        (urlTypeParam ? findTemplatePreset(urlTypeParam) : undefined);
       if (preset && !isFromShareLink) {
         let templateEvent = preset.sampleEvent;
         const storedTemplate =
@@ -2377,38 +2388,39 @@ export default function App() {
 
   const currentTemplateTypeInfo = (() => {
     const id = (event.id || '').toLowerCase();
+    const templateId = ((event as any).templateId || '').toLowerCase();
     const type = ((event as any).eventType || '').toLowerCase();
     const name = (event.name || '').toLowerCase();
 
-    if (type === 'housewarming' || id.includes('housewarming') || name.includes('ឡើងផ្ទះ') || name.includes('housewarming')) {
+    if (type === 'housewarming' || id.includes('housewarming') || templateId.includes('housewarming') || name.includes('ឡើងផ្ទះ') || name.includes('housewarming')) {
       return {
         type: 'housewarming',
         label: language === 'kh' ? 'ឡើងផ្ទះ' : 'Housewarming',
         icon: Home,
       };
     }
-    if (type === 'engagement' || id.includes('engagement') || name.includes('ភ្ជាប់ពាក្យ')) {
+    if (type === 'engagement' || id.includes('engagement') || templateId.includes('engagement') || name.includes('ភ្ជាប់ពាក្យ')) {
       return {
         type: 'engagement',
         label: language === 'kh' ? 'ភ្ជាប់ពាក្យ' : 'Engagement',
         icon: Sparkles,
       };
     }
-    if (type === 'anniversary' || id.includes('anniversary') || name.includes('ខួបអាពាហ៍ពិពាហ៍') || name.includes('anniversary')) {
+    if (type === 'anniversary' || id.includes('anniversary') || templateId.includes('anniversary') || name.includes('ខួបអាពាហ៍ពិពាហ៍') || name.includes('anniversary')) {
       return {
         type: 'anniversary',
         label: language === 'kh' ? 'ខួបអាពាហ៍ពិពាហ៍' : 'Anniversary',
         icon: Crown,
       };
     }
-    if (id.includes('modern-wedding') || name.includes('អាពាហ៍ពិពាហ៍បែបសម័យ') || name.includes('មង្គលការបែបសម័យ') || name.includes('មង្គលការសម័យ')) {
+    if (id.includes('modern-wedding') || templateId.includes('modern') || name.includes('អាពាហ៍ពិពាហ៍បែបសម័យ') || name.includes('មង្គលការបែបសម័យ') || name.includes('មង្គលការសម័យ')) {
       return {
         type: 'wedding',
         label: language === 'kh' ? 'មង្គលការសម័យ' : 'Modern Wedding',
         icon: Sparkles,
       };
     }
-    if (type === 'birthday' || id.includes('birthday') || event.singlePerson || name.includes('ខួបកំណើត') || name.includes('birthday')) {
+    if (type === 'birthday' || id.includes('birthday') || templateId.includes('birthday') || event.singlePerson || name.includes('ខួបកំណើត') || name.includes('birthday')) {
       return {
         type: 'birthday',
         label: language === 'kh' ? 'ខួបកំណើត' : 'Birthday',
@@ -2499,6 +2511,7 @@ export default function App() {
         onUpdateGuestName={newName => setGuestName(newName)}
         onOpenAddGuestModal={handleOpenAddGuest}
         id={event.id}
+        templateId={event.templateId}
         eventType={event.eventType}
         name={event.name}
         groom={event.groom}
@@ -3473,6 +3486,7 @@ export default function App() {
             textColor={sectionTextColor}
             theme={theme}
             eventType={currentTemplateTypeInfo.type}
+            templateId={event.templateId}
           />
         </div>
 
@@ -3652,9 +3666,7 @@ export default function App() {
         isAdmin={isAdmin}
         onUpdateGuestName={newName => setGuestName(newName)}
         currentEvent={event}
-        onSelectTemplate={(selectedEvent) => {
-          handleSaveEvent(selectedEvent, false);
-        }}
+        onSelectTemplate={(selectedEvent) => handleSaveEvent(selectedEvent, false)}
         onSelectCategory={cat => {
           const matchedPreset = EVENT_PRESETS.find(p => p.type === cat);
           if (matchedPreset) {
@@ -3713,6 +3725,7 @@ export default function App() {
         onToggleLanguage={toggleLanguage}
         onChangeTheme={handleThemeChange}
         eventId={event.id}
+        eventType={event.eventType}
         ownerId={activeUserScope.isAuthenticated ? activeUserScope.scopeId : (event.ownerId || extractScopeFromEventId(event.id) || GUEST_PUBLIC_SCOPE)}
         groom={event.groom}
         bride={event.bride}

@@ -500,6 +500,13 @@ async function resolveTargetEvent(options: {
       });
     }
 
+    if (eventId && !targetEvent) {
+      const idPreset = findTemplatePreset(stripScopedEventId(eventId));
+      if (idPreset && (!eventType || idPreset.type === eventType)) {
+        targetEvent = idPreset.sampleEvent;
+      }
+    }
+
     if (eventType) {
       const loadedCat = targetEvent
         ? normalizeCategoryString(targetEvent.eventType || targetEvent.id || targetEvent.name)
@@ -509,7 +516,9 @@ async function resolveTargetEvent(options: {
         if (userCatMatch) {
           targetEvent = userCatMatch;
         } else {
-          const preset = findTemplatePreset(eventType);
+          const preset =
+            (eventId ? findTemplatePreset(stripScopedEventId(eventId)) : undefined) ||
+            findTemplatePreset(eventType);
           if (preset) targetEvent = preset.sampleEvent;
         }
       }
@@ -540,6 +549,17 @@ async function resolveTargetEvent(options: {
     });
   }
 
+  if (!targetEvent && eventId) {
+    if (events[`type_${eventId}`] && shouldIncludePublicRecord(events[`type_${eventId}`])) {
+      targetEvent = events[`type_${eventId}`];
+    } else {
+      const idPreset = findTemplatePreset(stripScopedEventId(eventId));
+      if (idPreset && (!eventType || idPreset.type === eventType)) {
+        targetEvent = idPreset.sampleEvent;
+      }
+    }
+  }
+
   if (eventType) {
     const loadedCat = targetEvent
       ? normalizeCategoryString(targetEvent.eventType || targetEvent.id || targetEvent.name)
@@ -554,7 +574,9 @@ async function resolveTargetEvent(options: {
         if (matchByType) {
           targetEvent = matchByType;
         } else {
-          const preset = findTemplatePreset(eventType);
+          const preset =
+            (eventId ? findTemplatePreset(stripScopedEventId(eventId)) : undefined) ||
+            findTemplatePreset(eventType);
           if (preset) targetEvent = preset.sampleEvent;
         }
       }
@@ -562,12 +584,8 @@ async function resolveTargetEvent(options: {
   }
 
   if (!targetEvent && eventId) {
-    if (events[`type_${eventId}`] && shouldIncludePublicRecord(events[`type_${eventId}`])) {
-      targetEvent = events[`type_${eventId}`];
-    } else {
-      const preset = findTemplatePreset(stripScopedEventId(eventId));
-      if (preset) targetEvent = preset.sampleEvent;
-    }
+    const preset = findTemplatePreset(stripScopedEventId(eventId));
+    if (preset) targetEvent = preset.sampleEvent;
   }
 
   if (!targetEvent) {
@@ -1103,8 +1121,8 @@ app.get('/api/event', (req, res) => {
 
     if (eventId || eventType) {
       const preset =
-        (eventType ? findTemplatePreset(eventType) : undefined) ||
-        (eventId ? findTemplatePreset(stripScopedEventId(eventId)) : undefined);
+        (eventId ? findTemplatePreset(stripScopedEventId(eventId)) : undefined) ||
+        (eventType ? findTemplatePreset(eventType) : undefined);
       if (preset) {
         return res.json({
           success: true,
@@ -1134,12 +1152,12 @@ app.get('/api/event', (req, res) => {
     if (globalEvents[`type_${eventId}`] && shouldIncludePublicRecord(globalEvents[`type_${eventId}`])) {
       return res.json({ success: true, event: globalEvents[`type_${eventId}`], source: 'server', requestedId: eventId });
     }
-    if (eventType && globalEvents[`type_${eventType}`] && shouldIncludePublicRecord(globalEvents[`type_${eventType}`])) {
-      return res.json({ success: true, event: globalEvents[`type_${eventType}`], source: 'server', requestedId: eventId, requestedType: eventType });
-    }
     const preset = findTemplatePreset(stripScopedEventId(eventId));
     if (preset) {
       return res.json({ success: true, event: preset.sampleEvent, source: 'preset', requestedId: eventId });
+    }
+    if (eventType && globalEvents[`type_${eventType}`] && shouldIncludePublicRecord(globalEvents[`type_${eventType}`])) {
+      return res.json({ success: true, event: globalEvents[`type_${eventType}`], source: 'server', requestedId: eventId, requestedType: eventType });
     }
     return res.json({ success: true, event: null, requestedId: eventId, source: 'not_found' });
   }

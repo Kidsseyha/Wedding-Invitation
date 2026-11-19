@@ -42,7 +42,7 @@ export default function ViewerShareSection({
   const [shortUrl, setShortUrl] = useState<string>('');
 
   const currentGuest = guestName && guestName !== 'Your Name' ? guestName : '';
-  const fullUrl = getPublicShareUrl(currentGuest, event.id);
+  const fullUrl = getPublicShareUrl(currentGuest, event.id, event.eventType, { ownerId: event.ownerId });
 
   useEffect(() => {
     let isMounted = true;
@@ -97,13 +97,33 @@ export default function ViewerShareSection({
     }
   };
 
-  const shareTitle = language === 'kh'
-    ? `លិខិតអញ្ជើញអាពាហ៍ពិពាហ៍៖ ${event.groom} & ${event.bride}`
-    : `Wedding Invitation: ${event.groom} & ${event.bride}`;
+  const evType = (event.eventType || '').toLowerCase();
+  const hostDisplay = event.singlePerson ? event.groom : `${event.groom} & ${event.bride}`;
+  const shareTitleKh =
+    evType === 'birthday'
+      ? `លិខិតអញ្ជើញពិធីខួបកំណើត៖ ${hostDisplay}`
+      : evType === 'housewarming'
+      ? `លិខិតអញ្ជើញពិធីឡើងគេហដ្ឋានថ្មី៖ ${hostDisplay}`
+      : evType === 'engagement'
+      ? `លិខិតអញ្ជើញពិធីភ្ជាប់ពាក្យ៖ ${hostDisplay}`
+      : evType === 'anniversary'
+      ? `លិខិតអញ្ជើញពិធីខួបអាពាហ៍ពិពាហ៍៖ ${hostDisplay}`
+      : `លិខិតអញ្ជើញអាពាហ៍ពិពាហ៍៖ ${hostDisplay}`;
+  const shareTitleEn =
+    evType === 'birthday'
+      ? `Birthday Invitation: ${hostDisplay}`
+      : evType === 'housewarming'
+      ? `Housewarming Invitation: ${hostDisplay}`
+      : evType === 'engagement'
+      ? `Engagement Invitation: ${hostDisplay}`
+      : evType === 'anniversary'
+      ? `Anniversary Invitation: ${hostDisplay}`
+      : `Wedding Invitation: ${hostDisplay}`;
+  const shareTitle = language === 'kh' ? shareTitleKh : shareTitleEn;
 
   const shareText = language === 'kh'
-    ? `សូមគោរពអញ្ជើញ ${currentGuest || 'លោកអ្នក'} ចូលរួមជាអធិបតី និងជាភ្ញៀវកិត្តិយសក្នុងពិធីអាពាហ៍ពិពាហ៍របស់យើងខ្ញុំតាមរយៈតំណភ្ជាប់នេះ៖\n${activeShareLink}`
-    : `You are cordially invited to celebrate our wedding. View our invitation here:\n${activeShareLink}`;
+    ? `សូមគោរពអញ្ជើញ ${currentGuest || 'លោកអ្នក'} ចូលរួមជាអធិបតី និងជាភ្ញៀវកិត្តិយសក្នុងកម្មវិធីរបស់យើងខ្ញុំតាមរយៈតំណភ្ជាប់នេះ៖\n${activeShareLink}`
+    : `You are cordially invited to celebrate with us. View our invitation here:\n${activeShareLink}`;
 
   const shareTelegram = () => {
     window.open(`https://t.me/share/url?url=${encodeURIComponent(activeShareLink)}&text=${encodeURIComponent(shareText)}`, '_blank');
@@ -316,7 +336,17 @@ export default function ViewerShareSection({
                 <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent flex flex-col justify-end p-3.5">
                   <span className="text-[10px] uppercase font-bold tracking-widest text-amber-300 drop-shadow flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                    Digital Wedding Invitation
+                    {evType === 'birthday'
+                      ? 'Digital Birthday Invitation'
+                      : evType === 'housewarming'
+                      ? 'Digital Housewarming Invitation'
+                      : evType === 'engagement'
+                      ? 'Digital Engagement Invitation'
+                      : evType === 'anniversary'
+                      ? 'Digital Anniversary Invitation'
+                      : (event.templateId || '').toLowerCase().includes('modern')
+                      ? 'Digital Modern Wedding Invitation'
+                      : 'Digital Wedding Invitation'}
                   </span>
                   <h4 className="text-sm sm:text-base font-moul text-amber-100 drop-shadow-md leading-tight mt-1">
                     {event.singlePerson ? event.groom : `${event.groom} & ${event.bride}`}

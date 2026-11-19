@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { findTemplatePreset } from '../src/data/eventTemplates.js';
+import { stripScopedEventId } from '../src/lib/userScope.js';
 import {
   fetchEventFromFirestoreRest,
   normalizeCategoryString,
@@ -96,7 +97,9 @@ export default async function handler(req: VercelReq, res: VercelRes) {
         requestedId: eventId,
       });
     }
-    const preset = findTemplatePreset(eventId) || (eventType ? findTemplatePreset(eventType) : undefined);
+    const preset =
+      findTemplatePreset(stripScopedEventId(eventId)) ||
+      (eventType ? findTemplatePreset(eventType) : undefined);
     if (preset) {
       return res.status(200).json({
         success: true,

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, FormEvent } from 'react';
+import { useState, useEffect, useMemo, useRef, FormEvent } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   X,
@@ -34,6 +34,7 @@ import { Language, WeddingEvent } from '../types';
 import { ThemeMode } from './ThemeToggle';
 import { getPublicShareUrl, shortenUrl, getPreferredVercelOrigin, PUBLIC_APP_URL, VERCEL_APP_URL } from '../lib/shareUrl';
 import { fetchGuestsFromFirebase, deleteGuestFromFirebase } from '../lib/firebaseGuests';
+import { fetchUserTemplatesFromFirebase } from '../lib/firebaseServices';
 import { GuestPreset } from '../data/guests';
 import { EVENT_PRESETS, getCategoryCoverImage } from '../data/eventTemplates';
 import {
@@ -44,7 +45,8 @@ import {
   resolveSelectedShareTemplateId,
   ShareTemplateOption,
 } from '../utils/shareMeta';
-import { getScopedEventId, getUserStorageKey, resolveUserScope } from '../lib/userScope';
+import { getEventTimestampMs } from '../utils/saveHelpers';
+import { getScopedEventId, getUserStorageKey, resolveUserScope, stripScopedEventId } from '../lib/userScope';
 
 interface ShareInvitationModalProps {
   isOpen: boolean;
@@ -52,7 +54,7 @@ interface ShareInvitationModalProps {
   guestName: string;
   onUpdateGuestName?: (newName: string) => void;
   onSelectCategory?: (category: InvitationCategory) => void;
-  onSelectTemplate?: (eventData: WeddingEvent, category: InvitationCategory) => void;
+  onSelectTemplate?: (eventData: WeddingEvent, category: InvitationCategory) => Promise<WeddingEvent | void> | void;
   currentEvent?: WeddingEvent;
   language: Language;
   eventId?: string;
@@ -104,12 +106,15 @@ export default function ShareInvitationModal({
   const [shareDomain, setShareDomain] = useState<'vercel' | 'preview'>('vercel');
   const [forceKhmerLang, setForceKhmerLang] = useState<boolean>(true);
   const [showVercelGuide, setShowVercelGuide] = useState<boolean>(false);
+  const [cloudSyncVersion, setCloudSyncVersion] = useState<number>(0);
+  const pendingTemplateSaveRef = useRef<Promise<unknown> | null>(null);
 
   const fallbackCurrentEvent = useMemo(() => {
     if (currentEvent) return currentEvent;
     if (!eventId && !eventType && !eventName) return undefined;
     return {
       id: eventId,
+      templateId: undefined as string | undefined,
       eventType,
       name: eventName,
       singlePerson,
@@ -122,10 +127,49 @@ export default function ShareInvitationModal({
     };
   }, [currentEvent, eventId, eventType, eventName, singlePerson, groom, bride, weddingDate, locationName, coverImage]);
 
+  useEffect(() => {
+    if (!isOpen || !effectiveScope || effectiveScope === 'guest_public') return;
+    let cancelled = false;
+    fetchUserTemplatesFromFirebase(effectiveScope)
+      .then((cloudEvents) => {
+        if (cancelled || !Array.isArray(cloudEvents) || cloudEvents.length === 0) return;
+        let updatedAny = false;
+        for (const evt of cloudEvents) {
+          if (!evt || typeof evt !== 'object' || !evt.id) continue;
+          const scopedKey = getUserStorageKey(`wedding_template_saved_${evt.id}`, effectiveScope);
+          const strippedId = stripScopedEventId(evt.id);
+          const strippedKey = strippedId
+            ? getUserStorageKey(`wedding_template_saved_${strippedId}`, effectiveScope)
+            : '';
+          try {
+            const existingRaw = localStorage.getItem(scopedKey);
+            const existingEvt = existingRaw ? JSON.parse(existingRaw) : null;
+            const incomingMs = getEventTimestampMs(evt);
+            const existingMs = getEventTimestampMs(existingEvt);
+            if (!existingEvt || incomingMs >= existingMs) {
+              const serialized = JSON.stringify(evt);
+              localStorage.setItem(scopedKey, serialized);
+              if (strippedKey) {
+                localStorage.setItem(strippedKey, serialized);
+              }
+              updatedAny = true;
+            }
+          } catch {}
+        }
+        if (updatedAny && !cancelled) {
+          setCloudSyncVersion((v) => v + 1);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, effectiveScope]);
+
   const storageSnapshot = useMemo(() => {
     return readShareTemplatesStorageState(effectiveScope);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, currentEvent, effectiveScope]);
+  }, [isOpen, currentEvent, effectiveScope, cloudSyncVersion]);
 
   const allShareTemplates = useMemo(
     () =>
@@ -194,10 +238,19 @@ export default function ShareInvitationModal({
     const scopedEventData: WeddingEvent = {
       ...(opt.event as WeddingEvent),
       id: scopedId,
+      templateId: (opt.event as WeddingEvent)?.templateId || opt.templateId,
       ...(effectiveScope !== 'guest_public' ? { ownerId: effectiveScope } : {}),
     };
     if (onSelectTemplate) {
-      onSelectTemplate(scopedEventData, opt.category);
+      const saveResult = onSelectTemplate(scopedEventData, opt.category);
+      if (saveResult && typeof (saveResult as Promise<unknown>).then === 'function') {
+        const trackedPromise = Promise.resolve(saveResult).finally(() => {
+          if (pendingTemplateSaveRef.current === trackedPromise) {
+            pendingTemplateSaveRef.current = null;
+          }
+        });
+        pendingTemplateSaveRef.current = trackedPromise;
+      }
     } else if (onSelectCategory) {
       onSelectCategory(opt.category);
     }
@@ -230,7 +283,11 @@ export default function ShareInvitationModal({
   const currentShareGuest = targetGuest.trim() || guestName || 'Your Name';
 
   // Information retrieval from the selected template in All Templates
-  const isSameTemplateAsCurrent = selectedTemplate.templateId === initialTemplateId;
+  const isSameTemplateAsCurrent =
+    selectedTemplate.templateId === initialTemplateId &&
+    (!fallbackCurrentEvent?.templateId ||
+      fallbackCurrentEvent.templateId === selectedTemplate.templateId ||
+      stripScopedEventId(fallbackCurrentEvent.templateId) === stripScopedEventId(selectedTemplate.eventId));
   const activeEventId = isSameTemplateAsCurrent && fallbackCurrentEvent?.id
     ? fallbackCurrentEvent.id
     : getScopedEventId(selectedTemplate.eventId, effectiveScope);
@@ -242,6 +299,7 @@ export default function ShareInvitationModal({
   const fullUrl = getPublicShareUrl(currentShareGuest, activeEventId, selectedCategory, {
     customOrigin: selectedDomainOrigin,
     lang: targetShareLang,
+    ownerId: effectiveScope,
   });
 
   // Automatically fetch short URL whenever fullUrl changes (clear stale shortUrl immediately)
@@ -267,6 +325,9 @@ export default function ShareInvitationModal({
   const activeShareLink = shortUrl || fullUrl;
 
   const resolveFreshShareLink = async (): Promise<string> => {
+    if (pendingTemplateSaveRef.current) {
+      await pendingTemplateSaveRef.current.catch(() => {});
+    }
     if (shortUrl && !loadingShort) {
       return shortUrl;
     }
@@ -536,10 +597,14 @@ Your presence will make our day truly special! 🙏✨`;
     setBatchGuests(batchGuests.filter((_, i) => i !== index));
   };
 
-  const handleCopyBatchGuestLink = (name: string, index: number) => {
+  const handleCopyBatchGuestLink = async (name: string, index: number) => {
+    if (pendingTemplateSaveRef.current) {
+      await pendingTemplateSaveRef.current.catch(() => {});
+    }
     const url = getPublicShareUrl(name, activeEventId, selectedCategory, {
       customOrigin: selectedDomainOrigin,
       lang: targetShareLang,
+      ownerId: effectiveScope,
     });
     handleCopyLink(url);
     setCopiedIndex(index);
@@ -1211,6 +1276,7 @@ Your presence will make our day truly special! 🙏✨`;
                                   const guestLink = getPublicShareUrl(name, activeEventId, selectedCategory, {
                                     customOrigin: selectedDomainOrigin,
                                     lang: targetShareLang,
+                                    ownerId: effectiveScope,
                                   });
                                   return (
                                     <tr

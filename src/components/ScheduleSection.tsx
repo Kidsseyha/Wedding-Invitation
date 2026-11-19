@@ -28,6 +28,7 @@ interface ScheduleSectionProps {
   textColor?: string;
   theme?: ThemeMode;
   eventType?: string;
+  templateId?: string;
 }
 
 export default function ScheduleSection({
@@ -37,9 +38,19 @@ export default function ScheduleSection({
   textColor = '#f5b80f',
   theme = 'dark',
   eventType,
+  templateId,
 }: ScheduleSectionProps) {
-  const isHousewarming = eventType === 'housewarming';
-  const isAnniversary = eventType === 'anniversary';
+  const normalizedType = (eventType || '').toLowerCase();
+  const isHousewarming = normalizedType === 'housewarming';
+  const isAnniversary = normalizedType === 'anniversary';
+  const isBirthday = normalizedType === 'birthday';
+  const isEngagement = normalizedType === 'engagement';
+  const isModernWedding =
+    !isHousewarming &&
+    !isAnniversary &&
+    !isBirthday &&
+    !isEngagement &&
+    (templateId || '').toLowerCase().includes('modern');
   // Always display all days sequentially (Day 1 then Day 2)
   const [quickJumpIdx, setQuickJumpIdx] = useState<number | null>(null);
 
@@ -113,6 +124,18 @@ export default function ScheduleSection({
                 ? language === 'kh'
                   ? 'កម្មវិធីខួបអាពាហ៍ពិពាហ៍'
                   : 'Anniversary Program'
+                : isBirthday
+                ? language === 'kh'
+                  ? 'កម្មវិធីពិធីខួបកំណើត'
+                  : 'Birthday Program'
+                : isEngagement
+                ? language === 'kh'
+                  ? 'កម្មវិធីពិធីភ្ជាប់ពាក្យ'
+                  : 'Engagement Program'
+                : isModernWedding
+                ? language === 'kh'
+                  ? 'កម្មវិធីមង្គលការសម័យ'
+                  : 'Modern Wedding Program'
                 : shifts.length > 1
                 ? language === 'kh'
                   ? 'កម្មវិធីមង្គលការ ២ ថ្ងៃ'
@@ -132,6 +155,10 @@ export default function ScheduleSection({
               ? 'HOUSEWARMING AGENDA'
               : isAnniversary
               ? 'ANNIVERSARY AGENDA'
+              : isBirthday
+              ? 'BIRTHDAY AGENDA'
+              : isEngagement
+              ? 'ENGAGEMENT AGENDA'
               : 'WEDDING AGENDA'}
           </h2>
           <p
@@ -146,9 +173,21 @@ export default function ScheduleSection({
               ? language === 'kh'
                 ? 'កម្មវិធីសូត្រមន្តចម្រើនព្រះបរិត្ត រំលឹករឿងរ៉ាវស្នេហា និងពិសាអាហារជុំគ្រួសារ'
                 : 'Khmer Cultural Blessing, 4-Chapter Story Tribute & Dinner'
+              : isBirthday
+              ? language === 'kh'
+                ? 'របៀបវារៈពិធីអបអរសាទរថ្ងៃខួបកំណើត និងពិសាអាហារជួបជុំ'
+                : 'Birthday Celebration & Party Itinerary'
+              : isEngagement
+              ? language === 'kh'
+                ? 'កម្មវិធីហែជំនូន សែនព្រេន និងពិសាភោជនាហារតាមប្រពៃណីខ្មែរ'
+                : 'Traditional Khmer Engagement Ceremony Itinerary'
+              : shifts.length > 1
+              ? language === 'kh'
+                ? 'បែងចែកជាពីរថ្ងៃ តាមគន្លងប្រពៃណីខ្មែរ'
+                : '2-Day Traditional Khmer Wedding Itinerary'
               : language === 'kh'
-              ? 'បែងចែកជាពីរថ្ងៃ តាមគន្លងប្រពៃណីខ្មែរ'
-              : '2-Day Traditional Khmer Wedding Itinerary'}
+              ? 'កម្មវិធីពិធីមង្គលការ និងពិសាភោជនាហារពេលល្ងាច'
+              : 'Wedding Ceremony & Evening Reception Itinerary'}
           </p>
         </div>
 

@@ -1,9 +1,12 @@
+import { GUEST_PUBLIC_SCOPE, extractScopeFromEventId } from './userScope.js';
+
 export const PUBLIC_APP_URL = 'https://ais-pre-oi572nxogafsw6nsowqaaj-935767504529.asia-southeast1.run.app';
 export const VERCEL_APP_URL = 'https://invitationonline-six.vercel.app';
 
 export interface ShareUrlOptions {
   customOrigin?: string;
   lang?: string;
+  ownerId?: string;
 }
 
 /**
@@ -44,6 +47,16 @@ export function getPublicShareUrl(
 
   if (eventType && eventType.trim()) {
     url.searchParams.set('type', eventType.trim());
+  }
+
+  // Include ownerId if provided and not already encoded inside scoped eventId
+  const cleanOwnerId = options?.ownerId?.trim();
+  if (
+    cleanOwnerId &&
+    cleanOwnerId !== GUEST_PUBLIC_SCOPE &&
+    extractScopeFromEventId(eventId) !== cleanOwnerId
+  ) {
+    url.searchParams.set('ownerId', cleanOwnerId);
   }
 
   // Language parameter for 100% Khmer support across social networks and Vercel

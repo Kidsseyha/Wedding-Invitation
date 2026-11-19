@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { findTemplatePreset } from '../src/data/eventTemplates.js';
+import { stripScopedEventId } from '../src/lib/userScope.js';
 import {
   buildInvitationMeta,
   injectMetaIntoHtml,
@@ -159,18 +160,27 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       });
     }
 
+    if (!targetEvent && eventId) {
+      const idPreset = findTemplatePreset(stripScopedEventId(eventId));
+      if (idPreset && (!eventType || idPreset.type === eventType)) {
+        targetEvent = idPreset.sampleEvent;
+      }
+    }
+
     if (eventType) {
       const loadedCat = targetEvent
         ? normalizeCategoryString(targetEvent.eventType || targetEvent.id || targetEvent.name)
         : null;
       if (!targetEvent || (loadedCat && loadedCat !== eventType)) {
-        const preset = findTemplatePreset(eventType);
+        const preset =
+          (eventId ? findTemplatePreset(stripScopedEventId(eventId)) : undefined) ||
+          findTemplatePreset(eventType);
         if (preset) targetEvent = preset.sampleEvent;
       }
     }
 
     if (!targetEvent && eventId) {
-      const preset = findTemplatePreset(eventId);
+      const preset = findTemplatePreset(stripScopedEventId(eventId));
       if (preset) targetEvent = preset.sampleEvent;
     }
 

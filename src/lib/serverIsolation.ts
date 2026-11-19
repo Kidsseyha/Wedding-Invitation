@@ -61,7 +61,12 @@ export function findUserDbEvent(
     }
   }
 
-  if (eventType) {
+  const strippedRequestedLower = eventId ? stripScopedEventId(eventId).toLowerCase() : '';
+  const isGenericCategoryId =
+    !strippedRequestedLower ||
+    ['wedding', 'engagement', 'housewarming', 'birthday', 'anniversary'].includes(strippedRequestedLower);
+
+  if (eventType && isGenericCategoryId) {
     if (dbId && userDbEvents[`user_${dbId}_type_${eventType}`]) {
       candidates.push(userDbEvents[`user_${dbId}_type_${eventType}`]);
     }
