@@ -1740,13 +1740,16 @@ app.get('/s/:code', async (req, res) => {
       cleanTarget = cleanTarget.replace('ais-dev-', 'ais-pre-');
     }
 
-    // Merge any query params from request (e.g. /s/code?name=...)
+    // Merge any query params from request (e.g. /s/code?name=...) and ensure share=1 is set
     try {
       const urlObj = new URL(cleanTarget);
       for (const [key, val] of Object.entries(req.query)) {
         if (typeof val === 'string') {
           urlObj.searchParams.set(key, val);
         }
+      }
+      if (!urlObj.searchParams.get('share')) {
+        urlObj.searchParams.set('share', '1');
       }
       cleanTarget = urlObj.toString();
     } catch {

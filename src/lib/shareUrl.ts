@@ -169,3 +169,33 @@ export async function shortenUrl(longUrl: string, customOrigin?: string): Promis
   return cleanedUrl;
 }
 
+/**
+ * Determines whether the current URL represents a shared invitation being opened by a viewer.
+ * Returns true when share/guest params are present, on /s/:code short routes, or when an
+ * unauthenticated viewer opens an event-specific URL (?id=..., ?type=..., ?ownerId=...).
+ */
+export function isSharedInvitationSearch(
+  search: string,
+  options?: { isAdmin?: boolean; pathname?: string }
+): boolean {
+  const params = new URLSearchParams(search || '');
+  const hasExplicitShareParam = Boolean(
+    params.get('name') ||
+    params.get('i') ||
+    params.get('guest') ||
+    params.get('to') ||
+    params.get('share')
+  );
+  if (hasExplicitShareParam) return true;
+  if (options?.pathname && options.pathname.startsWith('/s/')) return true;
+  if (!options?.isAdmin) {
+    return Boolean(
+      params.get('id') ||
+      params.get('type') ||
+      params.get('category') ||
+      params.get('ownerId')
+    );
+  }
+  return false;
+}
+

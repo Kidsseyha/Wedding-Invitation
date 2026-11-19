@@ -54,7 +54,7 @@ import { WEDDING_EVENT } from './data/weddingData';
 import { sanitizeWeddingEvent, VERIFIED_WEDDING_COVER } from './utils/sanitizeEvent';
 import { findTemplatePreset, getCategoryCoverImage, VERIFIED_CATEGORY_COVERS, EVENT_PRESETS } from './data/eventTemplates';
 import { buildInvitationMeta, normalizeCategoryString } from './utils/shareMeta';
-import { PUBLIC_APP_URL } from './lib/shareUrl';
+import { PUBLIC_APP_URL, isSharedInvitationSearch } from './lib/shareUrl';
 import { Language, WeddingEvent } from './types';
 import { formatKhmerDate, formatEnDate } from './utils/khmerHelpers';
 import { getEventTimestampMs } from './utils/saveHelpers';
@@ -1380,13 +1380,27 @@ export default function App() {
   const [isFromShareLink, setIsFromShareLink] = useState(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
-      return Boolean(params.get('name') || params.get('i') || params.get('guest') || params.get('to') || params.get('share'));
+      return Boolean(
+        params.get('name') ||
+        params.get('i') ||
+        params.get('guest') ||
+        params.get('to') ||
+        params.get('share') ||
+        window.location.pathname.startsWith('/s/')
+      );
     }
     return false;
   });
 
   const isAdmin = Boolean(authUser) || localAdminOverride;
-  const isViewer = !isAdmin || isFromShareLink;
+  const isSharedViewer =
+    isFromShareLink ||
+    (typeof window !== 'undefined' &&
+      isSharedInvitationSearch(window.location.search, {
+        isAdmin,
+        pathname: window.location.pathname,
+      }));
+  const isViewer = !isAdmin || isSharedViewer;
 
   const handleOpenEditor = (tab: TabType = 'couple') => {
     setEditorInitialTab(tab);
@@ -2542,7 +2556,7 @@ export default function App() {
         onSaveAnniversaryInfo={async (updatedEvent) => {
           await handleSaveEvent(updatedEvent, false);
         }}
-        allowQuickEdit={!isFromShareLink}
+        allowQuickEdit={!isSharedViewer}
         onRequireAdminAuth={handleAdminLogin}
         onOpenDesignTab={() => {
           setEditorInitialTab('design');
@@ -2552,11 +2566,13 @@ export default function App() {
         theme={theme}
       />
 
-      {/* Floating Top Left Controls: Language & Theme */}
-      <div className="fixed top-3 left-2.5 sm:top-4 sm:left-4 z-50 flex flex-wrap items-center gap-1.5 sm:gap-2">
-        <LanguageToggle currentLanguage={language} onToggle={toggleLanguage} theme={theme} />
-        <ThemeToggle currentTheme={theme} onChangeTheme={handleThemeChange} language={language} />
-      </div>
+      {/* Floating Top Left Controls: Language & Theme (hidden for shared invitation viewers) */}
+      {!isSharedViewer && (
+        <div className="fixed top-3 left-2.5 sm:top-4 sm:left-4 z-50 flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <LanguageToggle currentLanguage={language} onToggle={toggleLanguage} theme={theme} />
+          <ThemeToggle currentTheme={theme} onChangeTheme={handleThemeChange} language={language} />
+        </div>
+      )}
 
       {/* Floating Top Right Controls: Music Player, Share & Edit Button */}
       <AudioPlayer
@@ -2569,7 +2585,7 @@ export default function App() {
       <div
         className="fixed right-2 sm:right-4 z-40 flex max-w-[calc(100vw-1rem)] top-[52px] sm:top-16 flex-row flex-wrap justify-end items-center gap-1.5 sm:flex-col sm:items-end sm:gap-2"
       >
-        {/* Admin and Auth Controls (hidden for shared link viewers so they only see Reload) */}
+        {/* Admin and Auth Controls (hidden for shared link viewers so they only see Reload & Music) */}
         {!isViewer ? (
           <>
             {/* PlanEssential Event Template Manager & Creator Button */}
@@ -2646,6 +2662,16 @@ export default function App() {
                 localStorage.removeItem('wedding_admin_override');
                 localStorage.removeItem('wedding_logged_in_identifier');
                 auth.signOut();
+                if (typeof window !== 'undefined' && !isFromShareLink) {
+                  try {
+                    const cleanUrl = new URL(window.location.href);
+                    cleanUrl.searchParams.delete('id');
+                    cleanUrl.searchParams.delete('type');
+                    cleanUrl.searchParams.delete('category');
+                    cleanUrl.searchParams.delete('ownerId');
+                    window.history.replaceState({}, '', cleanUrl.toString());
+                  } catch {}
+                }
                 setEvent(sanitizeWeddingEvent({
                   ...WEDDING_EVENT,
                   id: DEFAULT_PRESET_EVENT_ID,
@@ -2664,7 +2690,7 @@ export default function App() {
               </span>
             </motion.button>
           </>
-        ) : !isFromShareLink ? (
+        ) : !isSharedViewer ? (
           /* Login Button - Only visible if not admin and not a guest viewing a shared link */
           <motion.button
             id="admin-login-btn"
@@ -2684,8 +2710,8 @@ export default function App() {
           </motion.button>
         ) : null}
 
-        {/* Share Button (hidden for shared link viewers so they see Reload only) */}
-        {!isFromShareLink && (
+        {/* Share Button (hidden for shared link viewers so they see Reload & Music only) */}
+        {!isSharedViewer && (
           <motion.button
             id="share-btn"
             onClick={() => {
@@ -3416,7 +3442,7 @@ export default function App() {
             event={event}
             language={language}
             theme={theme}
-            canEdit={!isFromShareLink}
+            canEdit={!isSharedViewer}
             onEditStory={() => {
               if (isViewer) {
                 handleAdminLogin(() => setShowAnniversaryStoryEditor(true));
@@ -4302,8 +4328,8 @@ export default function App() {
         )}
       </AnimatePresence>
 
-      {/* Subtle Auto-Scroll 1.5x Indicator */}
-      {hasOpenedEnvelope && (
+      {/* Subtle Auto-Scroll 1.5x Indicator (hidden for shared invitation viewers) */}
+      {hasOpenedEnvelope && !isSharedViewer && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
