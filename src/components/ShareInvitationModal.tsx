@@ -263,6 +263,7 @@ export default function ShareInvitationModal({
   ]);
   const [newBatchName, setNewBatchName] = useState('');
   const [copiedGuestKey, setCopiedGuestKey] = useState<string | null>(null);
+  const [copyingGuestKey, setCopyingGuestKey] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [allDbGuests, setAllDbGuests] = useState<GuestPreset[]>([]);
 
@@ -607,19 +608,25 @@ Your presence will make our day truly special! 🙏✨`;
   const handleCopyBatchGuestLink = async (name: string) => {
     const cleanName = name.trim();
     if (!cleanName) return;
-    if (pendingTemplateSaveRef.current) {
-      await pendingTemplateSaveRef.current.catch(() => {});
+    setCopyingGuestKey(cleanName);
+    try {
+      if (pendingTemplateSaveRef.current) {
+        await pendingTemplateSaveRef.current.catch(() => {});
+      }
+      const url = getPublicShareUrl(cleanName, activeEventId, selectedCategory, {
+        customOrigin: selectedDomainOrigin,
+        lang: targetShareLang,
+        ownerId: effectiveScope,
+      });
+      const resolvedUrl = await shortenUrl(url, selectedDomainOrigin).catch(() => url);
+      handleCopyLink(resolvedUrl || url, cleanName);
+      setCopiedGuestKey(cleanName);
+      setTimeout(() => {
+        setCopiedGuestKey((prev) => (prev === cleanName ? null : prev));
+      }, 2000);
+    } finally {
+      setCopyingGuestKey((prev) => (prev === cleanName ? null : prev));
     }
-    const url = getPublicShareUrl(cleanName, activeEventId, selectedCategory, {
-      customOrigin: selectedDomainOrigin,
-      lang: targetShareLang,
-      ownerId: effectiveScope,
-    });
-    handleCopyLink(url, cleanName);
-    setCopiedGuestKey(cleanName);
-    setTimeout(() => {
-      setCopiedGuestKey((prev) => (prev === cleanName ? null : prev));
-    }, 2000);
   };
 
   // QR code encoding data: uses standard high-contrast black on white
@@ -1119,8 +1126,18 @@ Your presence will make our day truly special! 🙏✨`;
                     </div>
                   </div>
 
-                  {/* Guest Information */}
-                  <div className="space-y-1">
+                  {/* Guest & Invitation Information */}
+                  <div className="space-y-1.5">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-xl border border-amber-500/25 bg-amber-500/5 max-w-full">
+                      <img
+                        src={effectiveCoverImage}
+                        alt={displayHeaderKh}
+                        className="w-6 h-6 rounded-md object-cover shrink-0 border border-amber-400/40"
+                      />
+                      <span className={`text-xs font-khmer font-semibold truncate ${isLight ? 'text-amber-900' : 'text-amber-200'}`}>
+                        {language === 'kh' ? displayHeaderKh : displayHeaderEn}
+                      </span>
+                    </div>
                     <h4 className={`text-sm font-bold font-khmer ${isLight ? 'text-amber-900' : 'text-amber-200'}`}>
                       {language === 'kh' ? `សំបុត្រសម្រាប់៖ ${displayShareGuest}` : `Invitation for: ${displayShareGuest}`}
                     </h4>
@@ -1254,19 +1271,36 @@ Your presence will make our day truly special! 🙏✨`;
 
                     return (
                       <div className={`border ${isLight ? 'border-amber-300 bg-amber-50/30' : 'border-amber-500/30 bg-black/50'} rounded-2xl overflow-hidden shadow-inner`}>
-                        {/* Table Header with Counts */}
-                        <div className={`px-3.5 py-2.5 ${isLight ? 'bg-amber-100 border-amber-300' : 'bg-amber-950/70 border-amber-500/30'} border-b flex items-center justify-between text-xs font-khmer flex-wrap gap-2`}>
-                          <div className="flex items-center gap-2">
-                            <Table className="w-4 h-4 text-amber-500" />
-                            <span className={`${isLight ? 'text-amber-950' : 'text-amber-200'} font-bold`}>
-                              {language === 'kh'
-                                ? `តារាងភ្ញៀវសរុប (${filteredNames.length} នាក់)`
-                                : `All Guests Table (${filteredNames.length})`}
+                        {/* Table Header with Counts & Active Invitation Context */}
+                        <div className={`px-3.5 py-2.5 ${isLight ? 'bg-amber-100 border-amber-300' : 'bg-amber-950/70 border-amber-500/30'} border-b space-y-2 text-xs font-khmer`}>
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <div className="flex items-center gap-2">
+                              <Table className="w-4 h-4 text-amber-500" />
+                              <span className={`${isLight ? 'text-amber-950' : 'text-amber-200'} font-bold`}>
+                                {language === 'kh'
+                                  ? `តារាងភ្ញៀវសរុប (${filteredNames.length} នាក់)`
+                                  : `All Guests Table (${filteredNames.length})`}
+                              </span>
+                            </div>
+                            <span className={`text-[11px] ${isLight ? 'text-amber-900 bg-amber-200/70 border-amber-300' : 'text-amber-300/80 bg-amber-500/10 border-amber-500/20'} px-2.5 py-0.5 rounded-full border`}>
+                              {language === 'kh' ? 'មានឈ្មោះភ្ញៀវ · ចំណងជើង · រូបក្រប' : 'Guest · Title · Cover Included'}
                             </span>
                           </div>
-                          <span className={`text-[11px] ${isLight ? 'text-amber-900 bg-amber-200/70 border-amber-300' : 'text-amber-300/80 bg-amber-500/10 border-amber-500/20'} px-2.5 py-0.5 rounded-full border`}>
-                            {language === 'kh' ? 'មានតំណភ្ជាប់ផ្ទាល់ខ្លួន' : 'Personalized Links'}
-                          </span>
+                          <div className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl border ${isLight ? 'bg-white/90 border-amber-300/80' : 'bg-black/50 border-amber-500/25'}`}>
+                            <img
+                              src={effectiveCoverImage}
+                              alt={displayHeaderKh}
+                              className="w-9 h-9 rounded-lg object-cover shrink-0 border border-amber-400/40"
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className={`text-[11px] font-bold truncate ${isLight ? 'text-amber-950' : 'text-amber-100'}`}>
+                                {language === 'kh' ? displayHeaderKh : displayHeaderEn}
+                              </div>
+                              <div className={`text-[10px] truncate ${isLight ? 'text-neutral-600' : 'text-neutral-400'}`}>
+                                {language === 'kh' ? selectedTemplate.titleKh : selectedTemplate.titleEn} · {effectiveDate}
+                              </div>
+                            </div>
+                          </div>
                         </div>
 
                         {/* Responsive Table Container */}
@@ -1319,7 +1353,8 @@ Your presence will make our day truly special! 🙏✨`;
                                           <button
                                             type="button"
                                             onClick={() => handleCopyBatchGuestLink(name)}
-                                            className={`px-2.5 py-1 rounded-lg text-[11px] font-khmer font-bold flex items-center gap-1 transition-all ${
+                                            disabled={copyingGuestKey === name}
+                                            className={`px-2.5 py-1 rounded-lg text-[11px] font-khmer font-bold flex items-center gap-1 transition-all disabled:opacity-70 ${
                                               isRowCopied
                                                 ? 'bg-emerald-500 text-emerald-950 font-bold shadow'
                                                 : isLight
@@ -1328,7 +1363,12 @@ Your presence will make our day truly special! 🙏✨`;
                                             }`}
                                             title={guestLink}
                                           >
-                                            {isRowCopied ? (
+                                            {copyingGuestKey === name ? (
+                                              <>
+                                                <Loader2 className="w-3 h-3 animate-spin" />
+                                                <span>{language === 'kh' ? 'កំពុងបង្កើត...' : 'Copying...'}</span>
+                                              </>
+                                            ) : isRowCopied ? (
                                               <>
                                                 <Check className="w-3 h-3 text-emerald-950 stroke-[3]" />
                                                 <span>បានចម្លង</span>

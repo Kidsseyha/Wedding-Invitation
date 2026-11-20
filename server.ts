@@ -503,7 +503,19 @@ async function resolveTargetEvent(options: {
 
     if (eventId && !targetEvent) {
       const idPreset = findTemplatePreset(stripScopedEventId(eventId));
-      if (idPreset && (!eventType || idPreset.type === eventType)) {
+      if (idPreset?.sampleEvent?.id && stripScopedEventId(eventId) !== idPreset.sampleEvent.id) {
+        const mappedEventId = `${dbId}__${idPreset.sampleEvent.id}`;
+        targetEvent =
+          findUserDbEvent(userDbEvents, { eventId: mappedEventId, eventType, dbId }) ||
+          (await fetchEventFromFirestoreRest({
+            projectId: rawFirebaseConfig.projectId,
+            databaseId: (rawFirebaseConfig as any).firestoreDatabaseId || '(default)',
+            eventId: mappedEventId,
+            ownerId: dbId,
+            ownerEmail,
+          }));
+      }
+      if (!targetEvent && idPreset && (!eventType || idPreset.type === eventType)) {
         targetEvent = idPreset.sampleEvent;
       }
     }
@@ -1750,7 +1762,7 @@ app.delete('/api/templates/:id', (req, res) => {
   res.json({ success: true, deleted, id });
 });
 
-    // In-app short link lookup API (used as SPA fallback if client lands on /s/:code)
+    // In-app short link lookup API (used as SPA fallback and metadata inspector for /s/:code)
 app.get('/api/short-link/:code', async (req, res) => {
   const code = (req.params.code || '').trim();
   if (!code || !/^[a-zA-Z0-9_-]{1,128}$/.test(code)) {
@@ -1789,6 +1801,7 @@ app.get('/api/short-link/:code', async (req, res) => {
   let eventType = '';
   let ownerId = '';
   let lang = 'kh';
+  let metaOrigin = reqOrigin;
   try {
     const parsed = new URL(cleanTarget);
     if (!parsed.searchParams.get('share')) parsed.searchParams.set('share', '1');
@@ -1798,16 +1811,37 @@ app.get('/api/short-link/:code', async (req, res) => {
     eventType = (parsed.searchParams.get('type') || parsed.searchParams.get('category') || '').trim();
     ownerId = (parsed.searchParams.get('ownerId') || '').trim();
     lang = (parsed.searchParams.get('lang') || 'kh').trim();
+    if (parsed.origin && !parsed.origin.includes('localhost') && !parsed.origin.includes('127.0.0.1')) {
+      metaOrigin = parsed.origin;
+    }
     cleanTarget = parsed.toString();
   } catch {}
+
+  const targetEvent = await resolveTargetEvent({
+    eventId: eventId || undefined,
+    eventType: eventType || undefined,
+    ownerId: ownerId || undefined,
+  });
+  const meta = buildInvitationMeta({
+    event: targetEvent,
+    guestName: guestName || null,
+    queryType: eventType || null,
+    eventId: eventId || null,
+    origin: metaOrigin,
+    pageUrl: cleanTarget,
+  });
 
   return res.json({
     success: true,
     code,
     url: cleanTarget,
-    guestName,
+    guestName: meta.guestName || guestName,
+    invitationTitle: meta.invitationTitle,
+    coverImage: meta.coverImage,
+    metaTitle: meta.title,
+    description: meta.description,
     eventId,
-    eventType,
+    eventType: meta.category || eventType,
     ownerId,
     lang,
   });
@@ -2046,10 +2080,11 @@ async function startServer() {
         let template = fs.readFileSync(indexHtmlPath, 'utf-8');
         template = await vite.transformIndexHtml(req.originalUrl, template);
 
-        const guestName = (req.query.name || req.query.i || req.query.guest || req.query.to) as string;
-        const eventId = req.query.id as string;
-        const eventType = (req.query.type || req.query.category) as string;
-        const ownerId = req.query.ownerId as string;
+        const qStr = (val: unknown) => (Array.isArray(val) ? String(val[0] || '') : typeof val === 'string' ? val : '').trim();
+        const guestName = qStr(req.query.name || req.query.i || req.query.guest || req.query.to);
+        const eventId = qStr(req.query.id);
+        const eventType = qStr(req.query.type || req.query.category);
+        const ownerId = qStr(req.query.ownerId);
         const origin = getRequestPublicOrigin(req);
 
         const html = await getInjectedHtmlAsync(template, {
@@ -2083,10 +2118,11 @@ async function startServer() {
       const indexPath = [path.join(distPath, 'app.html'), path.join(distPath, 'index.html')].find(p => fs.existsSync(p)) || path.join(distPath, 'index.html');
       if (fs.existsSync(indexPath)) {
         let html = fs.readFileSync(indexPath, 'utf-8');
-        const guestName = (req.query.name || req.query.i || req.query.guest || req.query.to) as string;
-        const eventId = req.query.id as string;
-        const eventType = (req.query.type || req.query.category) as string;
-        const ownerId = req.query.ownerId as string;
+        const qStr = (val: unknown) => (Array.isArray(val) ? String(val[0] || '') : typeof val === 'string' ? val : '').trim();
+        const guestName = qStr(req.query.name || req.query.i || req.query.guest || req.query.to);
+        const eventId = qStr(req.query.id);
+        const eventType = qStr(req.query.type || req.query.category);
+        const ownerId = qStr(req.query.ownerId);
         const origin = getRequestPublicOrigin(req);
 
         html = await getInjectedHtmlAsync(html, {

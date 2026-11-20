@@ -1,7 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EVENT_PRESETS } from '../data/eventTemplates.js';
-import { buildAllShareTemplates, resolveSelectedShareTemplateId } from './shareMeta.js';
+import {
+  buildAllShareTemplates,
+  buildInvitationMeta,
+  resolveEventCoverImage,
+  resolveSelectedShareTemplateId,
+} from './shareMeta.js';
 import { sanitizeWeddingEvent } from './sanitizeEvent.js';
 import { findUserDbEvent } from '../lib/serverIsolation.js';
 import { getScopedEventId } from '../lib/userScope.js';
@@ -119,4 +124,40 @@ test('findUserDbEvent does not cross-bleed different templates within same categ
     dbId: USER_A,
   });
   assert.equal(categoryOnly?.groom, 'Traditional Groom');
+});
+
+test('buildInvitationMeta returns guest name, custom invitation title, and invitation cover for every event type', () => {
+  const origin = 'https://ais-pre-hjj7vuznhhxkva5mjjwpax-816970112678.asia-southeast1.run.app';
+
+  const birthdayMeta = buildInvitationMeta({
+    event: {
+      id: 'u_alice__birthday-bd001',
+      eventType: 'birthday',
+      name: 'ខួបកំណើតគម្រប់ ៣០ ឆ្នាំ កែវ ពិសិដ្ឋ',
+      groom: 'លោក កែវ ពិសិដ្ឋ',
+      config: {
+        envelope_header_image: '/assets/images/custom-birthday-cover.jpg',
+      },
+    },
+    guestName: '  លោក សុខ រតនៈ  ',
+    queryType: 'birthday',
+    eventId: 'u_alice__birthday-bd001',
+    origin,
+  });
+
+  assert.equal(birthdayMeta.guestName, 'លោក សុខ រតនៈ');
+  assert.equal(birthdayMeta.invitationTitle, 'ខួបកំណើតគម្រប់ ៣០ ឆ្នាំ កែវ ពិសិដ្ឋ');
+  assert.equal(birthdayMeta.title, 'ខួបកំណើតគម្រប់ ៣០ ឆ្នាំ កែវ ពិសិដ្ឋ - សូមគោរពអញ្ជើញ លោក សុខ រតនៈ');
+  assert.equal(birthdayMeta.coverImage, `${origin}/assets/images/custom-birthday-cover.jpg`);
+  assert.equal(birthdayMeta.image, `${origin}/assets/images/custom-birthday-cover.jpg`);
+
+  const houseCover = resolveEventCoverImage(
+    {
+      config: {
+        envelope_header_image: 'https://cdn.example.com/house-envelope.jpg',
+      },
+    },
+    'housewarming'
+  );
+  assert.equal(houseCover, 'https://cdn.example.com/house-envelope.jpg');
 });

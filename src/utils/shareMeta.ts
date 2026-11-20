@@ -11,6 +11,9 @@ export interface InvitationMetaResult {
   image: string;
   url: string;
   category: InvitationCategory;
+  guestName: string;
+  invitationTitle: string;
+  coverImage: string;
 }
 
 export interface ShareTemplateOption {
@@ -92,6 +95,7 @@ export function resolveEventCoverImage(event: any, category: InvitationCategory,
   const candidates = [
     event?.cover_image,
     event?.image,
+    event?.config?.envelope_header_image,
     event?.config?.image,
     event?.config?.cover_background,
     event?.config?.photo_gallary?.photo1,
@@ -520,11 +524,12 @@ export function buildInvitationMeta(params: {
   // If queryType explicitly requests a different category than the loaded event (or no event was loaded),
   // pull information from that specific preset or category template.
   let effectiveEvent = event;
+  const strippedEventId = eventId ? stripScopedEventId(eventId) : '';
   if (!effectiveEvent || (explicitCategory && eventCategory && explicitCategory !== eventCategory)) {
     const preset =
-      (eventId ? findTemplatePreset(eventId) : undefined) ||
+      (strippedEventId ? findTemplatePreset(strippedEventId) : undefined) ||
       EVENT_PRESETS.find((p) => p.type === category) ||
-      findTemplatePreset(queryType || eventId || category);
+      findTemplatePreset(queryType || strippedEventId || category);
     if (preset) {
       effectiveEvent = preset.sampleEvent;
     }
@@ -537,32 +542,33 @@ export function buildInvitationMeta(params: {
 
   const hostKhmerName = (effectiveEvent?.groom || '').trim();
   const brideKhmerName = (effectiveEvent?.bride || '').trim();
+  const explicitEventName = (effectiveEvent?.name || '').trim();
 
   const eventName =
+    explicitEventName ||
     (isBday
       ? hostKhmerName
         ? `ពិធីខួបកំណើត ${hostKhmerName}`
-        : effectiveEvent?.name || 'ពិធីខួបកំណើត'
+        : 'ពិធីខួបកំណើត'
       : isHouse
       ? hostKhmerName
         ? `ពិធីឡើងគេហដ្ឋានថ្មី ${hostKhmerName}`
-        : effectiveEvent?.name || 'ពិធីឡើងគេហដ្ឋានថ្មី'
+        : 'ពិធីឡើងគេហដ្ឋានថ្មី'
       : isEngage
       ? hostKhmerName && brideKhmerName
         ? `ពិធីភ្ជាប់ពាក្យ ${hostKhmerName} & ${brideKhmerName}`
-        : effectiveEvent?.name || 'ពិធីភ្ជាប់ពាក្យ'
+        : 'ពិធីភ្ជាប់ពាក្យ'
       : isAnniv
       ? hostKhmerName && brideKhmerName
         ? `ពិធីខួបអាពាហ៍ពិពាហ៍ ${hostKhmerName} & ${brideKhmerName}`
-        : effectiveEvent?.name || 'ពិធីខួបអាពាហ៍ពិពាហ៍'
+        : 'ពិធីខួបអាពាហ៍ពិពាហ៍'
       : effectiveEvent?.singlePerson
       ? hostKhmerName
         ? `កម្មវិធី ${hostKhmerName}`
-        : effectiveEvent?.name || 'លិខិតអញ្ជើញឌីជីថល'
-      : effectiveEvent?.name ||
-        (hostKhmerName && brideKhmerName
-          ? `អាពាហ៍ពិពាហ៍ ${hostKhmerName} & ${brideKhmerName}`
-          : 'លិខិតអញ្ជើញឌីជីថល')) || 'លិខិតអញ្ជើញឌីជីថល';
+        : 'លិខិតអញ្ជើញឌីជីថល'
+      : hostKhmerName && brideKhmerName
+      ? `អាពាហ៍ពិពាហ៍ ${hostKhmerName} & ${brideKhmerName}`
+      : 'លិខិតអញ្ជើញឌីជីថល');
 
   const cleanGuest = guestName && guestName.trim() && guestName.trim() !== 'Your Name' ? guestName.trim() : '';
   const title = cleanGuest ? `${eventName} - សូមគោរពអញ្ជើញ ${cleanGuest}` : eventName;
@@ -604,6 +610,7 @@ export function buildInvitationMeta(params: {
   const candidateImages = [
     effectiveEvent?.cover_image,
     effectiveEvent?.image,
+    effectiveEvent?.config?.envelope_header_image,
     effectiveEvent?.config?.image,
     effectiveEvent?.config?.cover_background,
     effectiveEvent?.config?.photo_gallary?.photo1,
@@ -631,6 +638,9 @@ export function buildInvitationMeta(params: {
     image: selectedImage,
     url: pageUrl || origin,
     category,
+    guestName: cleanGuest,
+    invitationTitle: eventName,
+    coverImage: selectedImage,
   };
 }
 

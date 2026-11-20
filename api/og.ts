@@ -160,8 +160,21 @@ export default async function handler(req: VercelReq, res: VercelRes) {
     }
 
     if (!targetEvent && eventId) {
-      const idPreset = findTemplatePreset(stripScopedEventId(eventId));
-      if (idPreset && (!eventType || idPreset.type === eventType)) {
+      const strippedId = stripScopedEventId(eventId);
+      const idPreset = findTemplatePreset(strippedId);
+      if (idPreset?.sampleEvent?.id && strippedId !== idPreset.sampleEvent.id) {
+        const effectiveOwner = ownerId || (eventId.includes('__') ? eventId.split('__')[0] : '');
+        if (effectiveOwner) {
+          targetEvent = await fetchEventFromFirestoreRest({
+            projectId: firebaseCfg.projectId,
+            databaseId: firebaseCfg.firestoreDatabaseId,
+            eventId: `${effectiveOwner}__${idPreset.sampleEvent.id}`,
+            ownerId: effectiveOwner,
+            apiKey: firebaseCfg.apiKey,
+          });
+        }
+      }
+      if (!targetEvent && idPreset && (!eventType || idPreset.type === eventType)) {
         targetEvent = idPreset.sampleEvent;
       }
     }
