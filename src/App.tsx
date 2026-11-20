@@ -228,19 +228,29 @@ export default function App() {
         urlId = params.get('id');
         urlType = params.get('type') || params.get('category');
         urlOwnerId = params.get('ownerId');
-        isShare = Boolean(params.get('name') || params.get('i') || params.get('guest') || params.get('to') || params.get('share'));
+        isShare = Boolean(
+          params.get('name') ||
+          params.get('i') ||
+          params.get('guest') ||
+          params.get('to') ||
+          params.get('share') ||
+          window.location.pathname.startsWith('/s/')
+        );
       }
 
       if (urlId || urlType) {
         const explicitCat = normalizeCategoryString(urlType);
         const targetId = urlId || urlType!;
+        const urlOwnerScope = (urlOwnerId || extractScopeFromEventId(urlId) || '').trim();
+        const canHydrateLocalForUrl = !isShare || !urlOwnerScope || urlOwnerScope === scopeId;
         const scopedTargetId = initialScope.isAuthenticated && !isShare
           ? getScopedEventId(targetId, scopeId)
           : targetId;
-        const storedTemplate =
-          localStorage.getItem(getUserStorageKey(`wedding_template_saved_${scopedTargetId}`, scopeId)) ||
-          localStorage.getItem(getUserStorageKey(`wedding_template_saved_${stripScopedEventId(targetId)}`, scopeId)) ||
-          (!urlId && explicitCat ? localStorage.getItem(getUserStorageKey(`wedding_template_type_${explicitCat}`, scopeId)) : null);
+        const storedTemplate = canHydrateLocalForUrl
+          ? localStorage.getItem(getUserStorageKey(`wedding_template_saved_${scopedTargetId}`, scopeId)) ||
+            localStorage.getItem(getUserStorageKey(`wedding_template_saved_${stripScopedEventId(targetId)}`, scopeId)) ||
+            (!urlId && explicitCat ? localStorage.getItem(getUserStorageKey(`wedding_template_type_${explicitCat}`, scopeId)) : null)
+          : null;
         if (storedTemplate) {
           const parsed = sanitizeWeddingEvent(JSON.parse(storedTemplate));
           const parsedCat = normalizeCategoryString(parsed.eventType || parsed.id || parsed.name);
@@ -1521,7 +1531,11 @@ export default function App() {
       let appliedFast = false;
       const checkResult = await checkDatabasesAndFetchEvent(fetchId, targetOwnerFilter || undefined, {
         templateType: templateTypeHint || undefined,
-        ownerEmail: activeUserScope.ownerEmail || event.ownerEmail || undefined,
+        ownerEmail: !isFromShareLink
+          ? activeUserScope.ownerEmail || event.ownerEmail || undefined
+          : targetOwnerFilter
+          ? undefined
+          : event.ownerEmail || undefined,
         timeoutMs: 4000,
         onFastResult: (fastEvt) => {
           appliedFast = true;
@@ -1744,11 +1758,9 @@ export default function App() {
       if (foundGuest) {
         setGuestName(foundGuest);
         setIsFromShareLink(true);
-      } else {
+      } else if (effectiveShareMode) {
         setGuestName('Your Name');
-        if (params.get('share') || shortMatch) {
-          setIsFromShareLink(true);
-        }
+        setIsFromShareLink(true);
       }
 
       // Determine exact target event ID for either shared link viewer or authenticated user workspace
@@ -1876,7 +1888,7 @@ export default function App() {
           fetchEventFromFirebase(fetchId, targetOwnerFilter || undefined, {
             includeServerApi: true,
             templateType: urlTypeParam || undefined,
-            ownerEmail: activeUserScope.ownerEmail || undefined,
+            ownerEmail: !effectiveShareMode ? activeUserScope.ownerEmail || undefined : undefined,
           }),
           activeUserScope.isAuthenticated && !effectiveShareMode && !urlIdParam && !urlTypeParam && !hadLocalActiveTemplate
             ? fetch(`/api/event?ownerId=${encodeURIComponent(scopeId)}${ownerEmailQuery}`)
@@ -2266,7 +2278,10 @@ export default function App() {
     scrollPosRef.current = 0;
   };
 
+  const saveSeqRef = useRef(0);
+
   const handleSaveEvent = async (updatedEvent: WeddingEvent, refreshEnvelope: boolean = true): Promise<WeddingEvent> => {
+    const saveSeq = ++saveSeqRef.current;
     hasSavedLocallyRef.current = true;
     const scopeId = activeUserScope.scopeId;
     const validatedType = updatedEvent.eventType || validateCurrentTemplateType(updatedEvent);
@@ -2373,9 +2388,11 @@ export default function App() {
       eventType: confirmedSource.eventType || validatedType,
     });
 
-    lastSavedAtRef.current = getEventTimestampMs(confirmedDbEvent) || lastSavedAtRef.current;
-    setEvent(confirmedDbEvent);
-    persistLocalCaches(confirmedDbEvent);
+    if (saveSeq === saveSeqRef.current) {
+      lastSavedAtRef.current = getEventTimestampMs(confirmedDbEvent) || lastSavedAtRef.current;
+      setEvent(confirmedDbEvent);
+      persistLocalCaches(confirmedDbEvent);
+    }
 
     return confirmedDbEvent;
   };
@@ -3308,12 +3325,13 @@ export default function App() {
               initial={{ opacity: 0, y: 45, scale: 0.75, rotateX: 20 }}
               animate={{ opacity: 1, y: 0, scale: 1, rotateX: 0 }}
               transition={{ type: 'spring', damping: 15, stiffness: 90, delay: 0.52 }}
-              className="relative my-8 sm:my-10 w-full max-w-md sm:max-w-lg md:max-w-xl cursor-pointer group px-2 flex justify-center"
+              className={`relative my-8 sm:my-10 w-full max-w-md sm:max-w-lg md:max-w-xl ${isSharedViewer ? '' : 'cursor-pointer'} group px-2 flex justify-center`}
               onClick={() => {
+                if (isSharedViewer) return;
                 handleSaveEvent(event, false);
                 setShowShareModal(true);
               }}
-              title="ចុចដើម្បីប្តូរឈ្មោះភ្ញៀវ / Tap to personalize"
+              title={isSharedViewer ? undefined : 'ចុចដើម្បីប្តូរឈ្មោះភ្ញៀវ / Tap to personalize'}
             >
               {config.envelope_frame ? (
                 <div className="relative w-full max-w-[320px] sm:max-w-[380px] h-[85px] sm:h-[100px] flex items-center justify-center select-none group-hover:scale-[1.02] transition-transform duration-300">

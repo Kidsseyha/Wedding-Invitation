@@ -197,12 +197,26 @@ export default function ShareInvitationModal({
   );
 
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>(initialTemplateId);
+  const wasOpenRef = useRef<boolean>(false);
+  const hasUserSelectedTemplateRef = useRef<boolean>(false);
+  const shortenSeqRef = useRef<number>(0);
+  const [copyingAction, setCopyingAction] = useState<'link' | 'message' | null>(null);
 
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      hasUserSelectedTemplateRef.current = false;
+      return;
+    }
+    if (!wasOpenRef.current) {
+      wasOpenRef.current = true;
+      hasUserSelectedTemplateRef.current = false;
+      setSelectedTemplateId(initialTemplateId);
+      setTargetGuest(guestName && guestName !== 'Your Name' ? guestName : '');
+    } else if (!hasUserSelectedTemplateRef.current && !pendingTemplateSaveRef.current) {
       setSelectedTemplateId(initialTemplateId);
     }
-  }, [isOpen, initialTemplateId]);
+  }, [isOpen, initialTemplateId, guestName]);
 
   const selectedTemplate: ShareTemplateOption =
     allShareTemplates.find((opt) => opt.templateId === selectedTemplateId) ||
@@ -229,6 +243,7 @@ export default function ShareInvitationModal({
   const selectedEventData = selectedTemplate.event;
 
   const handleTemplateSelect = (opt: ShareTemplateOption) => {
+    hasUserSelectedTemplateRef.current = true;
     setSelectedTemplateId(opt.templateId);
     const scopedId = getScopedEventId(opt.eventId, effectiveScope);
     try {
@@ -240,6 +255,7 @@ export default function ShareInvitationModal({
       ...(opt.event as WeddingEvent),
       id: scopedId,
       templateId: (opt.event as WeddingEvent)?.templateId || opt.templateId,
+      eventType: opt.category,
       ...(effectiveScope !== 'guest_public' ? { ownerId: effectiveScope } : {}),
     };
     if (onSelectTemplate) {
@@ -276,11 +292,6 @@ export default function ShareInvitationModal({
     }
   }, [isOpen, effectiveScope]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    setTargetGuest(guestName && guestName !== 'Your Name' ? guestName : '');
-  }, [isOpen, guestName]);
-
   const currentShareGuest = targetGuest.trim() || 'Your Name';
   const displayShareGuest =
     currentShareGuest !== 'Your Name'
@@ -295,9 +306,14 @@ export default function ShareInvitationModal({
     (!fallbackCurrentEvent?.templateId ||
       fallbackCurrentEvent.templateId === selectedTemplate.templateId ||
       stripScopedEventId(fallbackCurrentEvent.templateId) === stripScopedEventId(selectedTemplate.eventId));
-  const activeEventId = isSameTemplateAsCurrent && fallbackCurrentEvent?.id
-    ? fallbackCurrentEvent.id
-    : getScopedEventId(selectedTemplate.eventId, effectiveScope);
+  const rawActiveEventId =
+    isSameTemplateAsCurrent && fallbackCurrentEvent?.id
+      ? fallbackCurrentEvent.id
+      : selectedTemplate.eventId;
+  const activeEventId =
+    effectiveScope !== 'guest_public'
+      ? getScopedEventId(rawActiveEventId, effectiveScope)
+      : rawActiveEventId;
 
   const runtimeVercelOrigin = getPreferredVercelOrigin();
   const selectedDomainOrigin = shareDomain === 'vercel' ? runtimeVercelOrigin : undefined;
@@ -311,24 +327,33 @@ export default function ShareInvitationModal({
 
   const shortUrl = shortUrlState && shortUrlState.targetUrl === fullUrl ? shortUrlState.shortUrl : '';
 
-  // Automatically fetch short URL whenever fullUrl changes (strictly keyed to fullUrl so stale links never leak)
+  // Automatically fetch short URL whenever fullUrl changes (debounced lightly to prevent keystroke races)
   useEffect(() => {
+    if (!isOpen) return;
     let isMounted = true;
+    const reqSeq = ++shortenSeqRef.current;
     setLoadingShort(true);
-    shortenUrl(fullUrl, selectedDomainOrigin)
-      .then((res) => {
-        if (isMounted) {
-          setShortUrlState({ targetUrl: fullUrl, shortUrl: res });
-          setLoadingShort(false);
-        }
-      })
-      .catch(() => {
-        if (isMounted) setLoadingShort(false);
-      });
+
+    const timerId = window.setTimeout(() => {
+      shortenUrl(fullUrl, selectedDomainOrigin)
+        .then((res) => {
+          if (isMounted && reqSeq === shortenSeqRef.current) {
+            setShortUrlState({ targetUrl: fullUrl, shortUrl: res });
+            setLoadingShort(false);
+          }
+        })
+        .catch(() => {
+          if (isMounted && reqSeq === shortenSeqRef.current) {
+            setLoadingShort(false);
+          }
+        });
+    }, 100);
+
     return () => {
       isMounted = false;
+      window.clearTimeout(timerId);
     };
-  }, [fullUrl, selectedDomainOrigin]);
+  }, [isOpen, fullUrl, selectedDomainOrigin]);
 
   const activeShareLink = shortUrl || fullUrl;
 
@@ -339,16 +364,65 @@ export default function ShareInvitationModal({
     if (shortUrl && !loadingShort) {
       return shortUrl;
     }
+    const reqSeq = ++shortenSeqRef.current;
     setLoadingShort(true);
     try {
       const resolved = await shortenUrl(fullUrl, selectedDomainOrigin);
-      setShortUrlState({ targetUrl: fullUrl, shortUrl: resolved });
+      if (reqSeq === shortenSeqRef.current) {
+        setShortUrlState({ targetUrl: fullUrl, shortUrl: resolved });
+      }
       return resolved || fullUrl;
     } catch {
       return fullUrl;
     } finally {
-      setLoadingShort(false);
+      if (reqSeq === shortenSeqRef.current) {
+        setLoadingShort(false);
+      }
     }
+  };
+
+  const copyTextSync = (text: string): boolean => {
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.setAttribute('readonly', '');
+      textArea.style.position = 'fixed';
+      textArea.style.top = '0';
+      textArea.style.left = '-9999px';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.focus({ preventScroll: true });
+      textArea.select();
+      textArea.setSelectionRange(0, text.length);
+      const copied = document.execCommand('copy');
+      document.body.removeChild(textArea);
+      return Boolean(copied);
+    } catch (e) {
+      console.error('Sync clipboard copy failed', e);
+      return false;
+    }
+  };
+
+  const copyTextReliably = async (text: string): Promise<boolean> => {
+    if (copyTextSync(text)) {
+      return true;
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        return copyTextSync(text);
+      }
+    }
+    return false;
+  };
+
+  const showCopyToast = (message: string) => {
+    setCopyToast(message);
+    setTimeout(() => {
+      setCopyToast((prev) => (prev === message ? null : prev));
+    }, 2500);
   };
 
   // Unified Copy Link feature with exact guest name and toast confirmation
@@ -356,41 +430,24 @@ export default function ShareInvitationModal({
     const linkToCopy = customUrl || activeShareLink || fullUrl;
     if (!linkToCopy) return;
     const toastGuestName = (guestLabel || '').trim() || displayShareGuest;
+    const toastMsg =
+      language === 'kh'
+        ? `បានចម្លងតំណភ្ជាប់សំបុត្រសម្រាប់ ${toastGuestName}!`
+        : `Copied invitation link for ${toastGuestName}!`;
 
-    const copySuccess = () => {
-      setCopyToast(
-        language === 'kh'
-          ? `បានចម្លងតំណភ្ជាប់សំបុត្រសម្រាប់ ${toastGuestName}!`
-          : `Copied invitation link for ${toastGuestName}!`
-      );
-      setTimeout(() => {
-        setCopyToast(null);
-      }, 2500);
-    };
-
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(linkToCopy).then(copySuccess).catch(() => {
-        fallbackCopyText(linkToCopy, copySuccess);
-      });
-    } else {
-      fallbackCopyText(linkToCopy, copySuccess);
+    if (copyTextSync(linkToCopy)) {
+      showCopyToast(toastMsg);
+      return;
     }
-  };
-
-  const fallbackCopyText = (text: string, cb?: () => void) => {
-    try {
-      const textArea = document.createElement('textarea');
-      textArea.value = text;
-      textArea.style.position = 'fixed';
-      textArea.style.opacity = '0';
-      document.body.appendChild(textArea);
-      textArea.focus();
-      textArea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textArea);
-      if (cb) cb();
-    } catch (e) {
-      console.error('Fallback copy failed', e);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard
+        .writeText(linkToCopy)
+        .then(() => showCopyToast(toastMsg))
+        .catch(() => {
+          if (copyTextSync(linkToCopy)) {
+            showCopyToast(toastMsg);
+          }
+        });
     }
   };
 
@@ -550,36 +607,82 @@ Your presence will make our day truly special! 🙏✨`;
 
   const activeMessage = buildShareMessage(activeShareLink);
 
-  const handleCopyOnlyShortLink = async () => {
-    const resolvedLink = await resolveFreshShareLink();
-    handleCopyLink(resolvedLink, displayShareGuest);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
+  const handleCopyOnlyShortLink = () => {
+    const markCopied = () => {
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2000);
+    };
+
+    // Synchronous path when short link is ready and template save finished (preserves click activation in iframes)
+    if (shortUrl && !pendingTemplateSaveRef.current) {
+      handleCopyLink(shortUrl, displayShareGuest);
+      markCopied();
+      return;
+    }
+
+    setCopyingAction('link');
+    resolveFreshShareLink()
+      .then(async (resolvedLink) => {
+        const ok = await copyTextReliably(resolvedLink);
+        if (ok) {
+          showCopyToast(
+            language === 'kh'
+              ? `បានចម្លងតំណភ្ជាប់សំបុត្រសម្រាប់ ${displayShareGuest}!`
+              : `Copied invitation link for ${displayShareGuest}!`
+          );
+          markCopied();
+        }
+      })
+      .finally(() => {
+        setCopyingAction((prev) => (prev === 'link' ? null : prev));
+      });
   };
 
-  const handleCopyMessage = async () => {
-    const resolvedLink = await resolveFreshShareLink();
-    const messageToCopy = buildShareMessage(resolvedLink);
+  const handleCopyMessage = () => {
     const onCopied = () => {
       setCopiedMessage(true);
-      setCopyToast(
+      showCopyToast(
         language === 'kh'
           ? `បានចម្លងសារអញ្ជើញ និងលីងសម្រាប់ ${displayShareGuest}!`
           : `Copied invitation message & link for ${displayShareGuest}!`
       );
       setTimeout(() => {
         setCopiedMessage(false);
-        setCopyToast(null);
       }, 2500);
     };
 
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(messageToCopy).then(onCopied).catch(() => {
-        fallbackCopyText(messageToCopy, onCopied);
-      });
-    } else {
-      fallbackCopyText(messageToCopy, onCopied);
+    // Synchronous path when short link is ready and template save finished (preserves click activation in iframes)
+    if (shortUrl && !pendingTemplateSaveRef.current) {
+      const messageToCopy = buildShareMessage(shortUrl);
+      if (copyTextSync(messageToCopy)) {
+        onCopied();
+        return;
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard
+          .writeText(messageToCopy)
+          .then(onCopied)
+          .catch(() => {
+            if (copyTextSync(messageToCopy)) {
+              onCopied();
+            }
+          });
+      }
+      return;
     }
+
+    setCopyingAction('message');
+    resolveFreshShareLink()
+      .then(async (resolvedLink) => {
+        const messageToCopy = buildShareMessage(resolvedLink);
+        const ok = await copyTextReliably(messageToCopy);
+        if (ok) {
+          onCopied();
+        }
+      })
+      .finally(() => {
+        setCopyingAction((prev) => (prev === 'message' ? null : prev));
+      });
   };
 
   const openPendingAwareLink = (e: React.MouseEvent<HTMLAnchorElement>, targetUrl: string) => {
@@ -667,11 +770,19 @@ Your presence will make our day truly special! 🙏✨`;
         ownerId: effectiveScope,
       });
       const resolvedUrl = await shortenUrl(url, selectedDomainOrigin).catch(() => url);
-      handleCopyLink(resolvedUrl || url, cleanName);
-      setCopiedGuestKey(cleanName);
-      setTimeout(() => {
-        setCopiedGuestKey((prev) => (prev === cleanName ? null : prev));
-      }, 2000);
+      const finalUrl = resolvedUrl || url;
+      const ok = await copyTextReliably(finalUrl);
+      if (ok) {
+        showCopyToast(
+          language === 'kh'
+            ? `បានចម្លងតំណភ្ជាប់សំបុត្រសម្រាប់ ${cleanName}!`
+            : `Copied invitation link for ${cleanName}!`
+        );
+        setCopiedGuestKey(cleanName);
+        setTimeout(() => {
+          setCopiedGuestKey((prev) => (prev === cleanName ? null : prev));
+        }, 2000);
+      }
     } finally {
       setCopyingGuestKey((prev) => (prev === cleanName ? null : prev));
     }
@@ -877,8 +988,11 @@ Your presence will make our day truly special! 🙏✨`;
                         type="text"
                         value={targetGuest}
                         onChange={(e) => {
-                          setTargetGuest(e.target.value);
-                          if (onUpdateGuestName) onUpdateGuestName(e.target.value);
+                          const nextVal = e.target.value;
+                          setTargetGuest(nextVal);
+                          if (onUpdateGuestName) {
+                            onUpdateGuestName(nextVal.trim() ? nextVal : 'Your Name');
+                          }
                         }}
                         placeholder="ឧ. លោក សុខ រតនៈវិសាល និងភរិយា"
                         className={`flex-1 px-3.5 py-2.5 rounded-xl border font-khmer text-sm focus:outline-none focus:ring-2 focus:ring-amber-400/20 ${
@@ -901,9 +1015,10 @@ Your presence will make our day truly special! 🙏✨`;
                         <select
                           value={allDbGuests.some(g => g.name === targetGuest) ? targetGuest : ''}
                           onChange={(e) => {
-                            if (e.target.value) {
-                              setTargetGuest(e.target.value);
-                              if (onUpdateGuestName) onUpdateGuestName(e.target.value);
+                            const nextVal = e.target.value;
+                            if (nextVal) {
+                              setTargetGuest(nextVal);
+                              if (onUpdateGuestName) onUpdateGuestName(nextVal);
                             }
                           }}
                           className={`w-full px-3 py-2 rounded-xl border font-khmer text-xs focus:outline-none ${
@@ -1086,10 +1201,10 @@ Your presence will make our day truly special! 🙏✨`;
                         <button
                           type="button"
                           onClick={handleCopyOnlyShortLink}
-                          disabled={loadingShort}
+                          disabled={copyingAction === 'link'}
                           className={`text-[11px] ${isLight ? 'text-amber-800 hover:text-amber-950' : 'text-amber-400 hover:text-amber-200'} font-khmer font-semibold flex items-center gap-1 border border-amber-400/30 px-2 py-0.5 rounded-lg cursor-pointer disabled:opacity-70`}
                         >
-                          {loadingShort ? (
+                          {copyingAction === 'link' || (loadingShort && !shortUrl) ? (
                             <Loader2 className="w-3 h-3 animate-spin" />
                           ) : copiedLink ? (
                             <Check className="w-3 h-3 text-emerald-500" />
@@ -1101,10 +1216,10 @@ Your presence will make our day truly special! 🙏✨`;
                         <button
                           type="button"
                           onClick={handleCopyMessage}
-                          disabled={loadingShort}
+                          disabled={copyingAction === 'message'}
                           className={`text-[11px] ${isLight ? 'text-amber-900 hover:text-amber-950' : 'text-amber-300 hover:text-amber-100'} font-khmer font-bold flex items-center gap-1 bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 rounded-lg cursor-pointer disabled:opacity-70`}
                         >
-                          {loadingShort ? (
+                          {copyingAction === 'message' || (loadingShort && !shortUrl) ? (
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           ) : copiedMessage ? (
                             <Check className="w-3.5 h-3.5 text-emerald-500" />

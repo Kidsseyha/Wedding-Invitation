@@ -151,3 +151,35 @@ test('getDefaultShareDomain defaults to preview outside .vercel.app and vercel o
   }
 });
 
+test('distinct templates and distinct guest names produce unique short codes preserving both guest and template', () => {
+  const templates = [
+    { id: 'u_owner__cmgrawhnk0003le0434762j7n', type: 'wedding' },
+    { id: 'u_owner__modern-wedding-mw001', type: 'wedding' },
+    { id: 'u_owner__engagement-cm001', type: 'engagement' },
+    { id: 'u_owner__housewarming-hm001', type: 'housewarming' },
+    { id: 'u_owner__birthday-bd001', type: 'birthday' },
+    { id: 'u_owner__anniversary-an001', type: 'anniversary' },
+  ];
+  const guests = ['លោក សុខ រតនៈវិសាល', 'កញ្ញា ចន្ទ្រា', 'Mr. Dara'];
+  const seenCodes = new Set<string>();
+
+  for (const tpl of templates) {
+    for (const guest of guests) {
+      const shareUrl = getPublicShareUrl(guest, tpl.id, tpl.type, {
+        customOrigin: PUBLIC_APP_URL,
+      });
+      const parsed = new URL(shareUrl);
+      assert.equal(parsed.searchParams.get('id'), tpl.id);
+      assert.equal(parsed.searchParams.get('type'), tpl.type);
+      assert.equal(extractGuestNameFromSearch(parsed.search), guest);
+      assert.equal(parsed.searchParams.get('share'), '1');
+
+      const code = generateDeterministicShortCode(shareUrl);
+      assert.equal(seenCodes.has(code), false, `Duplicate short code ${code} for ${tpl.id} / ${guest}`);
+      seenCodes.add(code);
+    }
+  }
+
+  assert.equal(seenCodes.size, templates.length * guests.length);
+});
+
