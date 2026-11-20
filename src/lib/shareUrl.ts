@@ -1,12 +1,71 @@
 import { GUEST_PUBLIC_SCOPE, extractScopeFromEventId } from './userScope.js';
 
-export const PUBLIC_APP_URL = 'https://ais-pre-oi572nxogafsw6nsowqaaj-935767504529.asia-southeast1.run.app';
+export const PUBLIC_APP_URL = 'https://ais-pre-hjj7vuznhhxkva5mjjwpax-816970112678.asia-southeast1.run.app';
 export const VERCEL_APP_URL = 'https://invitationonline-six.vercel.app';
 
 export interface ShareUrlOptions {
   customOrigin?: string;
   lang?: string;
   ownerId?: string;
+}
+
+/**
+ * Generates a deterministic, collision-resistant base36 hash for a full target URL
+ * so distinct guests always receive distinct short codes and identical URLs share the same code.
+ */
+export function hashTargetUrlBase36(input: string): string {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b9;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 0x01000193);
+    h2 = Math.imul(h2 ^ ch, 0x85ebca6b);
+  }
+  const p1 = (h1 >>> 0).toString(36).padStart(7, '0').slice(-4);
+  const p2 = (h2 >>> 0).toString(36).padStart(7, '0').slice(-4);
+  return `${p1}${p2}`;
+}
+
+/**
+ * Generates a clean short link code whose prefix reflects the guest slug (when ASCII) or event type,
+ * paired with a deterministic 8-char hash derived from the full URL (including guest name).
+ */
+export function generateDeterministicShortCode(targetUrl: string): string {
+  let prefix = 'kh';
+  try {
+    const parsed = new URL(targetUrl);
+    const typeParam = (parsed.searchParams.get('type') || '').toLowerCase().trim();
+    if (typeParam.startsWith('wedding')) prefix = 'wd';
+    else if (typeParam.startsWith('engage')) prefix = 'eg';
+    else if (typeParam.startsWith('house')) prefix = 'hw';
+    else if (typeParam.startsWith('birth')) prefix = 'bd';
+    else if (typeParam.startsWith('anniv')) prefix = 'an';
+
+    const nameParam = parsed.searchParams.get('name') || '';
+    const asciiSlug = nameParam
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, '')
+      .slice(0, 10);
+    if (asciiSlug) prefix = asciiSlug;
+  } catch {
+    // fallback prefix
+  }
+  return `${prefix}-${hashTargetUrlBase36(targetUrl)}`;
+}
+
+/**
+ * Extracts the invited guest name from a URL query string (?i=, ?guest=, ?name=, ?to=).
+ */
+export function extractGuestNameFromSearch(search: string): string {
+  const params = new URLSearchParams(search || '');
+  const raw =
+    params.get('i') ||
+    params.get('guest') ||
+    params.get('name') ||
+    params.get('to') ||
+    '';
+  const trimmed = raw.trim();
+  return trimmed && trimmed !== 'Your Name' ? trimmed : '';
 }
 
 /**
@@ -95,10 +154,33 @@ export function getPreferredVercelOrigin(): string {
 export async function shortenUrl(longUrl: string, customOrigin?: string): Promise<string> {
   if (!longUrl) return '';
 
-  const fallbackOrigin = (
-    customOrigin ||
-    (longUrl.includes('.vercel.app') ? new URL(longUrl).origin : PUBLIC_APP_URL)
-  ).replace(/\/+$/, '');
+  let inferredOrigin = PUBLIC_APP_URL;
+  try {
+    const parsedOrigin = new URL(longUrl).origin;
+    if (
+      parsedOrigin &&
+      parsedOrigin.startsWith('http') &&
+      !parsedOrigin.includes('localhost') &&
+      !parsedOrigin.includes('127.0.0.1')
+    ) {
+      inferredOrigin = parsedOrigin.includes('ais-dev-')
+        ? parsedOrigin.replace('ais-dev-', 'ais-pre-')
+        : parsedOrigin;
+    }
+  } catch {
+    // ignore invalid URL
+  }
+
+  if (!customOrigin && inferredOrigin === PUBLIC_APP_URL && typeof window !== 'undefined') {
+    const winOrigin = window.location?.origin || '';
+    if (winOrigin && !winOrigin.includes('localhost') && !winOrigin.includes('127.0.0.1')) {
+      inferredOrigin = winOrigin.includes('ais-dev-')
+        ? winOrigin.replace('ais-dev-', 'ais-pre-')
+        : winOrigin;
+    }
+  }
+
+  const fallbackOrigin = (customOrigin || inferredOrigin).replace(/\/+$/, '');
 
   let cleanedUrl = longUrl;
   if (cleanedUrl.includes('localhost') || cleanedUrl.includes('127.0.0.1')) {
@@ -164,8 +246,7 @@ export async function shortenUrl(longUrl: string, customOrigin?: string): Promis
   try {
     const { doc, setDoc } = await import('firebase/firestore');
     const { db } = await import('./firebase');
-    const rand = Math.random().toString(36).substring(2, 7);
-    const code = `kh-${rand}`;
+    const code = generateDeterministicShortCode(cleanedUrl);
     await setDoc(doc(db, 'short_links', code), {
       code,
       url: cleanedUrl,
@@ -211,4 +292,3 @@ export function isSharedInvitationSearch(
   }
   return false;
 }
-

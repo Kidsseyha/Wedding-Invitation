@@ -32,6 +32,7 @@ import {
   GuestPreset,
 } from '../data/guests';
 import {
+  fetchGuestsFromFirebase,
   subscribeToGuests,
   saveGuestToFirebase,
   deleteGuestFromFirebase,
@@ -97,7 +98,20 @@ export default function AddGuestModal({
     const unsubscribe = subscribeToGuests((guests) => {
       setSavedGuests(guests);
     }, effectiveOwnerId);
-    return () => unsubscribe();
+    const handleDbRefresh = () => {
+      fetchGuestsFromFirebase(effectiveOwnerId)
+        .then((guests) => {
+          if (Array.isArray(guests)) {
+            setSavedGuests(guests);
+          }
+        })
+        .catch(() => {});
+    };
+    window.addEventListener('wedding:db-refresh', handleDbRefresh);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('wedding:db-refresh', handleDbRefresh);
+    };
   }, [effectiveOwnerId]);
 
   useEffect(() => {
@@ -147,15 +161,21 @@ export default function AddGuestModal({
 
   useEffect(() => {
     if (isOpen) {
-      setGuestInput(currentGuestName || '');
+      setGuestInput(currentGuestName && currentGuestName !== 'Your Name' ? currentGuestName : '');
       setPrefix('');
-      const match = savedGuests.find(g => g.name.toLowerCase() === (currentGuestName || '').toLowerCase());
-      if (match) {
-        setCategory(match.category || 'general');
-        setNote(match.note || '');
-      }
     }
-  }, [isOpen, currentGuestName, savedGuests]);
+  }, [isOpen, currentGuestName]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const activeName = (guestInput || currentGuestName || '').trim().toLowerCase();
+    if (!activeName || activeName === 'your name') return;
+    const match = savedGuests.find(g => g.name.toLowerCase() === activeName);
+    if (match) {
+      setCategory(match.category || 'general');
+      setNote(match.note || '');
+    }
+  }, [isOpen, guestInput, currentGuestName, savedGuests]);
 
   const showFeedback = (msg: string) => {
     setFeedbackMsg(msg);
@@ -220,10 +240,14 @@ export default function AddGuestModal({
 
   const getFullName = () => {
     const trimmed = guestInput.trim();
-    return trimmed || currentGuestName || 'ភ្ញៀវកិត្តិយស';
+    if (trimmed && trimmed !== 'Your Name') return trimmed;
+    const fallbackCurrent = (currentGuestName || '').trim();
+    if (fallbackCurrent && fallbackCurrent !== 'Your Name') return fallbackCurrent;
+    return '';
   };
 
   const fullName = getFullName();
+  const displayGuestPreview = fullName || (language === 'kh' ? 'ភ្ញៀវកិត្តិយស' : 'Honored Guest');
 
   const getCategoryLabel = (cat: 'vip' | 'friends' | 'family' | 'general' | 'colleagues') => {
     switch (cat) {
@@ -629,11 +653,41 @@ export default function AddGuestModal({
     }
   };
 
-  const guestLink = getPublicShareUrl(fullName, eventId, eventType, { ownerId: effectiveOwnerId });
+  const targetShareLang = language === 'en' ? 'en' : 'kh';
+  const guestLink = getPublicShareUrl(fullName, eventId, eventType, {
+    ownerId: effectiveOwnerId,
+    lang: targetShareLang,
+  });
+
+  const copyTextSafely = async (text: string): Promise<boolean> => {
+    if (!text) return false;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+      // fall through to execCommand fallback
+    }
+    try {
+      const textArea = document.createElement('textarea');
+      textArea.value = text;
+      textArea.style.position = 'fixed';
+      textArea.style.opacity = '0';
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(textArea);
+      return ok;
+    } catch {
+      return false;
+    }
+  };
 
   const handleSaveAndApply = (e?: FormEvent) => {
     if (e) e.preventDefault();
-    const finalName = fullName;
+    const finalName = fullName || (language === 'kh' ? 'ភ្ញៀវកិត្តិយស' : 'Honored Guest');
     onSaveGuestName(finalName);
 
     // Save to Firebase asynchronously scoped to owner
@@ -658,7 +712,7 @@ export default function AddGuestModal({
   };
 
   const handlePreviewEnvelope = () => {
-    const finalName = fullName;
+    const finalName = fullName || (language === 'kh' ? 'ភ្ញៀវកិត្តិយស' : 'Honored Guest');
     onSaveGuestName(finalName);
     
     // Save to Firebase scoped to owner
@@ -683,8 +737,8 @@ export default function AddGuestModal({
     onClose();
   };
 
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(guestLink);
+  const handleCopyLink = async () => {
+    await copyTextSafely(guestLink);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -701,7 +755,7 @@ export default function AddGuestModal({
         ? 'ពិធីខួបអាពាហ៍ពិពាហ៍'
         : 'ពិធីសិរីមង្គលអាពាហ៍ពិពាហ៍';
     const hostDisplay = eventType === 'birthday' || eventType === 'housewarming' ? groom : `${groom} & ${bride}`;
-    const text = `សូមគោរពអញ្ជើញ ${fullName} ចូលរួម${eventLabel} ${hostDisplay} | Plan Essential Digital Invitation`;
+    const text = `សូមគោរពអញ្ជើញ ${displayGuestPreview} ចូលរួម${eventLabel} ${hostDisplay} | Plan Essential Digital Invitation`;
     window.open(
       `https://t.me/share/url?url=${encodeURIComponent(guestLink)}&text=${encodeURIComponent(text)}`,
       '_blank'
@@ -953,7 +1007,7 @@ export default function AddGuestModal({
                       {language === 'kh' ? 'ព័ត៌មានបង្ហាញលើសំបុត្រ Envelope' : 'Preview on Envelope'}
                     </span>
                     <span className={`text-base sm:text-lg font-moul ${isLight ? 'text-amber-950' : 'text-amber-100'} mt-1 block drop-shadow`}>
-                      {fullName}
+                      {displayGuestPreview}
                     </span>
                   </div>
 
@@ -1166,7 +1220,7 @@ export default function AddGuestModal({
                                 {language === 'kh' ? 'ជ្រើស' : 'Use'}
                               </button>
                               <a
-                                href={getPublicShareUrl(g.name, eventId, eventType, { ownerId: effectiveOwnerId })}
+                                href={getPublicShareUrl(g.name, eventId, eventType, { ownerId: effectiveOwnerId, lang: targetShareLang })}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className={`p-1 rounded transition-all ${
@@ -1181,9 +1235,9 @@ export default function AddGuestModal({
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  const link = getPublicShareUrl(g.name, eventId, eventType, { ownerId: effectiveOwnerId });
+                                  const link = getPublicShareUrl(g.name, eventId, eventType, { ownerId: effectiveOwnerId, lang: targetShareLang });
                                   const short = await shortenUrl(link);
-                                  navigator.clipboard.writeText(short);
+                                  await copyTextSafely(short);
                                   showFeedback(language === 'kh' ? `បានចម្លងតំណភ្ជាប់ខ្លីសម្រាប់ "${g.name}"` : `Copied short link for "${g.name}"`);
                                 }}
                                 className={`p-1 rounded transition-all ${

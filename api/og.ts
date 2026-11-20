@@ -18,9 +18,8 @@ interface FirebaseRuntimeConfig {
 
 function loadFirebaseConfig(): FirebaseRuntimeConfig {
   const fallback: FirebaseRuntimeConfig = {
-    projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0635510191',
-    firestoreDatabaseId:
-      process.env.VITE_FIREBASE_DATABASE_ID || 'ai-studio-invitationonline-6145d4e3-f054-4b92-8181-aa9c53ee300a',
+    projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'wedding-invitation-0007',
+    firestoreDatabaseId: process.env.VITE_FIREBASE_DATABASE_ID || '(default)',
     apiKey: process.env.VITE_FIREBASE_API_KEY || undefined,
   };
   try {

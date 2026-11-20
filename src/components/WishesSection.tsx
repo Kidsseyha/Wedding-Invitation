@@ -155,10 +155,36 @@ export default function WishesSection({
       }
     };
 
+    const handleDbRefresh = async () => {
+      try {
+        const ownerParam = effectiveOwnerId && effectiveOwnerId !== 'guest_public' ? `&ownerId=${encodeURIComponent(effectiveOwnerId)}` : '';
+        const res = await fetch(`/api/wishes?eventId=${encodeURIComponent(effectiveEventId)}${ownerParam}&_t=${Date.now()}`, {
+          cache: 'no-store',
+        });
+        if (res.ok) {
+          const json = await res.json();
+          if (json?.success && Array.isArray(json.wishes)) {
+            if (json.wishes.length > 0 || effectiveEventId !== DEFAULT_PRESET_EVENT_ID) {
+              setWishes(json.wishes);
+              try {
+                localStorage.setItem(wishesStorageKey, JSON.stringify(json.wishes));
+              } catch {
+                // ignore
+              }
+            }
+          }
+        }
+      } catch {
+        // ignore network errors
+      }
+    };
+
     window.addEventListener('wedding:ws', handleWsEvent);
+    window.addEventListener('wedding:db-refresh', handleDbRefresh);
     return () => {
       unsubscribe();
       window.removeEventListener('wedding:ws', handleWsEvent);
+      window.removeEventListener('wedding:db-refresh', handleDbRefresh);
     };
   }, [effectiveEventId, effectiveOwnerId, wishesStorageKey]);
 

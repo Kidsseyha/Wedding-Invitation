@@ -10,9 +10,8 @@ interface FirebaseRuntimeConfig {
 
 function loadFirebaseConfig(): FirebaseRuntimeConfig {
   const fallback: FirebaseRuntimeConfig = {
-    projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'gen-lang-client-0635510191',
-    firestoreDatabaseId:
-      process.env.VITE_FIREBASE_DATABASE_ID || 'ai-studio-invitationonline-6145d4e3-f054-4b92-8181-aa9c53ee300a',
+    projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'wedding-invitation-0007',
+    firestoreDatabaseId: process.env.VITE_FIREBASE_DATABASE_ID || '(default)',
     apiKey: process.env.VITE_FIREBASE_API_KEY || undefined,
   };
   try {
@@ -48,6 +47,19 @@ function getHeader(req: VercelReq, key: string): string {
   return val || '';
 }
 
+function hashUrlBase36(input: string): string {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b9;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 0x01000193);
+    h2 = Math.imul(h2 ^ ch, 0x85ebca6b);
+  }
+  const p1 = (h1 >>> 0).toString(36).padStart(7, '0').slice(-4);
+  const p2 = (h2 >>> 0).toString(36).padStart(7, '0').slice(-4);
+  return `${p1}${p2}`;
+}
+
 function generateShortCode(targetUrl: string): string {
   let prefix = 'kh';
   try {
@@ -63,13 +75,12 @@ function generateShortCode(targetUrl: string): string {
     const asciiSlug = nameParam
       .toLowerCase()
       .replace(/[^a-z0-9]/g, '')
-      .slice(0, 8);
+      .slice(0, 10);
     if (asciiSlug) prefix = asciiSlug;
   } catch {
     // fallback prefix
   }
-  const rand = Math.random().toString(36).substring(2, 7);
-  return `${prefix}-${rand}`;
+  return `${prefix}-${hashUrlBase36(targetUrl)}`;
 }
 
 export default async function handler(req: VercelReq, res: VercelRes) {

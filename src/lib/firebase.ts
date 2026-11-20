@@ -44,19 +44,86 @@ if (typeof window !== 'undefined') {
 
 let isNetworkDisabled = false;
 
-// Test connection on boot
-export async function testFirestoreConnection() {
+export interface FirestoreConnectionStatus {
+  connected: boolean;
+  reconnected: boolean;
+  databaseId: string;
+  projectId: string;
+  latencyMs: number;
+  error?: string;
+}
+
+// Test connection on boot and on manual database checks
+export async function testFirestoreConnection(timeoutMs = 3500): Promise<FirestoreConnectionStatus> {
+  const startedAt = Date.now();
+  let reconnected = false;
+
   try {
     if (isNetworkDisabled) {
       await enableNetwork(db).catch(() => {});
       isNetworkDisabled = false;
+      reconnected = true;
     }
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('firestore_quota_exceeded');
+      } catch {
+        // ignore
+      }
+    }
+
+    await Promise.race([
+      getDocFromServer(doc(db, 'test', 'connection')),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Firestore connection check timed out')), timeoutMs)
+      ),
+    ]);
+
+    return {
+      connected: true,
+      reconnected,
+      databaseId: firebaseConfig.firestoreDatabaseId,
+      projectId: firebaseConfig.projectId,
+      latencyMs: Date.now() - startedAt,
+    };
+  } catch (error: any) {
+    const code = String(error?.code || '');
+    const message = error instanceof Error ? error.message : String(error || '');
+
+    // Receiving permission-denied from Firestore server confirms live server reachability
+    if (
+      code === 'permission-denied' ||
+      code.includes('permission-denied') ||
+      message.includes('Missing or insufficient permissions')
+    ) {
+      return {
+        connected: true,
+        reconnected,
+        databaseId: firebaseConfig.firestoreDatabaseId,
+        projectId: firebaseConfig.projectId,
+        latencyMs: Date.now() - startedAt,
+      };
+    }
+
+    if (
+      message.includes('the client is offline') ||
+      message.includes('offline') ||
+      code === 'unavailable'
+    ) {
       console.warn('Firestore connection offline, attempting reconnection.');
-      enableNetwork(db).catch(() => {});
+      await enableNetwork(db).catch(() => {});
+      reconnected = true;
     }
+
+    return {
+      connected: false,
+      reconnected,
+      databaseId: firebaseConfig.firestoreDatabaseId,
+      projectId: firebaseConfig.projectId,
+      latencyMs: Date.now() - startedAt,
+      error: message || code || 'Unknown Firestore error',
+    };
   }
 }
 

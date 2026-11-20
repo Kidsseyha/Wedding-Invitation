@@ -10,7 +10,15 @@ import {
   query,
   where,
 } from 'firebase/firestore';
-import { db, auth, IS_FIRESTORE_WRITE_DISABLED, handleFirestoreError, OperationType } from './firebase';
+import {
+  db,
+  auth,
+  firebaseConfig,
+  IS_FIRESTORE_WRITE_DISABLED,
+  handleFirestoreError,
+  testFirestoreConnection,
+  OperationType,
+} from './firebase';
 import type { WeddingEvent } from '../types';
 import { DEFAULT_PRESET_EVENT_ID, GUEST_PUBLIC_SCOPE, extractScopeFromEventId, isGlobalSharedPresetId } from './userScope';
 import { getEmailDatabaseId, resolveRecordDatabaseId, type UserDatabaseRecord } from './userDatabase';
@@ -758,6 +766,7 @@ export async function fetchEventFromFirebase(
     forceServer?: boolean;
     timeoutMs?: number;
     onFastResult?: (event: WeddingEvent) => void;
+    onSourceResolved?: (info: { firestoreOk: boolean; serverOk: boolean }) => void;
   }
 ): Promise<WeddingEvent | null> {
   const targetId = eventId || DEFAULT_PRESET_EVENT_ID;
@@ -766,7 +775,7 @@ export async function fetchEventFromFirebase(
     ownerEmail: options?.ownerEmail,
     eventId: targetId,
   });
-  const branchTimeoutMs = options?.timeoutMs ?? (options?.forceServer ? 2200 : 2500);
+  const branchTimeoutMs = options?.timeoutMs ?? (options?.forceServer ? 3500 : 2500);
 
   const isBelongingToTargetOwner = (cand: WeddingEvent | null | undefined): cand is WeddingEvent => {
     if (!cand || typeof cand !== 'object') return false;
@@ -777,6 +786,9 @@ export async function fetchEventFromFirebase(
   };
 
   let fastBest: WeddingEvent | null = null;
+  let firestoreResponded = false;
+  let serverResponded = false;
+
   const considerFastResult = (cand: WeddingEvent | null) => {
     if (!isBelongingToTargetOwner(cand) || !options?.onFastResult) return cand;
     const picked = pickNewestDatabaseEvent<WeddingEvent>([fastBest, cand]);
@@ -792,12 +804,15 @@ export async function fetchEventFromFirebase(
       let failed = false;
       const serverRes = await raceWithTimeout(
         getDocFromServer(ref)
-          .then((snap) => (snap.exists() ? (snap.data() as WeddingEvent) : null))
+          .then((snap) => {
+            firestoreResponded = true;
+            return snap.exists() ? (snap.data() as WeddingEvent) : null;
+          })
           .catch(() => {
             failed = true;
             return null;
           }),
-        Math.min(branchTimeoutMs, 1100),
+        Math.min(branchTimeoutMs, 4000),
         null as WeddingEvent | null
       );
       if (!serverRes.timedOut && !failed) {
@@ -807,7 +822,7 @@ export async function fetchEventFromFirebase(
         getDoc(ref)
           .then((snap) => (snap.exists() ? (snap.data() as WeddingEvent) : null))
           .catch(() => null),
-        250,
+        300,
         null as WeddingEvent | null
       );
       return cacheRes.value;
@@ -815,7 +830,10 @@ export async function fetchEventFromFirebase(
 
     const res = await raceWithTimeout(
       getDoc(ref)
-        .then((snap) => (snap.exists() ? (snap.data() as WeddingEvent) : null))
+        .then((snap) => {
+          firestoreResponded = true;
+          return snap.exists() ? (snap.data() as WeddingEvent) : null;
+        })
         .catch(() => null),
       branchTimeoutMs,
       null as WeddingEvent | null
@@ -860,6 +878,7 @@ export async function fetchEventFromFirebase(
             fetchOpts
           );
           if (res.ok) {
+            serverResponded = true;
             const json = await res.json();
             if (json?.success && json.event && json.source !== 'preset' && isBelongingToTargetOwner(json.event)) {
               return json.event as WeddingEvent;
@@ -895,11 +914,88 @@ export async function fetchEventFromFirebase(
     serverApiPromise,
   ]);
 
+  options?.onSourceResolved?.({
+    firestoreOk: firestoreResponded,
+    serverOk: serverResponded,
+  });
+
   return pickNewestDatabaseEvent<WeddingEvent>([
     scopedDoc,
     isBelongingToTargetOwner(topDoc) ? topDoc : null,
     isBelongingToTargetOwner(apiDoc) ? apiDoc : null,
   ]);
+}
+
+export interface DatabaseCheckResult {
+  event: WeddingEvent | null;
+  firestoreConnected: boolean;
+  serverConnected: boolean;
+  reconnected: boolean;
+  latencyMs: number;
+  databaseId: string;
+  projectId: string;
+}
+
+/**
+ * Verifies connectivity to both Firebase Firestore and the Express Server DB,
+ * then fetches the latest event record from both sources with forceServer enabled.
+ */
+export async function checkDatabasesAndFetchEvent(
+  eventId: string,
+  ownerId?: string,
+  options?: {
+    templateType?: string;
+    ownerEmail?: string;
+    timeoutMs?: number;
+    onFastResult?: (event: WeddingEvent) => void;
+  }
+): Promise<DatabaseCheckResult> {
+  const timeoutMs = options?.timeoutMs ?? 4000;
+  let sourceStatus = { firestoreOk: false, serverOk: false };
+
+  const checkServerHealth = async (): Promise<boolean> => {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), Math.min(timeoutMs, 3500)) : null;
+    try {
+      const res = await fetch(`/api/health?_t=${Date.now()}`, {
+        cache: 'no-store',
+        ...(controller ? { signal: controller.signal } : {}),
+      });
+      if (!res.ok) return false;
+      const json = await res.json().catch(() => null);
+      return Boolean(json && json.status === 'ok');
+    } catch {
+      return false;
+    } finally {
+      if (timer !== null) clearTimeout(timer);
+    }
+  };
+
+  const [fsStatus, healthOk, dbEvent] = await Promise.all([
+    testFirestoreConnection(Math.min(timeoutMs, 3500)),
+    checkServerHealth(),
+    fetchEventFromFirebase(eventId, ownerId, {
+      includeServerApi: true,
+      templateType: options?.templateType,
+      ownerEmail: options?.ownerEmail,
+      forceServer: true,
+      timeoutMs,
+      onFastResult: options?.onFastResult,
+      onSourceResolved: (info) => {
+        sourceStatus = info;
+      },
+    }),
+  ]);
+
+  return {
+    event: dbEvent,
+    firestoreConnected: fsStatus.connected || sourceStatus.firestoreOk,
+    serverConnected: healthOk || sourceStatus.serverOk,
+    reconnected: fsStatus.reconnected,
+    latencyMs: fsStatus.latencyMs,
+    databaseId: fsStatus.databaseId || firebaseConfig.firestoreDatabaseId,
+    projectId: fsStatus.projectId || firebaseConfig.projectId,
+  };
 }
 
 /**

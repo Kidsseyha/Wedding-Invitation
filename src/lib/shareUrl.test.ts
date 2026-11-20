@@ -1,6 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { getPublicShareUrl, isSharedInvitationSearch, VERCEL_APP_URL, PUBLIC_APP_URL } from './shareUrl';
+import {
+  getPublicShareUrl,
+  isSharedInvitationSearch,
+  generateDeterministicShortCode,
+  extractGuestNameFromSearch,
+  shortenUrl,
+  VERCEL_APP_URL,
+  PUBLIC_APP_URL,
+} from './shareUrl';
 
 test('getPublicShareUrl defaults to lang=kh and includes share=1', () => {
   const urlStr = getPublicShareUrl('សុខ វិបុល', 'event_123', 'housewarming');
@@ -58,4 +66,70 @@ test('getPublicShareUrl includes ownerId only when needed and excludes guest_pub
     getPublicShareUrl('Guest', 'modern-wedding-mw001', 'wedding', { ownerId: 'guest_public' })
   );
   assert.equal(guestPublic.searchParams.get('ownerId'), null);
+});
+
+test('generateDeterministicShortCode produces unique deterministic codes per guest name', () => {
+  const urlSok = getPublicShareUrl('លោក សុខ', 'u_owner__wedding', 'wedding');
+  const urlThavy = getPublicShareUrl('អ្នកនាង ថាវី', 'u_owner__wedding', 'wedding');
+  const urlJohn1 = getPublicShareUrl('John Smith', 'u_owner__wedding', 'wedding');
+  const urlJohn2 = getPublicShareUrl('John Sok', 'u_owner__wedding', 'wedding');
+
+  const codeSok1 = generateDeterministicShortCode(urlSok);
+  const codeSok2 = generateDeterministicShortCode(urlSok);
+  const codeThavy = generateDeterministicShortCode(urlThavy);
+  const codeJohn1 = generateDeterministicShortCode(urlJohn1);
+  const codeJohn2 = generateDeterministicShortCode(urlJohn2);
+
+  assert.equal(codeSok1, codeSok2);
+  assert.notEqual(codeSok1, codeThavy);
+  assert.notEqual(codeJohn1, codeJohn2);
+  assert.ok(codeJohn1.startsWith('johnsmith-'));
+  assert.ok(codeJohn2.startsWith('johnsok-'));
+  assert.ok(codeSok1.startsWith('wd-'));
+});
+
+test('extractGuestNameFromSearch handles all guest params, trims whitespace, and ignores placeholder', () => {
+  assert.equal(extractGuestNameFromSearch('?name=%20%E1%9E%9B%E1%9F%84%E1%9E%80%20%E1%9E%9F%E1%9E%BB%E1%9E%81%20'), 'លោក សុខ');
+  assert.equal(extractGuestNameFromSearch('?i=Dara%20Chan'), 'Dara Chan');
+  assert.equal(extractGuestNameFromSearch('?guest=Sokha'), 'Sokha');
+  assert.equal(extractGuestNameFromSearch('?to=Vannak'), 'Vannak');
+  assert.equal(extractGuestNameFromSearch('?name=Your%20Name'), '');
+  assert.equal(extractGuestNameFromSearch('?share=1&id=evt'), '');
+});
+
+test('shortenUrl preserves inferred public origin and sends distinct guest URLs to /api/shorten', async () => {
+  const originalFetch = globalThis.fetch;
+  const postedPayloads: Array<{ url: string; origin: string; lang: string }> = [];
+
+  globalThis.fetch = (async (_input: any, init?: any) => {
+    const body = JSON.parse(String(init?.body || '{}'));
+    postedPayloads.push(body);
+    const code = generateDeterministicShortCode(body.url);
+    return new Response(
+      JSON.stringify({
+        success: true,
+        code,
+        shortUrl: `${body.origin}/s/${code}`,
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } }
+    );
+  }) as typeof fetch;
+
+  try {
+    const long1 = getPublicShareUrl('លោក សុខ វិបុល', 'u_1__evt', 'wedding', { customOrigin: PUBLIC_APP_URL });
+    const long2 = getPublicShareUrl('កញ្ញា ចន្ទ្រា', 'u_1__evt', 'wedding', { customOrigin: PUBLIC_APP_URL });
+
+    const short1 = await shortenUrl(long1);
+    const short2 = await shortenUrl(long2);
+
+    assert.ok(short1.startsWith(`${PUBLIC_APP_URL}/s/`));
+    assert.ok(short2.startsWith(`${PUBLIC_APP_URL}/s/`));
+    assert.notEqual(short1, short2);
+    assert.equal(postedPayloads.length, 2);
+    assert.equal(new URL(postedPayloads[0].url).searchParams.get('name'), 'លោក សុខ វិបុល');
+    assert.equal(new URL(postedPayloads[1].url).searchParams.get('name'), 'កញ្ញា ចន្ទ្រា');
+    assert.equal(postedPayloads[0].origin, PUBLIC_APP_URL);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

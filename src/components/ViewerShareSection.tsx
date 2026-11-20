@@ -39,16 +39,20 @@ export default function ViewerShareSection({
   const isLight = theme === 'light';
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedShort, setCopiedShort] = useState(false);
-  const [shortUrl, setShortUrl] = useState<string>('');
+  const [shortUrlState, setShortUrlState] = useState<{ targetUrl: string; shortUrl: string } | null>(null);
 
-  const currentGuest = guestName && guestName !== 'Your Name' ? guestName : '';
-  const fullUrl = getPublicShareUrl(currentGuest, event.id, event.eventType, { ownerId: event.ownerId });
+  const currentGuest = guestName && guestName !== 'Your Name' ? guestName.trim() : '';
+  const fullUrl = getPublicShareUrl(currentGuest, event.id, event.eventType, {
+    ownerId: event.ownerId,
+    lang: language === 'en' ? 'en' : 'kh',
+  });
+  const shortUrl = shortUrlState && shortUrlState.targetUrl === fullUrl ? shortUrlState.shortUrl : '';
 
   useEffect(() => {
     let isMounted = true;
     shortenUrl(fullUrl).then(res => {
       if (isMounted && res) {
-        setShortUrl(res);
+        setShortUrlState({ targetUrl: fullUrl, shortUrl: res });
       }
     });
     return () => {

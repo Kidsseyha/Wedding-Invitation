@@ -99,7 +99,7 @@ export default function ShareInvitationModal({
   const [targetGuest, setTargetGuest] = useState(guestName || '');
   const [copiedMessage, setCopiedMessage] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
-  const [shortUrl, setShortUrl] = useState<string>('');
+  const [shortUrlState, setShortUrlState] = useState<{ targetUrl: string; shortUrl: string } | null>(null);
   const [loadingShort, setLoadingShort] = useState<boolean>(false);
   const [qrMode, setQrMode] = useState<'short' | 'direct'>('short');
   const [copyToast, setCopyToast] = useState<string | null>(null);
@@ -262,7 +262,7 @@ export default function ShareInvitationModal({
     'លោក ចាន់ វិសាល និងក្រុមគ្រួសារ',
   ]);
   const [newBatchName, setNewBatchName] = useState('');
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [copiedGuestKey, setCopiedGuestKey] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [allDbGuests, setAllDbGuests] = useState<GuestPreset[]>([]);
 
@@ -275,12 +275,17 @@ export default function ShareInvitationModal({
   }, [isOpen, effectiveScope]);
 
   useEffect(() => {
-    if (guestName && guestName !== 'Your Name') {
-      setTargetGuest(guestName);
-    }
-  }, [guestName]);
+    if (!isOpen) return;
+    setTargetGuest(guestName && guestName !== 'Your Name' ? guestName : '');
+  }, [isOpen, guestName]);
 
-  const currentShareGuest = targetGuest.trim() || guestName || 'Your Name';
+  const currentShareGuest = targetGuest.trim() || 'Your Name';
+  const displayShareGuest =
+    currentShareGuest !== 'Your Name'
+      ? currentShareGuest
+      : language === 'kh'
+      ? 'ភ្ញៀវកិត្តិយស'
+      : 'Honored Guest';
 
   // Information retrieval from the selected template in All Templates
   const isSameTemplateAsCurrent =
@@ -302,15 +307,16 @@ export default function ShareInvitationModal({
     ownerId: effectiveScope,
   });
 
-  // Automatically fetch short URL whenever fullUrl changes (clear stale shortUrl immediately)
+  const shortUrl = shortUrlState && shortUrlState.targetUrl === fullUrl ? shortUrlState.shortUrl : '';
+
+  // Automatically fetch short URL whenever fullUrl changes (strictly keyed to fullUrl so stale links never leak)
   useEffect(() => {
     let isMounted = true;
-    setShortUrl('');
     setLoadingShort(true);
     shortenUrl(fullUrl, selectedDomainOrigin)
       .then((res) => {
         if (isMounted) {
-          setShortUrl(res);
+          setShortUrlState({ targetUrl: fullUrl, shortUrl: res });
           setLoadingShort(false);
         }
       })
@@ -334,7 +340,7 @@ export default function ShareInvitationModal({
     setLoadingShort(true);
     try {
       const resolved = await shortenUrl(fullUrl, selectedDomainOrigin);
-      setShortUrl(resolved);
+      setShortUrlState({ targetUrl: fullUrl, shortUrl: resolved });
       return resolved || fullUrl;
     } catch {
       return fullUrl;
@@ -343,16 +349,17 @@ export default function ShareInvitationModal({
     }
   };
 
-  // Unified Copy Link feature with guest name and toast confirmation
-  const handleCopyLink = (customUrl?: string) => {
+  // Unified Copy Link feature with exact guest name and toast confirmation
+  const handleCopyLink = (customUrl?: string, guestLabel?: string) => {
     const linkToCopy = customUrl || activeShareLink || fullUrl;
     if (!linkToCopy) return;
+    const toastGuestName = (guestLabel || '').trim() || displayShareGuest;
 
     const copySuccess = () => {
       setCopyToast(
         language === 'kh'
-          ? `បានចម្លងតំណភ្ជាប់សំបុត្រសម្រាប់ ${currentShareGuest}!`
-          : `Copied invitation link for ${currentShareGuest}!`
+          ? `បានចម្លងតំណភ្ជាប់សំបុត្រសម្រាប់ ${toastGuestName}!`
+          : `Copied invitation link for ${toastGuestName}!`
       );
       setTimeout(() => {
         setCopyToast(null);
@@ -503,7 +510,7 @@ export default function ShareInvitationModal({
     if (language === 'kh') {
       return `💌 *${displayHeaderKh}*
 
-សូមគោរពអញ្ជើញ៖ *${currentShareGuest}*
+សូមគោរពអញ្ជើញ៖ *${displayShareGuest}*
 ចូលរួមជាអធិបតី និងជាភ្ញៀវកិត្តិយសក្នុងកម្មវិធីរបស់យើងខ្ញុំ៖
 ${celebrationCelebrants}
 
@@ -518,7 +525,7 @@ ${linkToUse}
 
     return `💌 *${displayHeaderEn}*
 
-Cordially Invited: *${currentShareGuest}*
+Cordially Invited: *${displayShareGuest}*
 To celebrate with us:
 ${celebrationCelebrants}
 
@@ -535,7 +542,7 @@ Your presence will make our day truly special! 🙏✨`;
 
   const handleCopyOnlyShortLink = async () => {
     const resolvedLink = await resolveFreshShareLink();
-    handleCopyLink(resolvedLink);
+    handleCopyLink(resolvedLink, displayShareGuest);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2000);
   };
@@ -547,8 +554,8 @@ Your presence will make our day truly special! 🙏✨`;
       setCopiedMessage(true);
       setCopyToast(
         language === 'kh'
-          ? `បានចម្លងសារអញ្ជើញ និងលីងខ្លី Vercel សម្រាប់ ${currentShareGuest}!`
-          : `Copied invitation message & Vercel short link for ${currentShareGuest}!`
+          ? `បានចម្លងសារអញ្ជើញ និងលីងសម្រាប់ ${displayShareGuest}!`
+          : `Copied invitation message & link for ${displayShareGuest}!`
       );
       setTimeout(() => {
         setCopiedMessage(false);
@@ -597,18 +604,22 @@ Your presence will make our day truly special! 🙏✨`;
     setBatchGuests(batchGuests.filter((_, i) => i !== index));
   };
 
-  const handleCopyBatchGuestLink = async (name: string, index: number) => {
+  const handleCopyBatchGuestLink = async (name: string) => {
+    const cleanName = name.trim();
+    if (!cleanName) return;
     if (pendingTemplateSaveRef.current) {
       await pendingTemplateSaveRef.current.catch(() => {});
     }
-    const url = getPublicShareUrl(name, activeEventId, selectedCategory, {
+    const url = getPublicShareUrl(cleanName, activeEventId, selectedCategory, {
       customOrigin: selectedDomainOrigin,
       lang: targetShareLang,
       ownerId: effectiveScope,
     });
-    handleCopyLink(url);
-    setCopiedIndex(index);
-    setTimeout(() => setCopiedIndex(null), 2000);
+    handleCopyLink(url, cleanName);
+    setCopiedGuestKey(cleanName);
+    setTimeout(() => {
+      setCopiedGuestKey((prev) => (prev === cleanName ? null : prev));
+    }, 2000);
   };
 
   // QR code encoding data: uses standard high-contrast black on white
@@ -909,7 +920,7 @@ Your presence will make our day truly special! 🙏✨`;
                             {displayHeaderKh}
                           </h4>
                           <p className="text-[11px] sm:text-xs font-khmer text-amber-200 drop-shadow mt-0.5">
-                            សូមគោរពអញ្ជើញ <span className="font-bold text-amber-300 underline underline-offset-2">{currentShareGuest}</span>
+                            សូមគោរពអញ្ជើញ <span className="font-bold text-amber-300 underline underline-offset-2">{displayShareGuest}</span>
                           </p>
                         </div>
                       </div>
@@ -1111,7 +1122,7 @@ Your presence will make our day truly special! 🙏✨`;
                   {/* Guest Information */}
                   <div className="space-y-1">
                     <h4 className={`text-sm font-bold font-khmer ${isLight ? 'text-amber-900' : 'text-amber-200'}`}>
-                      {language === 'kh' ? `សំបុត្រសម្រាប់៖ ${currentShareGuest}` : `Invitation for: ${currentShareGuest}`}
+                      {language === 'kh' ? `សំបុត្រសម្រាប់៖ ${displayShareGuest}` : `Invitation for: ${displayShareGuest}`}
                     </h4>
                     <p className={`text-[11px] ${isLight ? 'text-amber-800' : 'text-amber-400/80'} font-mono truncate max-w-sm mx-auto px-2`}>
                       {activeQrData}
@@ -1227,12 +1238,14 @@ Your presence will make our day truly special! 🙏✨`;
 
                   {/* Complete Guest Table */}
                   {(() => {
-                    // Combine database guests and batch guests
+                    // Combine database guests and batch guests cleanly with trimmed deduplication
                     const allGuestNames = Array.from(
-                      new Set([
-                        ...batchGuests,
-                        ...allDbGuests.map((g) => g.name).filter(Boolean),
-                      ])
+                      new Set(
+                        [
+                          ...batchGuests.map((n) => n.trim()),
+                          ...allDbGuests.map((g) => (g.name || '').trim()),
+                        ].filter(Boolean)
+                      )
                     );
 
                     const filteredNames = allGuestNames.filter((name) =>
@@ -1278,9 +1291,10 @@ Your presence will make our day truly special! 🙏✨`;
                                     lang: targetShareLang,
                                     ownerId: effectiveScope,
                                   });
+                                  const isRowCopied = copiedGuestKey === name;
                                   return (
                                     <tr
-                                      key={idx}
+                                      key={name}
                                       className={`${isLight ? 'hover:bg-amber-100/50' : 'hover:bg-amber-400/5'} transition-colors group`}
                                     >
                                       <td className={`py-2.5 px-3 text-center ${isLight ? 'text-neutral-500' : 'text-neutral-400'} text-[11px] font-mono`}>
@@ -1298,23 +1312,23 @@ Your presence will make our day truly special! 🙏✨`;
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             className={`p-1.5 rounded-lg ${isLight ? 'text-neutral-600 hover:text-amber-800 hover:bg-amber-200/60' : 'text-neutral-400 hover:text-amber-300 hover:bg-amber-400/10'} transition-colors`}
-                                            title={language === 'kh' ? 'បើកមើលសាកល្បង' : 'Test Open'}
+                                            title={guestLink}
                                           >
                                             <ExternalLink className="w-3.5 h-3.5" />
                                           </a>
                                           <button
                                             type="button"
-                                            onClick={() => handleCopyBatchGuestLink(name, idx)}
+                                            onClick={() => handleCopyBatchGuestLink(name)}
                                             className={`px-2.5 py-1 rounded-lg text-[11px] font-khmer font-bold flex items-center gap-1 transition-all ${
-                                              copiedIndex === idx
+                                              isRowCopied
                                                 ? 'bg-emerald-500 text-emerald-950 font-bold shadow'
                                                 : isLight
                                                 ? 'bg-amber-200 hover:bg-amber-300 text-amber-950 border border-amber-300'
                                                 : 'bg-amber-400/20 hover:bg-amber-400/30 text-amber-200 border border-amber-400/30'
                                             }`}
-                                            title={language === 'kh' ? 'ចម្លងតំណភ្ជាប់' : 'Copy Link'}
+                                            title={guestLink}
                                           >
-                                            {copiedIndex === idx ? (
+                                            {isRowCopied ? (
                                               <>
                                                 <Check className="w-3 h-3 text-emerald-950 stroke-[3]" />
                                                 <span>បានចម្លង</span>
@@ -1329,16 +1343,16 @@ Your presence will make our day truly special! 🙏✨`;
                                           <button
                                             type="button"
                                             onClick={async () => {
-                                              setBatchGuests(batchGuests.filter((g) => g !== name));
-                                              const dbMatch = allDbGuests.find((g) => g.name === name);
+                                              setBatchGuests(batchGuests.filter((g) => g.trim() !== name));
+                                              const dbMatch = allDbGuests.find((g) => (g.name || '').trim() === name);
                                               if (dbMatch && dbMatch.id) {
                                                 try {
-                                                  await deleteGuestFromFirebase(dbMatch.id);
+                                                  await deleteGuestFromFirebase(dbMatch.id, effectiveScope);
                                                 } catch (err) {
                                                   console.error('Error deleting guest:', err);
                                                 }
                                               }
-                                              setAllDbGuests(allDbGuests.filter((g) => g.name !== name));
+                                              setAllDbGuests(allDbGuests.filter((g) => (g.name || '').trim() !== name));
                                             }}
                                             className="p-1.5 rounded-lg text-neutral-400 hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
                                             title={language === 'kh' ? 'លុប' : 'Delete'}

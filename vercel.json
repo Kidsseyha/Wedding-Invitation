@@ -4,7 +4,10 @@
   "framework": "vite",
   "functions": {
     "api/og.ts": {
-      "includeFiles": "dist/app.html"
+      "includeFiles": "{dist/app.html,firebase-applet-config.json}"
+    },
+    "api/shorten.ts": {
+      "includeFiles": "firebase-applet-config.json"
     }
   },
   "rewrites": [

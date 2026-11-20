@@ -24,6 +24,7 @@ import {
   isGlobalSharedPresetId,
   stripScopedEventId,
 } from './src/lib/userScope';
+import { generateDeterministicShortCode } from './src/lib/shareUrl';
 import {
   findUserDbEvent,
   shouldIncludePublicRecord,
@@ -159,7 +160,7 @@ const GUESTS_FILE = path.join(DATA_DIR, 'saved_guests.json');
 const SHORT_LINKS_FILE = path.join(DATA_DIR, 'saved_short_links.json');
 const SYSTEM_USERS_FILE = path.join(DATA_DIR, 'saved_system_users.json');
 const NOTIFICATIONS_FILE = path.join(DATA_DIR, 'saved_notifications.json');
-const PUBLIC_APP_URL = (process.env.APP_URL || 'https://ais-pre-oi572nxogafsw6nsowqaaj-935767504529.asia-southeast1.run.app').replace('ais-dev-', 'ais-pre-');
+const PUBLIC_APP_URL = (process.env.APP_URL || 'https://ais-pre-hjj7vuznhhxkva5mjjwpax-816970112678.asia-southeast1.run.app').replace('ais-dev-', 'ais-pre-');
 
 function getSafeUserDbDir(dbId: string): string | null {
   const cleanId = (dbId || '').trim();
@@ -763,7 +764,25 @@ function saveGuests(guests: any[]) {
 
 // API Routes FIRST before Vite middleware
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok' });
+  const dataDirReady = fs.existsSync(DATA_DIR);
+  let userDatabasesCount = 0;
+  try {
+    if (fs.existsSync(USER_DATABASES_DIR)) {
+      userDatabasesCount = fs
+        .readdirSync(USER_DATABASES_DIR, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory()).length;
+    }
+  } catch {
+    // ignore
+  }
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({
+    status: 'ok',
+    serverDb: true,
+    dataDirReady,
+    userDatabasesCount,
+    timestamp: new Date().toISOString(),
+  });
 });
 
 const DEFAULT_PRESET_ID = 'cmgrawhnk0003le0434762j7n';
@@ -1731,6 +1750,69 @@ app.delete('/api/templates/:id', (req, res) => {
   res.json({ success: true, deleted, id });
 });
 
+    // In-app short link lookup API (used as SPA fallback if client lands on /s/:code)
+app.get('/api/short-link/:code', async (req, res) => {
+  const code = (req.params.code || '').trim();
+  if (!code || !/^[a-zA-Z0-9_-]{1,128}$/.test(code)) {
+    return res.status(400).json({ success: false, error: 'Invalid short code' });
+  }
+  const links = getShortLinks();
+  let target = links[code];
+
+  if (!target) {
+    const fsLink = await fetchShortLinkFromFirestoreRest({
+      projectId: rawFirebaseConfig.projectId,
+      databaseId: (rawFirebaseConfig as any).firestoreDatabaseId || '(default)',
+      code,
+      apiKey: rawFirebaseConfig.apiKey,
+    });
+    if (fsLink?.url) {
+      target = fsLink.url;
+    }
+  }
+
+  if (!target) {
+    return res.status(404).json({ success: false, error: 'Short link not found' });
+  }
+
+  let cleanTarget = target;
+  const reqOrigin = getRequestPublicOrigin(req);
+  if (cleanTarget.includes('localhost') || cleanTarget.includes('127.0.0.1')) {
+    cleanTarget = cleanTarget.replace(/http:\/\/localhost:\d+/, reqOrigin).replace(/https:\/\/localhost:\d+/, reqOrigin);
+  }
+  if (cleanTarget.includes('ais-dev-')) {
+    cleanTarget = cleanTarget.replace('ais-dev-', 'ais-pre-');
+  }
+
+  let guestName = '';
+  let eventId = '';
+  let eventType = '';
+  let ownerId = '';
+  let lang = 'kh';
+  try {
+    const parsed = new URL(cleanTarget);
+    if (!parsed.searchParams.get('share')) parsed.searchParams.set('share', '1');
+    if (!parsed.searchParams.get('lang')) parsed.searchParams.set('lang', 'kh');
+    guestName = (parsed.searchParams.get('i') || parsed.searchParams.get('guest') || parsed.searchParams.get('name') || parsed.searchParams.get('to') || '').trim();
+    eventId = (parsed.searchParams.get('id') || '').trim();
+    eventType = (parsed.searchParams.get('type') || parsed.searchParams.get('category') || '').trim();
+    ownerId = (parsed.searchParams.get('ownerId') || '').trim();
+    lang = (parsed.searchParams.get('lang') || 'kh').trim();
+    cleanTarget = parsed.toString();
+  } catch {}
+
+  return res.json({
+    success: true,
+    code,
+    url: cleanTarget,
+    guestName,
+    eventId,
+    eventType,
+    ownerId,
+    lang,
+  });
+});
+
     // In-app short link endpoint with full Open Graph metadata preview for Telegram, Facebook, Messenger
 app.get('/s/:code', async (req, res) => {
   const code = req.params.code;
@@ -1751,8 +1833,9 @@ app.get('/s/:code', async (req, res) => {
 
   if (target) {
     let cleanTarget = target;
+    const reqOrigin = getRequestPublicOrigin(req);
     if (cleanTarget.includes('localhost') || cleanTarget.includes('127.0.0.1')) {
-      cleanTarget = cleanTarget.replace(/http:\/\/localhost:\d+/, PUBLIC_APP_URL).replace(/https:\/\/localhost:\d+/, PUBLIC_APP_URL);
+      cleanTarget = cleanTarget.replace(/http:\/\/localhost:\d+/, reqOrigin).replace(/https:\/\/localhost:\d+/, reqOrigin);
     }
     if (cleanTarget.includes('ais-dev-')) {
       cleanTarget = cleanTarget.replace('ais-dev-', 'ais-pre-');
@@ -1791,7 +1874,7 @@ app.get('/s/:code', async (req, res) => {
     let eventId: string | null = null;
     let eventType: string | null = null;
     let ownerId: string | null = null;
-    let targetOrigin = getRequestPublicOrigin(req);
+    let targetOrigin = reqOrigin;
     try {
       const parsed = new URL(cleanTarget);
       guestName = parsed.searchParams.get('name') || parsed.searchParams.get('i') || parsed.searchParams.get('guest') || parsed.searchParams.get('to');
@@ -1830,7 +1913,7 @@ app.get('/s/:code', async (req, res) => {
     return res.redirect(302, cleanTarget);
   }
 
-  return res.redirect(302, PUBLIC_APP_URL);
+  return res.redirect(302, getRequestPublicOrigin(req));
 });
 
 // API endpoint to shorten a URL
@@ -1841,16 +1924,8 @@ app.post('/api/shorten', async (req, res) => {
   }
 
   try {
-    let cleanUrl = url;
-    if (cleanUrl.includes('localhost') || cleanUrl.includes('127.0.0.1')) {
-      cleanUrl = cleanUrl.replace(/http:\/\/localhost:\d+/, PUBLIC_APP_URL).replace(/https:\/\/localhost:\d+/, PUBLIC_APP_URL);
-    }
-    if (cleanUrl.includes('ais-dev-')) {
-      cleanUrl = cleanUrl.replace('ais-dev-', 'ais-pre-');
-    }
-
     // Determine public origin: NEVER use localhost or dev domain
-    let baseOrigin = PUBLIC_APP_URL;
+    let baseOrigin = getRequestPublicOrigin(req) || PUBLIC_APP_URL;
     if (
       clientOrigin &&
       typeof clientOrigin === 'string' &&
@@ -1863,6 +1938,14 @@ app.post('/api/shorten', async (req, res) => {
 
     if (baseOrigin.includes('ais-dev-')) {
       baseOrigin = baseOrigin.replace('ais-dev-', 'ais-pre-');
+    }
+
+    let cleanUrl = url;
+    if (cleanUrl.includes('localhost') || cleanUrl.includes('127.0.0.1')) {
+      cleanUrl = cleanUrl.replace(/http:\/\/localhost:\d+/, baseOrigin).replace(/https:\/\/localhost:\d+/, baseOrigin);
+    }
+    if (cleanUrl.includes('ais-dev-')) {
+      cleanUrl = cleanUrl.replace('ais-dev-', 'ais-pre-');
     }
 
     // Ensure Khmer language & share flag are preserved in target URL
@@ -1905,31 +1988,13 @@ app.post('/api/shorten', async (req, res) => {
       }
     }
 
-    // Generate clean in-app short code: /s/:code
-    let code = '';
-    try {
-      const urlObj = new URL(cleanUrl);
-      const typeParam = (urlObj.searchParams.get('type') || '').toLowerCase().trim();
-      let prefix = 'kh';
-      if (typeParam.startsWith('wedding')) prefix = 'wd';
-      else if (typeParam.startsWith('engage')) prefix = 'eg';
-      else if (typeParam.startsWith('house')) prefix = 'hw';
-      else if (typeParam.startsWith('birth')) prefix = 'bd';
-      else if (typeParam.startsWith('anniv')) prefix = 'an';
-
-      const nameParam = urlObj.searchParams.get('name');
-      if (nameParam) {
-        const cleanName = nameParam.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10);
-        if (cleanName) prefix = cleanName;
-      }
-      const rand = Math.random().toString(36).substring(2, 7);
-      code = `${prefix}-${rand}`;
-    } catch {
-      // url parse error, fallback
-    }
-
-    if (!code) {
-      code = `kh-${Math.random().toString(36).substring(2, 8)}`;
+    // Generate deterministic, collision-safe in-app short code: /s/:code
+    const baseCode = generateDeterministicShortCode(cleanUrl);
+    let code = baseCode;
+    let suffixIdx = 1;
+    while (existingLinks[code] && existingLinks[code] !== cleanUrl) {
+      code = `${baseCode}-${suffixIdx}`;
+      suffixIdx += 1;
     }
 
     saveShortLink(code, cleanUrl);

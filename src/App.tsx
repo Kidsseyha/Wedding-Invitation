@@ -54,17 +54,18 @@ import { WEDDING_EVENT } from './data/weddingData';
 import { sanitizeWeddingEvent, VERIFIED_WEDDING_COVER } from './utils/sanitizeEvent';
 import { findTemplatePreset, getCategoryCoverImage, VERIFIED_CATEGORY_COVERS, EVENT_PRESETS } from './data/eventTemplates';
 import { buildInvitationMeta, normalizeCategoryString } from './utils/shareMeta';
-import { PUBLIC_APP_URL, isSharedInvitationSearch } from './lib/shareUrl';
+import { PUBLIC_APP_URL, extractGuestNameFromSearch, isSharedInvitationSearch } from './lib/shareUrl';
 import { Language, WeddingEvent } from './types';
 import { formatKhmerDate, formatEnDate } from './utils/khmerHelpers';
 import { getEventTimestampMs } from './utils/saveHelpers';
 import { testFirestoreConnection, auth, db } from './lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, User } from 'firebase/auth';
 import {
   saveEventToFirebase,
   saveEventReliable,
   fetchEventFromFirebase,
+  checkDatabasesAndFetchEvent,
   fetchUserTemplatesFromFirebase,
   subscribeToEvent,
   syncUserProfile,
@@ -1438,8 +1439,8 @@ export default function App() {
     setIsRefreshingFromDb(true);
     setRefreshValidationFeedback(
       language === 'kh'
-        ? 'កំពុងត្រួតពិនិត្យ និងទាញយកទិន្នន័យពី Database...'
-        : 'Checking information from database...'
+        ? 'កំពុងត្រួតពិនិត្យ Database (Firestore & Server) និងផ្ទុកទិន្នន័យឡើងវិញ...'
+        : 'Checking database (Firestore & Server) and reloading...'
     );
 
     try {
@@ -1458,8 +1459,27 @@ export default function App() {
       let targetOwnerFilter = '';
 
       if (isFromShareLink || (!activeUserScope.isAuthenticated && (urlIdParam || urlTypeParam))) {
-        fetchId = urlIdParam || urlTypeParam || event.id || DEFAULT_PRESET_EVENT_ID;
-        targetOwnerFilter = urlOwnerParam || extractScopeFromEventId(fetchId) || event.ownerId || '';
+        targetOwnerFilter =
+          urlOwnerParam ||
+          extractScopeFromEventId(urlIdParam) ||
+          extractScopeFromEventId(event.id) ||
+          event.ownerId ||
+          '';
+        if (urlIdParam) {
+          fetchId = urlIdParam;
+        } else if (
+          event.id &&
+          (!urlTypeParam ||
+            normalizeCategoryString(event.eventType || event.id) === normalizeCategoryString(urlTypeParam))
+        ) {
+          fetchId = event.id;
+        } else if (urlTypeParam) {
+          const presetMatch = findTemplatePreset(urlTypeParam);
+          const basePresetId = presetMatch?.sampleEvent?.id || urlTypeParam;
+          fetchId = targetOwnerFilter ? getScopedEventId(basePresetId, targetOwnerFilter) : basePresetId;
+        } else {
+          fetchId = event.id || DEFAULT_PRESET_EVENT_ID;
+        }
       } else if (activeUserScope.isAuthenticated) {
         targetOwnerFilter = scopeId;
         const activeTemplateId = localStorage.getItem(getUserStorageKey('wedding_last_active_template_id', scopeId));
@@ -1476,7 +1496,7 @@ export default function App() {
         const sanitized = sanitizeWeddingEvent({
           ...rawDbEvent,
           id: rawDbEvent.id || fetchId,
-          ownerId: rawDbEvent.ownerId || (activeUserScope.isAuthenticated && !isFromShareLink ? scopeId : undefined),
+          ownerId: rawDbEvent.ownerId || (activeUserScope.isAuthenticated && !isFromShareLink ? scopeId : targetOwnerFilter || undefined),
           ownerEmail: rawDbEvent.ownerEmail || (activeUserScope.isAuthenticated && !isFromShareLink ? activeUserScope.ownerEmail : undefined),
         });
         hasSavedLocallyRef.current = false;
@@ -1489,25 +1509,26 @@ export default function App() {
             localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(sanitized));
             localStorage.setItem(getUserStorageKey(`wedding_template_saved_${sanitized.id}`, scopeId), JSON.stringify(sanitized));
             localStorage.setItem(getUserStorageKey(`wedding_template_saved_${rawBaseId}`, scopeId), JSON.stringify(sanitized));
+            localStorage.setItem(getUserStorageKey('wedding_last_active_template_id', scopeId), sanitized.id);
             if (sanitized.eventType) {
               localStorage.setItem(getUserStorageKey(`wedding_template_type_${sanitized.eventType}`, scopeId), JSON.stringify(sanitized));
+              localStorage.setItem(getUserStorageKey('wedding_last_template_type', scopeId), sanitized.eventType);
             }
           } catch {}
         }
       };
 
       let appliedFast = false;
-      let dbEvent = await fetchEventFromFirebase(fetchId, targetOwnerFilter || undefined, {
-        includeServerApi: true,
+      const checkResult = await checkDatabasesAndFetchEvent(fetchId, targetOwnerFilter || undefined, {
         templateType: templateTypeHint || undefined,
         ownerEmail: activeUserScope.ownerEmail || event.ownerEmail || undefined,
-        forceServer: true,
-        timeoutMs: 1200,
+        timeoutMs: 4000,
         onFastResult: (fastEvt) => {
           appliedFast = true;
           applyDbEvent(fastEvt);
         },
       });
+      let dbEvent = checkResult.event;
 
       // Parallelize fallback lookups only if primary ID check returned nothing
       if (!dbEvent && activeUserScope.isAuthenticated && !isFromShareLink) {
@@ -1516,11 +1537,11 @@ export default function App() {
             ? fetchEventFromFirebase(`event_${authUser.uid}`, undefined, {
                 includeServerApi: true,
                 forceServer: true,
-                timeoutMs: 1100,
+                timeoutMs: 2500,
               })
             : Promise.resolve(null),
           !urlIdParam && !urlTypeParam
-            ? fetchUserTemplatesFromFirebase(scopeId, { timeoutMs: 1200 })
+            ? fetchUserTemplatesFromFirebase(scopeId, { timeoutMs: 2500 })
             : Promise.resolve([]),
         ]);
 
@@ -1537,18 +1558,50 @@ export default function App() {
         }
       }
 
+      // Trigger fresh wishes, guests, and user database sync in parallel
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('wedding:db-refresh', {
+            detail: {
+              eventId: dbEvent?.id || fetchId,
+              ownerId: dbEvent?.ownerId || targetOwnerFilter || scopeId,
+            },
+          })
+        );
+      }
+      if (activeUserScope.isAuthenticated && !isFromShareLink) {
+        loadDbUsers().catch(() => {});
+      }
+
+      const dbParts: string[] = [];
+      if (checkResult.firestoreConnected) dbParts.push('Firestore');
+      if (checkResult.serverConnected) dbParts.push('Server');
+      const dbStatusLabel = dbParts.join(' & ');
+
       if (dbEvent) {
         applyDbEvent(dbEvent);
         setRefreshValidationFeedback(
           language === 'kh'
-            ? 'បានត្រួតពិនិត្យ និងបង្ហាញទិន្នន័យចុងក្រោយពី Database រួចរាល់!'
-            : 'Database checked — showing latest saved information!'
+            ? `✓ Database (${dbStatusLabel || 'Cloud'}) ដំណើរការល្អ — បានផ្ទុកទិន្នន័យចុងក្រោយឡើងវិញរួចរាល់!`
+            : `✓ Database (${dbStatusLabel || 'Cloud'}) verified — Reloaded latest saved data!`
         );
-      } else if (!appliedFast) {
+      } else if (appliedFast) {
         setRefreshValidationFeedback(
           language === 'kh'
-            ? 'បានត្រួតពិនិត្យ Database — មិនទាន់មានទិន្នន័យរក្សាទុកថ្មីទេ'
-            : 'Database checked — no saved updates found yet'
+            ? `✓ Database (${dbStatusLabel || 'Cloud'}) — បានផ្ទុកទិន្នន័យចុងក្រោយឡើងវិញរួចរាល់!`
+            : `✓ Database (${dbStatusLabel || 'Cloud'}) — Reloaded latest data!`
+        );
+      } else if (!checkResult.firestoreConnected && !checkResult.serverConnected) {
+        setRefreshValidationFeedback(
+          language === 'kh'
+            ? '⚠️ មិនអាចភ្ជាប់ទៅ Database (Firestore / Server) បានទេ សូមពិនិត្យអ៊ីនធឺណិត'
+            : '⚠️ Cannot reach Database (Firestore / Server). Please check connection'
+        );
+      } else {
+        setRefreshValidationFeedback(
+          language === 'kh'
+            ? `✓ Database (${dbStatusLabel}) ភ្ជាប់ជោគជ័យ — មិនទាន់មានការកែប្រែថ្មីរក្សាទុកទេ`
+            : `✓ Database (${dbStatusLabel}) connected — no new saved updates found yet`
         );
       }
     } catch (err) {
@@ -1562,64 +1615,17 @@ export default function App() {
       setIsRefreshingFromDb(false);
       refreshToastTimerRef.current = setTimeout(() => {
         setRefreshValidationFeedback(null);
-      }, 2200);
+      }, 3000);
     }
-  };
-
-  const handleRefreshWithValidation = async () => {
-    const scopeId = activeUserScope.scopeId;
-    const validatedType = validateCurrentTemplateType(event);
-    const rawBaseId = event.templateId || stripScopedEventId(event.id || DEFAULT_PRESET_EVENT_ID);
-    const currentId = activeUserScope.isAuthenticated
-      ? getScopedEventId(event.id || rawBaseId, scopeId)
-      : (event.id || localStorage.getItem(getUserStorageKey('wedding_last_active_template_id', scopeId)) || DEFAULT_PRESET_EVENT_ID);
-
-    const typeLabelKh = {
-      wedding: 'មង្គលការ (Wedding)',
-      engagement: 'ភ្ជាប់ពាក្យ (Engagement)',
-      housewarming: 'ឡើងគេហដ្ឋាន (Housewarming)',
-      birthday: 'ខួបកំណើត (Birthday)',
-      anniversary: 'ខួបមង្គលការ (Anniversary)',
-    }[validatedType];
-
-    const validatedEvent: WeddingEvent = {
-      ...event,
-      id: currentId,
-      templateId: rawBaseId,
-      ownerId: activeUserScope.isAuthenticated ? scopeId : event.ownerId,
-      ownerEmail: activeUserScope.isAuthenticated ? (activeUserScope.ownerEmail || event.ownerEmail || '') : event.ownerEmail,
-      eventType: validatedType,
-      updatedAt: event.updatedAt || new Date().toISOString(),
-    };
-
-    try {
-      localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(validatedEvent));
-      localStorage.setItem(getUserStorageKey(`wedding_template_saved_${currentId}`, scopeId), JSON.stringify(validatedEvent));
-      localStorage.setItem(getUserStorageKey(`wedding_template_saved_${rawBaseId}`, scopeId), JSON.stringify(validatedEvent));
-      localStorage.setItem(getUserStorageKey(`wedding_template_type_${validatedType}`, scopeId), JSON.stringify(validatedEvent));
-      localStorage.setItem(getUserStorageKey('wedding_last_active_template_id', scopeId), currentId);
-      localStorage.setItem(getUserStorageKey('wedding_last_template_type', scopeId), validatedType);
-
-      // Persist to server API
-      fetch('/api/event', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(validatedEvent),
-      }).catch(() => {});
-    } catch (e) {
-      console.warn('Error saving during refresh validation:', e);
-    }
-
-    setEvent(validatedEvent);
-    setRefreshValidationFeedback(language === 'kh' ? `កំពុងផ្ទុកទំព័រឡើងវិញ (${typeLabelKh})...` : `Reloading page (${typeLabelKh})...`);
-    
-    setTimeout(() => {
-      window.location.reload();
-    }, 600);
   };
 
   // Read guest name and event ID from URL query parameters, and fetch latest user-isolated event from server/Firestore
-  const [guestName, setGuestName] = useState('Your Name');
+  const [guestName, setGuestName] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return extractGuestNameFromSearch(window.location.search) || 'Your Name';
+    }
+    return 'Your Name';
+  });
   const hasSavedLocallyRef = useRef(false);
   const lastSavedAtRef = useRef<number>(0);
 
@@ -1635,42 +1641,9 @@ export default function App() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     let cancelled = false;
+    let unsubscribeEvent: (() => void) | undefined;
     hasSavedLocallyRef.current = false;
     lastSavedAtRef.current = 0;
-
-    const scopeId = activeUserScope.scopeId;
-    const params = new URLSearchParams(window.location.search);
-    const iParam = params.get('i');
-    const nameParam = params.get('name');
-    const guestParam = params.get('guest');
-    const toParam = params.get('to');
-    let urlIdParam = params.get('id');
-    const urlTypeParam = params.get('type') || params.get('category');
-    const urlOwnerParam = params.get('ownerId')?.trim() || '';
-
-    // If an authenticated owner opens their dashboard (not a shared link) with a stale ?id= belonging to a different user, clear it
-    const urlIdOwnerScope = extractScopeFromEventId(urlIdParam);
-    if (activeUserScope.isAuthenticated && !isFromShareLink && urlIdOwnerScope && urlIdOwnerScope !== scopeId) {
-      urlIdParam = null;
-      try {
-        const cleanUrl = new URL(window.location.href);
-        cleanUrl.searchParams.delete('id');
-        cleanUrl.searchParams.delete('type');
-        cleanUrl.searchParams.delete('category');
-        window.history.replaceState({}, '', cleanUrl.toString());
-      } catch {}
-    }
-
-    const foundGuest = iParam || guestParam || nameParam || toParam;
-    if (foundGuest) {
-      setGuestName(foundGuest);
-      setIsFromShareLink(true);
-    } else {
-      setGuestName('Your Name');
-      if (params.get('share')) {
-        setIsFromShareLink(true);
-      }
-    }
 
     // Check if URL contains #template hash
     const checkHash = () => {
@@ -1685,101 +1658,194 @@ export default function App() {
 
     testFirestoreConnection();
 
-    // Determine exact target event ID for either shared link viewer or authenticated user workspace
-    let fetchId = DEFAULT_PRESET_EVENT_ID;
-    let targetOwnerFilter = '';
+    const initBoot = async () => {
+      const scopeId = activeUserScope.scopeId;
+      let currentSearch = window.location.search;
+      let params = new URLSearchParams(currentSearch);
+      let urlIdParam = params.get('id');
+      let urlTypeParam = params.get('type') || params.get('category');
+      let urlOwnerParam = params.get('ownerId')?.trim() || '';
+      let foundGuest = extractGuestNameFromSearch(currentSearch);
 
-    if (isFromShareLink || (!activeUserScope.isAuthenticated && (urlIdParam || urlTypeParam))) {
-      fetchId = urlIdParam || urlTypeParam || DEFAULT_PRESET_EVENT_ID;
-      targetOwnerFilter = urlOwnerParam || extractScopeFromEventId(fetchId) || '';
-    } else if (activeUserScope.isAuthenticated) {
-      targetOwnerFilter = scopeId;
-      const activeTemplateId = localStorage.getItem(getUserStorageKey('wedding_last_active_template_id', scopeId));
-      let storedEventId: string | null = null;
-      try {
-        const stored = localStorage.getItem(getUserStorageKey('wedding_custom_event_data', scopeId));
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (parsed?.id) storedEventId = parsed.id;
-        }
-      } catch {}
-
-      const candidateId = urlIdParam || urlTypeParam || activeTemplateId || storedEventId || DEFAULT_PRESET_EVENT_ID;
-      fetchId = getScopedEventId(candidateId, scopeId);
-
-      // Immediately hydrate from this user's own local cache (or reset to clean default for new user) so no previous user's data remains on screen
-      const localScopedRaw =
-        localStorage.getItem(getUserStorageKey(`wedding_template_saved_${fetchId}`, scopeId)) ||
-        localStorage.getItem(getUserStorageKey(`wedding_template_saved_${stripScopedEventId(fetchId)}`, scopeId)) ||
-        (urlTypeParam ? localStorage.getItem(getUserStorageKey(`wedding_template_type_${normalizeCategoryString(urlTypeParam)}`, scopeId)) : null) ||
-        localStorage.getItem(getUserStorageKey('wedding_custom_event_data', scopeId));
-
-      if (localScopedRaw) {
+      // SPA fallback: if a /s/:code short link lands directly on index.html without server redirect, resolve it cleanly
+      const shortMatch = window.location.pathname.match(/^\/s\/([a-zA-Z0-9_-]+)\/?$/);
+      if (shortMatch && (!foundGuest || !urlIdParam)) {
+        const shortCode = shortMatch[1];
+        let resolvedUrlStr = '';
         try {
-          const parsedLocal = sanitizeWeddingEvent(JSON.parse(localScopedRaw));
-          if (!parsedLocal.ownerId || parsedLocal.ownerId === scopeId || parsedLocal.ownerId === authUser?.uid) {
-            setEvent({
-              ...parsedLocal,
-              id: parsedLocal.id || fetchId,
-              ownerId: scopeId,
-              ownerEmail: activeUserScope.ownerEmail || parsedLocal.ownerEmail || '',
-            });
+          const apiRes = await fetch(`/api/short-link/${encodeURIComponent(shortCode)}`);
+          if (apiRes.ok) {
+            const apiJson = await apiRes.json();
+            if (apiJson?.url) resolvedUrlStr = String(apiJson.url);
+          }
+        } catch {
+          // ignore network error and try Firestore fallback below
+        }
+        if (!resolvedUrlStr) {
+          try {
+            const snap = await getDoc(doc(db, 'short_links', shortCode));
+            if (snap.exists() && snap.data()?.url) {
+              resolvedUrlStr = String(snap.data().url);
+            }
+          } catch {
+            // ignore Firestore fallback failure
+          }
+        }
+        if (cancelled) return;
+        if (resolvedUrlStr) {
+          try {
+            const resolvedUrlObj = new URL(resolvedUrlStr, window.location.origin);
+            for (const [k, v] of params.entries()) {
+              resolvedUrlObj.searchParams.set(k, v);
+            }
+            window.history.replaceState(
+              {},
+              '',
+              resolvedUrlObj.pathname + resolvedUrlObj.search + window.location.hash
+            );
+            currentSearch = resolvedUrlObj.search;
+            params = new URLSearchParams(currentSearch);
+            urlIdParam = params.get('id');
+            urlTypeParam = params.get('type') || params.get('category');
+            urlOwnerParam = params.get('ownerId')?.trim() || '';
+            foundGuest = extractGuestNameFromSearch(currentSearch);
+            const resolvedLang = params.get('lang');
+            if (resolvedLang === 'kh' || resolvedLang === 'en') {
+              setLanguage(resolvedLang);
+            }
+            setIsFromShareLink(true);
+          } catch {
+            // ignore malformed resolved URL
+          }
+        }
+      }
+
+      if (cancelled) return;
+
+      const effectiveShareMode =
+        isFromShareLink ||
+        Boolean(foundGuest) ||
+        Boolean(params.get('share')) ||
+        Boolean(shortMatch);
+
+      // If an authenticated owner opens their dashboard (not a shared link) with a stale ?id= belonging to a different user, clear it
+      const urlIdOwnerScope = extractScopeFromEventId(urlIdParam);
+      if (activeUserScope.isAuthenticated && !effectiveShareMode && urlIdOwnerScope && urlIdOwnerScope !== scopeId) {
+        urlIdParam = null;
+        try {
+          const cleanUrl = new URL(window.location.href);
+          cleanUrl.searchParams.delete('id');
+          cleanUrl.searchParams.delete('type');
+          cleanUrl.searchParams.delete('category');
+          window.history.replaceState({}, '', cleanUrl.toString());
+        } catch {}
+      }
+
+      if (foundGuest) {
+        setGuestName(foundGuest);
+        setIsFromShareLink(true);
+      } else {
+        setGuestName('Your Name');
+        if (params.get('share') || shortMatch) {
+          setIsFromShareLink(true);
+        }
+      }
+
+      // Determine exact target event ID for either shared link viewer or authenticated user workspace
+      let fetchId = DEFAULT_PRESET_EVENT_ID;
+      let targetOwnerFilter = '';
+
+      if (effectiveShareMode || (!activeUserScope.isAuthenticated && (urlIdParam || urlTypeParam))) {
+        fetchId = urlIdParam || urlTypeParam || DEFAULT_PRESET_EVENT_ID;
+        targetOwnerFilter = urlOwnerParam || extractScopeFromEventId(fetchId) || '';
+      } else if (activeUserScope.isAuthenticated) {
+        targetOwnerFilter = scopeId;
+        const activeTemplateId = localStorage.getItem(getUserStorageKey('wedding_last_active_template_id', scopeId));
+        let storedEventId: string | null = null;
+        try {
+          const stored = localStorage.getItem(getUserStorageKey('wedding_custom_event_data', scopeId));
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (parsed?.id) storedEventId = parsed.id;
           }
         } catch {}
-      } else {
-        const preset =
-          findTemplatePreset(stripScopedEventId(fetchId)) ||
-          (urlTypeParam ? findTemplatePreset(urlTypeParam) : undefined);
-        const baseTemplate = preset ? preset.sampleEvent : WEDDING_EVENT;
-        const cleanUserDefault = sanitizeWeddingEvent({
-          ...baseTemplate,
-          id: fetchId,
-          templateId: baseTemplate.id || DEFAULT_PRESET_EVENT_ID,
-          ownerId: scopeId,
-          ownerEmail: activeUserScope.ownerEmail || '',
-          eventType: preset ? preset.type : 'wedding',
-        });
-        setEvent(cleanUserDefault);
-      }
-    } else {
-      const activeTemplateId = localStorage.getItem(getUserStorageKey('wedding_last_active_template_id', scopeId));
-      fetchId = activeTemplateId || DEFAULT_PRESET_EVENT_ID;
-    }
 
-    const explicitUrlCat = normalizeCategoryString(urlTypeParam);
-    const isMatchingUrlCategory = (candidate: any) => {
-      if (!explicitUrlCat) return true;
-      const candidateCat = normalizeCategoryString(candidate?.eventType || candidate?.id || candidate?.name);
-      return !candidateCat || candidateCat === explicitUrlCat;
-    };
-    const isOwnedByCurrentScope = (candidate: any) => {
-      if (isFromShareLink || !activeUserScope.isAuthenticated) return true;
-      if (!candidate?.ownerId) return true;
-      return candidate.ownerId === scopeId || (Boolean(authUser?.uid) && candidate.ownerId === authUser?.uid);
-    };
+        const candidateId = urlIdParam || urlTypeParam || activeTemplateId || storedEventId || DEFAULT_PRESET_EVENT_ID;
+        fetchId = getScopedEventId(candidateId, scopeId);
 
-    const unsubscribeEvent = subscribeToEvent(
-      fetchId,
-      (fbEvent) => {
-        if (cancelled) return;
-        const incomingMs = getEventTimestampMs(fbEvent);
-        if (hasSavedLocallyRef.current && incomingMs <= lastSavedAtRef.current) return;
-        if (fbEvent && isMatchingUrlCategory(fbEvent) && isOwnedByCurrentScope(fbEvent)) {
-          const sanitized = sanitizeWeddingEvent({
-            ...fbEvent,
-            ownerId: fbEvent.ownerId || (activeUserScope.isAuthenticated && !isFromShareLink ? scopeId : undefined),
+        // Immediately hydrate from this user's own local cache (or reset to clean default for new user) so no previous user's data remains on screen
+        const localScopedRaw =
+          localStorage.getItem(getUserStorageKey(`wedding_template_saved_${fetchId}`, scopeId)) ||
+          localStorage.getItem(getUserStorageKey(`wedding_template_saved_${stripScopedEventId(fetchId)}`, scopeId)) ||
+          (urlTypeParam ? localStorage.getItem(getUserStorageKey(`wedding_template_type_${normalizeCategoryString(urlTypeParam)}`, scopeId)) : null) ||
+          localStorage.getItem(getUserStorageKey('wedding_custom_event_data', scopeId));
+
+        if (localScopedRaw) {
+          try {
+            const parsedLocal = sanitizeWeddingEvent(JSON.parse(localScopedRaw));
+            if (!parsedLocal.ownerId || parsedLocal.ownerId === scopeId || parsedLocal.ownerId === authUser?.uid) {
+              setEvent({
+                ...parsedLocal,
+                id: parsedLocal.id || fetchId,
+                ownerId: scopeId,
+                ownerEmail: activeUserScope.ownerEmail || parsedLocal.ownerEmail || '',
+              });
+            }
+          } catch {}
+        } else {
+          const preset =
+            findTemplatePreset(stripScopedEventId(fetchId)) ||
+            (urlTypeParam ? findTemplatePreset(urlTypeParam) : undefined);
+          const baseTemplate = preset ? preset.sampleEvent : WEDDING_EVENT;
+          const cleanUserDefault = sanitizeWeddingEvent({
+            ...baseTemplate,
+            id: fetchId,
+            templateId: baseTemplate.id || DEFAULT_PRESET_EVENT_ID,
+            ownerId: scopeId,
+            ownerEmail: activeUserScope.ownerEmail || '',
+            eventType: preset ? preset.type : 'wedding',
           });
-          setEvent(sanitized);
-          if (!isFromShareLink) {
-            try {
-              localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(sanitized));
-              localStorage.setItem(getUserStorageKey(`wedding_template_saved_${sanitized.id}`, scopeId), JSON.stringify(sanitized));
-            } catch {}
-          }
+          setEvent(cleanUserDefault);
         }
-      },
-      targetOwnerFilter || undefined
-    );
+      } else {
+        const activeTemplateId = localStorage.getItem(getUserStorageKey('wedding_last_active_template_id', scopeId));
+        fetchId = activeTemplateId || DEFAULT_PRESET_EVENT_ID;
+      }
+
+      const explicitUrlCat = normalizeCategoryString(urlTypeParam);
+      const isMatchingUrlCategory = (candidate: any) => {
+        if (!explicitUrlCat) return true;
+        const candidateCat = normalizeCategoryString(candidate?.eventType || candidate?.id || candidate?.name);
+        return !candidateCat || candidateCat === explicitUrlCat;
+      };
+      const isOwnedByCurrentScope = (candidate: any) => {
+        if (effectiveShareMode || !activeUserScope.isAuthenticated) return true;
+        if (!candidate?.ownerId) return true;
+        return candidate.ownerId === scopeId || (Boolean(authUser?.uid) && candidate.ownerId === authUser?.uid);
+      };
+
+      unsubscribeEvent = subscribeToEvent(
+        fetchId,
+        (fbEvent) => {
+          if (cancelled) return;
+          const incomingMs = getEventTimestampMs(fbEvent);
+          if (hasSavedLocallyRef.current && incomingMs <= lastSavedAtRef.current) return;
+          if (fbEvent && isMatchingUrlCategory(fbEvent) && isOwnedByCurrentScope(fbEvent)) {
+            const sanitized = sanitizeWeddingEvent({
+              ...fbEvent,
+              ownerId: fbEvent.ownerId || (activeUserScope.isAuthenticated && !effectiveShareMode ? scopeId : undefined),
+            });
+            setEvent(sanitized);
+            if (!effectiveShareMode) {
+              try {
+                localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(sanitized));
+                localStorage.setItem(getUserStorageKey(`wedding_template_saved_${sanitized.id}`, scopeId), JSON.stringify(sanitized));
+              } catch {}
+            }
+          }
+        },
+        targetOwnerFilter || undefined
+      );
 
     const fetchServerData = async () => {
       try {
@@ -1788,7 +1854,7 @@ export default function App() {
           localStorage.getItem(getUserStorageKey('wedding_custom_event_data', scopeId))
         );
         const ownerEmailQuery =
-          activeUserScope.isAuthenticated && !isFromShareLink && activeUserScope.ownerEmail
+          activeUserScope.isAuthenticated && !effectiveShareMode && activeUserScope.ownerEmail
             ? `&ownerEmail=${encodeURIComponent(activeUserScope.ownerEmail)}`
             : '';
 
@@ -1798,7 +1864,7 @@ export default function App() {
             templateType: urlTypeParam || undefined,
             ownerEmail: activeUserScope.ownerEmail || undefined,
           }),
-          activeUserScope.isAuthenticated && !isFromShareLink && !urlIdParam && !urlTypeParam && !hadLocalActiveTemplate
+          activeUserScope.isAuthenticated && !effectiveShareMode && !urlIdParam && !urlTypeParam && !hadLocalActiveTemplate
             ? fetch(`/api/event?ownerId=${encodeURIComponent(scopeId)}${ownerEmailQuery}`)
                 .then(async (r) => {
                   if (!r.ok) return null;
@@ -1818,7 +1884,7 @@ export default function App() {
         }
 
         // Legacy Google UID migration fallback if user has no scoped doc yet
-        if (!fbEvent && activeUserScope.isAuthenticated && !isFromShareLink && authUser?.uid) {
+        if (!fbEvent && activeUserScope.isAuthenticated && !effectiveShareMode && authUser?.uid) {
           const legacyEvent = await fetchEventFromFirebase(`event_${authUser.uid}`);
           if (legacyEvent && (!legacyEvent.ownerId || legacyEvent.ownerId === authUser.uid || legacyEvent.ownerId === scopeId)) {
             fbEvent = {
@@ -1830,7 +1896,7 @@ export default function App() {
           }
         }
         // Check if user has any saved custom templates in cloud when default scoped ID is empty
-        if (!fbEvent && activeUserScope.isAuthenticated && !isFromShareLink && !urlIdParam && !urlTypeParam) {
+        if (!fbEvent && activeUserScope.isAuthenticated && !effectiveShareMode && !urlIdParam && !urlTypeParam) {
           const userTemplates = await fetchUserTemplatesFromFirebase(scopeId);
           if (userTemplates.length > 0) {
             userTemplates.sort((a, b) => new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime());
@@ -1842,10 +1908,10 @@ export default function App() {
         if (fbEvent && isMatchingUrlCategory(fbEvent) && isOwnedByCurrentScope(fbEvent)) {
           const sanitized = sanitizeWeddingEvent({
             ...fbEvent,
-            ownerId: fbEvent.ownerId || (activeUserScope.isAuthenticated && !isFromShareLink ? scopeId : undefined),
+            ownerId: fbEvent.ownerId || (activeUserScope.isAuthenticated && !effectiveShareMode ? scopeId : undefined),
           });
           setEvent(sanitized);
-          if (!isFromShareLink) {
+          if (!effectiveShareMode) {
             try {
               const rawBase = sanitized.templateId || stripScopedEventId(sanitized.id || DEFAULT_PRESET_EVENT_ID);
               localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(sanitized));
@@ -1869,7 +1935,7 @@ export default function App() {
       try {
         const ownerParam = targetOwnerFilter ? `&ownerId=${encodeURIComponent(targetOwnerFilter)}` : '';
         const ownerEmailParam =
-          activeUserScope.isAuthenticated && !isFromShareLink && activeUserScope.ownerEmail
+          activeUserScope.isAuthenticated && !effectiveShareMode && activeUserScope.ownerEmail
             ? `&ownerEmail=${encodeURIComponent(activeUserScope.ownerEmail)}`
             : '';
         const apiQuery = `id=${encodeURIComponent(fetchId)}${urlTypeParam ? `&type=${encodeURIComponent(urlTypeParam)}` : ''}${ownerParam}${ownerEmailParam}`;
@@ -1880,7 +1946,7 @@ export default function App() {
           if (data && data.success && data.event && data.source !== 'preset' && isMatchingUrlCategory(data.event) && isOwnedByCurrentScope(data.event)) {
             const sanitized = sanitizeWeddingEvent(data.event);
             setEvent(sanitized);
-            if (!isFromShareLink) {
+            if (!effectiveShareMode) {
               try {
                 localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(sanitized));
                 localStorage.setItem(getUserStorageKey(`wedding_template_saved_${sanitized.id}`, scopeId), JSON.stringify(sanitized));
@@ -1899,7 +1965,7 @@ export default function App() {
       const preset =
         findTemplatePreset(stripScopedEventId(fetchId)) ||
         (urlTypeParam ? findTemplatePreset(urlTypeParam) : undefined);
-      if (preset && !isFromShareLink) {
+      if (preset && !effectiveShareMode) {
         let templateEvent = preset.sampleEvent;
         const storedTemplate =
           localStorage.getItem(getUserStorageKey(`wedding_template_saved_${fetchId}`, scopeId)) ||
@@ -1927,7 +1993,10 @@ export default function App() {
       }
     };
 
-    fetchServerData();
+      await fetchServerData();
+    };
+
+    initBoot();
 
     return () => {
       cancelled = true;
