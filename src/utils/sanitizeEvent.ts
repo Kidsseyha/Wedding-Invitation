@@ -54,23 +54,44 @@ export function sanitizeWeddingEvent(rawEvent: any): WeddingEvent {
       : 'wedding';
   }
 
-  // Ensure category-appropriate cover image
-  const defaultCategoryCover = getCategoryCoverImage(resolvedType);
-  let sanitizedImage = rawEvent.image;
+  const nameLower = String(rawEvent.name || '').toLowerCase();
+  const isModernWedding =
+    resolvedType === 'wedding' &&
+    (eventId.includes('modern') ||
+      templateIdLower.includes('modern') ||
+      nameLower.includes('modern') ||
+      String(rawEvent.name || '').includes('សម័យ'));
 
-  if (!sanitizedImage || typeof sanitizedImage !== 'string' || sanitizedImage.includes('pixabay.com')) {
+  // Ensure category-appropriate cover image
+  const defaultCategoryCover = getCategoryCoverImage(isModernWedding ? 'preset-modern-wedding' : resolvedType);
+  let sanitizedImage = rawEvent.image;
+  const sanitizedImageTrimmed = typeof sanitizedImage === 'string' ? sanitizedImage.trim().toLowerCase() : '';
+
+  if (
+    !sanitizedImage ||
+    typeof sanitizedImage !== 'string' ||
+    !sanitizedImageTrimmed ||
+    sanitizedImageTrimmed === 'none' ||
+    sanitizedImageTrimmed === 'null' ||
+    sanitizedImageTrimmed === 'undefined' ||
+    sanitizedImage.includes('pixabay.com')
+  ) {
     sanitizedImage = defaultCategoryCover;
   } else if (sanitizedImage.includes('focuz-staging-space.sgp1.digitaloceanspaces.com') && !sanitizedImage.includes('.cdn.')) {
     sanitizedImage = sanitizedImage.replace('focuz-staging-space.sgp1.digitaloceanspaces.com', 'focuz-staging-space.sgp1.cdn.digitaloceanspaces.com');
   }
 
-  // Prevent wedding couple cover photo or legacy Unsplash cover from leaking into non-wedding templates
-  if (
-    resolvedType !== 'wedding' &&
-    (sanitizedImage.includes('491657278_9322919307805207_5998846575526453583_n.jpg') ||
-      sanitizedImage.includes('white_arch_columns_wedding_cover') ||
-      sanitizedImage.includes('khmer_royal_gold_wedding_cover'))
-  ) {
+  const isTradWeddingDefaultCover = (val: unknown): boolean => {
+    if (!val || typeof val !== 'string') return false;
+    return (
+      val.includes('491657278_9322919307805207_5998846575526453583_n.jpg') ||
+      val.includes('white_arch_columns_wedding_cover') ||
+      val.includes('khmer_royal_gold_wedding_cover')
+    );
+  };
+
+  // Prevent traditional wedding couple/arch cover photo from leaking into non-wedding or modern wedding templates
+  if ((resolvedType !== 'wedding' || isModernWedding) && isTradWeddingDefaultCover(sanitizedImage)) {
     sanitizedImage = defaultCategoryCover;
   }
 
@@ -117,10 +138,13 @@ export function sanitizeWeddingEvent(rawEvent: any): WeddingEvent {
     }
   }
 
+  const modernPreset = isModernWedding ? findTemplatePreset('preset-modern-wedding')?.sampleEvent : undefined;
   const sanitizedCoverBg =
     resolvedType === 'anniversary' &&
     (!cleanEvent.config?.cover_background || String(cleanEvent.config.cover_background).includes('unsplash.com'))
       ? '/assets/images/khmer_anniversary_silk_bg_1794794578031.jpg'
+      : isModernWedding && isTradWeddingDefaultCover(cleanEvent.config?.cover_background)
+      ? modernPreset?.config?.cover_background
       : cleanEvent.config?.cover_background;
 
   const sanitizedMainBg =
@@ -133,6 +157,8 @@ export function sanitizeWeddingEvent(rawEvent: any): WeddingEvent {
     resolvedType === 'anniversary' &&
     (!cleanEvent.config?.details_background || String(cleanEvent.config.details_background).includes('unsplash.com'))
       ? '/assets/images/khmer_anniversary_silk_bg_1794794578031.jpg'
+      : isModernWedding && isTradWeddingDefaultCover(cleanEvent.config?.details_background)
+      ? modernPreset?.config?.details_background
       : cleanEvent.config?.details_background;
 
   const anniversaryPreset = resolvedType === 'anniversary' ? findTemplatePreset('anniversary')?.sampleEvent : undefined;
@@ -142,10 +168,18 @@ export function sanitizeWeddingEvent(rawEvent: any): WeddingEvent {
       ? anniversaryPreset?.config?.anniversary_story_chapters
       : cleanEvent.config?.anniversary_story_chapters;
 
+  const normalizedCoverImage =
+    cleanEvent.cover_image && ((resolvedType !== 'wedding' || isModernWedding) && isTradWeddingDefaultCover(cleanEvent.cover_image))
+      ? sanitizedImage
+      : cleanEvent.cover_image && cleanEvent.image && cleanEvent.cover_image !== cleanEvent.image
+      ? sanitizedImage
+      : cleanEvent.cover_image;
+
   return {
     ...cleanEvent,
     eventType: resolvedType,
     image: sanitizedImage,
+    ...(normalizedCoverImage ? { cover_image: normalizedCoverImage } : {}),
     config: {
       ...(cleanEvent.config || {}),
       image: sanitizedImage,

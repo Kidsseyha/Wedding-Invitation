@@ -6,6 +6,7 @@ import {
   generateDeterministicShortCode,
   extractGuestNameFromSearch,
   shortenUrl,
+  getDefaultShareDomain,
   VERCEL_APP_URL,
   PUBLIC_APP_URL,
 } from './shareUrl';
@@ -133,3 +134,20 @@ test('shortenUrl preserves inferred public origin and sends distinct guest URLs 
     globalThis.fetch = originalFetch;
   }
 });
+
+test('getDefaultShareDomain defaults to preview outside .vercel.app and vercel on .vercel.app', () => {
+  const originalWindow = (globalThis as any).window;
+  try {
+    (globalThis as any).window = undefined;
+    assert.equal(getDefaultShareDomain(), 'preview');
+
+    (globalThis as any).window = { location: { origin: PUBLIC_APP_URL } };
+    assert.equal(getDefaultShareDomain(), 'preview');
+
+    (globalThis as any).window = { location: { origin: VERCEL_APP_URL } };
+    assert.equal(getDefaultShareDomain(), 'vercel');
+  } finally {
+    (globalThis as any).window = originalWindow;
+  }
+});
+

@@ -161,3 +161,51 @@ test('buildInvitationMeta returns guest name, custom invitation title, and invit
   );
   assert.equal(houseCover, 'https://cdn.example.com/house-envelope.jpg');
 });
+
+test('Modern Wedding repairs contaminated Traditional Wedding covers and ignores none sentinel', () => {
+  const origin = 'https://ais-pre-hjj7vuznhhxkva5mjjwpax-816970112678.asia-southeast1.run.app';
+  const modernPreset = EVENT_PRESETS.find((p) => p.id === 'preset-modern-wedding');
+  assert.ok(modernPreset);
+
+  const contaminated = sanitizeWeddingEvent({
+    ...modernPreset.sampleEvent,
+    id: 'u_user1__modern-wedding-mw001',
+    templateId: 'preset-modern-wedding',
+    eventType: 'wedding',
+    image: '/assets/images/white_arch_columns_wedding_cover_1790394461049.jpg',
+    cover_image: '/assets/images/white_arch_columns_wedding_cover_1790394461049.jpg',
+    config: {
+      ...modernPreset.sampleEvent.config,
+      envelope_header_image: 'none',
+      cover_background: '/assets/images/white_arch_columns_wedding_cover_1790394461049.jpg',
+      details_background: '/assets/images/white_arch_columns_wedding_cover_1790394461049.jpg',
+    },
+  });
+
+  assert.equal(contaminated.image, modernPreset.coverImage);
+  assert.equal(contaminated.cover_image, modernPreset.coverImage);
+  assert.notEqual(contaminated.config.cover_background, '/assets/images/white_arch_columns_wedding_cover_1790394461049.jpg');
+
+  const modernMeta = buildInvitationMeta({
+    event: {
+      ...modernPreset.sampleEvent,
+      id: 'u_user1__modern-wedding-mw001',
+      templateId: 'preset-modern-wedding',
+      image: 'https://cdn.example.com/custom-modern-portrait.jpg',
+      cover_image: '/assets/images/white_arch_columns_wedding_cover_1790394461049.jpg',
+      config: {
+        ...modernPreset.sampleEvent.config,
+        envelope_header_image: 'none',
+        cover_background: '/assets/images/white_arch_columns_wedding_cover_1790394461049.jpg',
+      },
+    },
+    guestName: 'លោក ដារ៉ា',
+    queryType: 'wedding',
+    eventId: 'u_user1__modern-wedding-mw001',
+    origin,
+  });
+
+  assert.equal(modernMeta.coverImage, 'https://cdn.example.com/custom-modern-portrait.jpg');
+  assert.equal(modernMeta.image, 'https://cdn.example.com/custom-modern-portrait.jpg');
+});
+

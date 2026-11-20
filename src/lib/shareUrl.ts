@@ -149,6 +149,17 @@ export function getPreferredVercelOrigin(): string {
 }
 
 /**
+ * Returns 'vercel' only when currently running on a *.vercel.app host,
+ * otherwise 'preview' so shared links resolve to the live working server.
+ */
+export function getDefaultShareDomain(): 'vercel' | 'preview' {
+  if (typeof window !== 'undefined' && window.location?.origin?.includes('.vercel.app')) {
+    return 'vercel';
+  }
+  return 'preview';
+}
+
+/**
  * Converts a long URL to a short link (using in-app /s/:code) with Khmer language support
  */
 export async function shortenUrl(longUrl: string, customOrigin?: string): Promise<string> {

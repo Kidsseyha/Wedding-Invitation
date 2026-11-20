@@ -37,6 +37,7 @@ import LanguageToggle from './LanguageToggle';
 import { EVENT_PRESETS, EventTypePreset, getCategoryCoverImage } from '../data/eventTemplates';
 import TemplateLivePreview from './TemplateLivePreview';
 import { deleteEventFromFirebase, fetchUserTemplatesFromFirebase } from '../lib/firebaseServices';
+import { sanitizeWeddingEvent } from '../utils/sanitizeEvent';
 import {
   getScopedEventId,
   getUserStorageKey,
@@ -345,7 +346,7 @@ export default function EventTypeModal({
       };
     }
 
-    const categoryCover = getCategoryCoverImage(preset.type) || preset.coverImage;
+    const categoryCover = preset.coverImage || preset.sampleEvent?.image || getCategoryCoverImage(preset.id || preset.type);
     return {
       ...preset.sampleEvent,
       id: scopedId,
@@ -363,7 +364,7 @@ export default function EventTypeModal({
   };
 
   const handleApply = async (preset: EventTypePreset) => {
-    const categoryCover = getCategoryCoverImage(preset.type) || preset.coverImage;
+    const categoryCover = preset.coverImage || preset.sampleEvent?.image || getCategoryCoverImage(preset.id || preset.type);
     const isCustomPreset = preset.id.includes('custom-event-');
     const scopedEventId = getScopedEventId(preset.sampleEvent.id, effectiveScope);
     const ownerFields =
@@ -373,23 +374,23 @@ export default function EventTypeModal({
 
     const saved = getSavedTemplateData(preset.sampleEvent.id);
     const freshPresetEvent: WeddingEvent = isCustomPreset
-      ? {
+      ? sanitizeWeddingEvent({
           ...preset.sampleEvent,
           id: scopedEventId,
           ...ownerFields,
           templateId: preset.id,
           eventType: preset.type,
           updatedAt: new Date().toISOString(),
-        }
+        })
       : saved
-      ? {
+      ? sanitizeWeddingEvent({
           ...saved,
           id: scopedEventId,
           ...ownerFields,
           templateId: preset.id,
           eventType: preset.type,
           updatedAt: new Date().toISOString(),
-        }
+        })
       : {
           ...preset.sampleEvent,
           id: scopedEventId,
@@ -458,7 +459,7 @@ export default function EventTypeModal({
   const handleCreateCustom = () => {
     const basePreset = EVENT_PRESETS.find((p) => p.type === customType) || EVENT_PRESETS[0];
     const customId = getScopedEventId(`custom-event-${Date.now()}`, effectiveScope);
-    const categoryCover = getCategoryCoverImage(customType) || basePreset.coverImage;
+    const categoryCover = basePreset.coverImage || basePreset.sampleEvent?.image || getCategoryCoverImage(basePreset.id || customType);
     const resolvedName = customName || (language === 'kh' ? basePreset.titleKh : basePreset.titleEn);
     const resolvedLocation = customLocation || basePreset.sampleEvent.location;
     const resolvedDate = customDate || basePreset.sampleEvent.config?.invitation_kh?.date_time || '';

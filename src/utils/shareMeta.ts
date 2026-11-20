@@ -91,24 +91,39 @@ export function isWeddingDefaultCoverUrl(url?: string | null): boolean {
   );
 }
 
+export function isInvalidCoverValue(url?: string | null): boolean {
+  if (!url || typeof url !== 'string') return true;
+  const trimmed = url.trim().toLowerCase();
+  return !trimmed || trimmed === 'none' || trimmed === 'null' || trimmed === 'undefined' || trimmed === 'false';
+}
+
+export function isModernWeddingEvent(event: any): boolean {
+  if (!event || typeof event !== 'object') return false;
+  const id = String(event.id || '').toLowerCase();
+  const tpl = String(event.templateId || '').toLowerCase();
+  const name = String(event.name || '');
+  const nameLower = name.toLowerCase();
+  return id.includes('modern') || tpl.includes('modern') || nameLower.includes('modern') || name.includes('សម័យ');
+}
+
 export function resolveEventCoverImage(event: any, category: InvitationCategory, fallbackCover?: string): string {
+  const isModern = category === 'wedding' && isModernWeddingEvent(event);
   const candidates = [
-    event?.cover_image,
-    event?.image,
     event?.config?.envelope_header_image,
+    event?.image,
+    event?.cover_image,
     event?.config?.image,
     event?.config?.cover_background,
     event?.config?.photo_gallary?.photo1,
     fallbackCover,
   ];
   for (const candidate of candidates) {
-    if (!candidate || typeof candidate !== 'string') continue;
-    const trimmed = candidate.trim();
-    if (!trimmed) continue;
-    if (category !== 'wedding' && isWeddingDefaultCoverUrl(trimmed)) continue;
+    if (isInvalidCoverValue(candidate)) continue;
+    const trimmed = String(candidate).trim();
+    if ((category !== 'wedding' || isModern) && isWeddingDefaultCoverUrl(trimmed)) continue;
     return trimmed;
   }
-  return getCategoryCoverImage(category);
+  return getCategoryCoverImage(isModern ? 'preset-modern-wedding' : category);
 }
 
 export function buildAllShareTemplates(params: {
@@ -607,10 +622,15 @@ export function buildInvitationMeta(params: {
     description += ` ទីតាំង៖ ${eventLocation}`;
   }
 
+  const isModern =
+    category === 'wedding' &&
+    (isModernWeddingEvent(effectiveEvent) ||
+      String(strippedEventId || '').toLowerCase().includes('modern'));
+
   const candidateImages = [
-    effectiveEvent?.cover_image,
-    effectiveEvent?.image,
     effectiveEvent?.config?.envelope_header_image,
+    effectiveEvent?.image,
+    effectiveEvent?.cover_image,
     effectiveEvent?.config?.image,
     effectiveEvent?.config?.cover_background,
     effectiveEvent?.config?.photo_gallary?.photo1,
@@ -618,10 +638,11 @@ export function buildInvitationMeta(params: {
 
   let selectedImage = '';
   for (const candidate of candidateImages) {
-    if (!candidate || typeof candidate !== 'string') continue;
-    if (candidate.startsWith('data:')) continue;
-    if (category !== 'wedding' && isWeddingDefaultCoverUrl(candidate)) continue;
-    const abs = toAbsoluteHttpUrl(candidate, origin);
+    if (isInvalidCoverValue(candidate)) continue;
+    const trimmed = String(candidate).trim();
+    if (trimmed.startsWith('data:')) continue;
+    if ((category !== 'wedding' || isModern) && isWeddingDefaultCoverUrl(trimmed)) continue;
+    const abs = toAbsoluteHttpUrl(trimmed, origin);
     if (abs) {
       selectedImage = abs;
       break;
@@ -629,7 +650,7 @@ export function buildInvitationMeta(params: {
   }
 
   if (!selectedImage) {
-    selectedImage = toAbsoluteHttpUrl(getCategoryCoverImage(category), origin);
+    selectedImage = toAbsoluteHttpUrl(getCategoryCoverImage(isModern ? 'preset-modern-wedding' : category), origin);
   }
 
   return {

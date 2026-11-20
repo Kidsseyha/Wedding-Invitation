@@ -32,7 +32,7 @@ import {
 } from 'lucide-react';
 import { Language, WeddingEvent } from '../types';
 import { ThemeMode } from './ThemeToggle';
-import { getPublicShareUrl, shortenUrl, getPreferredVercelOrigin, PUBLIC_APP_URL, VERCEL_APP_URL } from '../lib/shareUrl';
+import { getPublicShareUrl, shortenUrl, getPreferredVercelOrigin, getDefaultShareDomain, PUBLIC_APP_URL, VERCEL_APP_URL } from '../lib/shareUrl';
 import { fetchGuestsFromFirebase, deleteGuestFromFirebase } from '../lib/firebaseGuests';
 import { fetchUserTemplatesFromFirebase } from '../lib/firebaseServices';
 import { GuestPreset } from '../data/guests';
@@ -41,6 +41,7 @@ import {
   buildAllShareTemplates,
   buildInvitationMeta,
   InvitationCategory,
+  isInvalidCoverValue,
   readShareTemplatesStorageState,
   resolveSelectedShareTemplateId,
   ShareTemplateOption,
@@ -103,7 +104,7 @@ export default function ShareInvitationModal({
   const [loadingShort, setLoadingShort] = useState<boolean>(false);
   const [qrMode, setQrMode] = useState<'short' | 'direct'>('short');
   const [copyToast, setCopyToast] = useState<string | null>(null);
-  const [shareDomain, setShareDomain] = useState<'vercel' | 'preview'>('vercel');
+  const [shareDomain, setShareDomain] = useState<'vercel' | 'preview'>(getDefaultShareDomain);
   const [forceKhmerLang, setForceKhmerLang] = useState<boolean>(true);
   const [showVercelGuide, setShowVercelGuide] = useState<boolean>(false);
   const [cloudSyncVersion, setCloudSyncVersion] = useState<number>(0);
@@ -394,7 +395,15 @@ export default function ShareInvitationModal({
   };
 
   // Retrieve full event information from the selected All Templates entry
-  const effectiveCoverImage = selectedTemplate.coverImage;
+  const fallbackCategoryCover = getCategoryCoverImage(
+    selectedTemplate.templateId === 'preset-modern-wedding' ||
+      String(selectedTemplate.eventId || '').toLowerCase().includes('modern')
+      ? 'preset-modern-wedding'
+      : selectedCategory
+  );
+  const effectiveCoverImage = !isInvalidCoverValue(selectedTemplate.coverImage)
+    ? selectedTemplate.coverImage
+    : fallbackCategoryCover;
   const selectedGroom = (selectedEventData?.groom || '').trim();
   const selectedBride = (selectedEventData?.bride || '').trim();
   const selectedSinglePerson = Boolean(selectedEventData?.singlePerson || selectedCategory === 'birthday');
@@ -573,24 +582,63 @@ Your presence will make our day truly special! 🙏✨`;
     }
   };
 
-  const shareTelegram = () => {
+  const openPendingAwareLink = (e: React.MouseEvent<HTMLAnchorElement>, targetUrl: string) => {
+    if (!pendingTemplateSaveRef.current) return;
+    e.preventDefault();
+    pendingTemplateSaveRef.current
+      .catch(() => {})
+      .finally(() => {
+        window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      });
+  };
+
+  const shareTelegram = async () => {
+    if (!pendingTemplateSaveRef.current && (shortUrl || !loadingShort)) {
+      window.open(
+        `https://t.me/share/url?url=${encodeURIComponent(activeShareLink)}&text=${encodeURIComponent(
+          activeMessage
+        )}`,
+        '_blank',
+        'noopener,noreferrer'
+      );
+      return;
+    }
+    const resolvedLink = await resolveFreshShareLink();
+    const resolvedMessage = buildShareMessage(resolvedLink);
     window.open(
-      `https://t.me/share/url?url=${encodeURIComponent(activeShareLink)}&text=${encodeURIComponent(
-        activeMessage
+      `https://t.me/share/url?url=${encodeURIComponent(resolvedLink)}&text=${encodeURIComponent(
+        resolvedMessage
       )}`,
-      '_blank'
+      '_blank',
+      'noopener,noreferrer'
     );
   };
 
-  const shareFacebook = () => {
+  const shareFacebook = async () => {
+    if (!pendingTemplateSaveRef.current && (shortUrl || !loadingShort)) {
+      window.open(
+        `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(activeShareLink)}`,
+        '_blank',
+        'noopener,noreferrer'
+      );
+      return;
+    }
+    const resolvedLink = await resolveFreshShareLink();
     window.open(
-      `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(activeShareLink)}`,
-      '_blank'
+      `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(resolvedLink)}`,
+      '_blank',
+      'noopener,noreferrer'
     );
   };
 
-  const shareWhatsApp = () => {
-    window.open(`https://wa.me/?text=${encodeURIComponent(activeMessage)}`, '_blank');
+  const shareWhatsApp = async () => {
+    if (!pendingTemplateSaveRef.current && (shortUrl || !loadingShort)) {
+      window.open(`https://wa.me/?text=${encodeURIComponent(activeMessage)}`, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    const resolvedLink = await resolveFreshShareLink();
+    const resolvedMessage = buildShareMessage(resolvedLink);
+    window.open(`https://wa.me/?text=${encodeURIComponent(resolvedMessage)}`, '_blank', 'noopener,noreferrer');
   };
 
   const handleAddBatchGuest = (e: FormEvent) => {
@@ -890,6 +938,7 @@ Your presence will make our day truly special! 🙏✨`;
                       </span>
                       <a
                         href={activeShareLink}
+                        onClick={(e) => openPendingAwareLink(e, activeShareLink)}
                         target="_blank"
                         rel="noopener noreferrer"
                         className={`text-[11px] ${isLight ? 'text-amber-800 hover:text-amber-950 font-semibold' : 'text-amber-400 hover:text-amber-200'} font-khmer flex items-center gap-1 hover:underline`}
@@ -906,7 +955,10 @@ Your presence will make our day truly special! 🙏✨`;
                           src={effectiveCoverImage}
                           alt="Invitation Cover"
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-                          crossOrigin="anonymous"
+                          onError={(e) => {
+                            e.currentTarget.onerror = null;
+                            e.currentTarget.src = fallbackCategoryCover;
+                          }}
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent flex flex-col justify-end p-3.5">
                           <span className="text-[10px] uppercase font-bold tracking-widest text-amber-300 drop-shadow flex items-center gap-1.5">
@@ -1133,6 +1185,10 @@ Your presence will make our day truly special! 🙏✨`;
                         src={effectiveCoverImage}
                         alt={displayHeaderKh}
                         className="w-6 h-6 rounded-md object-cover shrink-0 border border-amber-400/40"
+                        onError={(e) => {
+                          e.currentTarget.onerror = null;
+                          e.currentTarget.src = fallbackCategoryCover;
+                        }}
                       />
                       <span className={`text-xs font-khmer font-semibold truncate ${isLight ? 'text-amber-900' : 'text-amber-200'}`}>
                         {language === 'kh' ? displayHeaderKh : displayHeaderEn}
@@ -1184,6 +1240,7 @@ Your presence will make our day truly special! 🙏✨`;
                   <div className="flex items-center justify-center gap-2.5 pt-1">
                     <a
                       href={activeQrData}
+                      onClick={(e) => openPendingAwareLink(e, activeQrData)}
                       target="_blank"
                       rel="noopener noreferrer"
                       className={`px-3.5 py-2 rounded-xl border text-xs font-khmer font-semibold flex items-center gap-1.5 transition-all ${
@@ -1291,6 +1348,10 @@ Your presence will make our day truly special! 🙏✨`;
                               src={effectiveCoverImage}
                               alt={displayHeaderKh}
                               className="w-9 h-9 rounded-lg object-cover shrink-0 border border-amber-400/40"
+                              onError={(e) => {
+                                e.currentTarget.onerror = null;
+                                e.currentTarget.src = fallbackCategoryCover;
+                              }}
                             />
                             <div className="min-w-0 flex-1">
                               <div className={`text-[11px] font-bold truncate ${isLight ? 'text-amber-950' : 'text-amber-100'}`}>
@@ -1343,6 +1404,7 @@ Your presence will make our day truly special! 🙏✨`;
                                         <div className="flex items-center justify-end gap-1">
                                           <a
                                             href={guestLink}
+                                            onClick={(e) => openPendingAwareLink(e, guestLink)}
                                             target="_blank"
                                             rel="noopener noreferrer"
                                             className={`p-1.5 rounded-lg ${isLight ? 'text-neutral-600 hover:text-amber-800 hover:bg-amber-200/60' : 'text-neutral-400 hover:text-amber-300 hover:bg-amber-400/10'} transition-colors`}

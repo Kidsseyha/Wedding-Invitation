@@ -53,7 +53,7 @@ import {
 import { WEDDING_EVENT } from './data/weddingData';
 import { sanitizeWeddingEvent, VERIFIED_WEDDING_COVER } from './utils/sanitizeEvent';
 import { findTemplatePreset, getCategoryCoverImage, VERIFIED_CATEGORY_COVERS, EVENT_PRESETS } from './data/eventTemplates';
-import { buildInvitationMeta, normalizeCategoryString } from './utils/shareMeta';
+import { buildInvitationMeta, normalizeCategoryString, resolveEventCoverImage } from './utils/shareMeta';
 import { PUBLIC_APP_URL, extractGuestNameFromSearch, isSharedInvitationSearch } from './lib/shareUrl';
 import { Language, WeddingEvent } from './types';
 import { formatKhmerDate, formatEnDate } from './utils/khmerHelpers';
@@ -1758,6 +1758,20 @@ export default function App() {
       if (effectiveShareMode || (!activeUserScope.isAuthenticated && (urlIdParam || urlTypeParam))) {
         fetchId = urlIdParam || urlTypeParam || DEFAULT_PRESET_EVENT_ID;
         targetOwnerFilter = urlOwnerParam || extractScopeFromEventId(fetchId) || '';
+        const initialPreset =
+          findTemplatePreset(stripScopedEventId(fetchId)) ||
+          (urlTypeParam ? findTemplatePreset(urlTypeParam) : undefined);
+        if (initialPreset) {
+          setEvent(
+            sanitizeWeddingEvent({
+              ...initialPreset.sampleEvent,
+              id: urlIdParam || initialPreset.sampleEvent.id,
+              templateId: initialPreset.id,
+              eventType: initialPreset.type,
+              ...(targetOwnerFilter ? { ownerId: targetOwnerFilter } : {}),
+            })
+          );
+        }
       } else if (activeUserScope.isAuthenticated) {
         targetOwnerFilter = scopeId;
         const activeTemplateId = localStorage.getItem(getUserStorageKey('wedding_last_active_template_id', scopeId));
@@ -1965,31 +1979,44 @@ export default function App() {
       const preset =
         findTemplatePreset(stripScopedEventId(fetchId)) ||
         (urlTypeParam ? findTemplatePreset(urlTypeParam) : undefined);
-      if (preset && !effectiveShareMode) {
+      if (preset) {
         let templateEvent = preset.sampleEvent;
-        const storedTemplate =
-          localStorage.getItem(getUserStorageKey(`wedding_template_saved_${fetchId}`, scopeId)) ||
-          localStorage.getItem(getUserStorageKey(`wedding_template_saved_${preset.sampleEvent.id}`, scopeId)) ||
-          localStorage.getItem(getUserStorageKey(`wedding_template_type_${preset.type}`, scopeId));
-        if (storedTemplate) {
-          try {
-            templateEvent = JSON.parse(storedTemplate);
-          } catch {}
+        if (!effectiveShareMode) {
+          const storedTemplate =
+            localStorage.getItem(getUserStorageKey(`wedding_template_saved_${fetchId}`, scopeId)) ||
+            localStorage.getItem(getUserStorageKey(`wedding_template_saved_${preset.sampleEvent.id}`, scopeId)) ||
+            localStorage.getItem(getUserStorageKey(`wedding_template_type_${preset.type}`, scopeId));
+          if (storedTemplate) {
+            try {
+              templateEvent = JSON.parse(storedTemplate);
+            } catch {}
+          }
         }
         const sanitized = sanitizeWeddingEvent({
           ...templateEvent,
-          id: activeUserScope.isAuthenticated ? getScopedEventId(templateEvent.id || preset.sampleEvent.id, scopeId) : (templateEvent.id || preset.sampleEvent.id),
-          templateId: preset.sampleEvent.id,
-          ownerId: activeUserScope.isAuthenticated ? scopeId : undefined,
-          ownerEmail: activeUserScope.isAuthenticated ? (activeUserScope.ownerEmail || undefined) : undefined,
+          id:
+            !effectiveShareMode && activeUserScope.isAuthenticated
+              ? getScopedEventId(templateEvent.id || preset.sampleEvent.id, scopeId)
+              : urlIdParam || templateEvent.id || preset.sampleEvent.id,
+          templateId: preset.id || preset.sampleEvent.id,
+          ownerId:
+            !effectiveShareMode && activeUserScope.isAuthenticated
+              ? scopeId
+              : targetOwnerFilter || undefined,
+          ownerEmail:
+            !effectiveShareMode && activeUserScope.isAuthenticated
+              ? activeUserScope.ownerEmail || undefined
+              : undefined,
           eventType: preset.type,
         });
         setEvent(sanitized);
-        try {
-          localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(sanitized));
-          localStorage.setItem(getUserStorageKey('wedding_last_active_template_id', scopeId), sanitized.id);
-          localStorage.setItem(getUserStorageKey('wedding_last_template_type', scopeId), preset.type);
-        } catch {}
+        if (!effectiveShareMode) {
+          try {
+            localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(sanitized));
+            localStorage.setItem(getUserStorageKey('wedding_last_active_template_id', scopeId), sanitized.id);
+            localStorage.setItem(getUserStorageKey('wedding_last_template_type', scopeId), preset.type);
+          } catch {}
+        }
       }
     };
 
@@ -2044,7 +2071,23 @@ export default function App() {
     updateMetaTag('name', 'twitter:title', meta.title);
     updateMetaTag('name', 'twitter:description', meta.description);
     updateMetaTag('name', 'twitter:image', meta.image);
-  }, [event.name, event.groom, event.bride, event.singlePerson, event.date, event.image, event.cover_image, event.eventType, event.id, guestName, isFromShareLink]);
+  }, [
+    event.name,
+    event.groom,
+    event.bride,
+    event.singlePerson,
+    event.date,
+    event.image,
+    event.cover_image,
+    event.eventType,
+    event.id,
+    event.templateId,
+    event.config?.envelope_header_image,
+    event.config?.cover_background,
+    event.config?.image,
+    guestName,
+    isFromShareLink,
+  ]);
 
   const config = event.config;
   const textContent = language === 'kh' ? config.invitation_kh : config.invitation_en;
@@ -2366,8 +2409,10 @@ export default function App() {
   };
 
   const handleUpdateEnvelopeHeaderImage = (url: string) => {
+    const cleanCover = url && url !== 'none' ? url : event.image;
     const updatedEvent = {
       ...event,
+      ...(cleanCover ? { cover_image: cleanCover } : {}),
       config: {
         ...event.config,
         envelope_header_image: url,
@@ -3775,7 +3820,7 @@ export default function App() {
           event.config?.invitation_kh?.date_time
         }
         locationName={typeof event.location === 'string' ? event.location : (event as any).location?.name}
-        coverImage={event.cover_image || event.image || getCategoryCoverImage(event.eventType || event.id)}
+        coverImage={resolveEventCoverImage(event, normalizeCategoryString(event.eventType || event.id) || 'wedding')}
         theme={theme}
         userScope={activeUserScope.scopeId}
       />

@@ -16,6 +16,7 @@ import { Language, WeddingEvent } from '../types';
 import { ThemeMode } from './ThemeToggle';
 import { getPublicShareUrl, shortenUrl } from '../lib/shareUrl';
 import { getCategoryCoverImage } from '../data/eventTemplates';
+import { normalizeCategoryString, resolveEventCoverImage } from '../utils/shareMeta';
 
 interface ViewerShareSectionProps {
   guestName: string;
@@ -157,7 +158,13 @@ export default function ViewerShareSection({
     }
   };
 
-  const effectiveCoverImage = event.cover_image || event.image || getCategoryCoverImage(event.eventType || event.id);
+  const resolvedCategory = normalizeCategoryString(event.eventType || event.id) || 'wedding';
+  const fallbackCategoryCover = getCategoryCoverImage(
+    (event.templateId || event.id || '').toLowerCase().includes('modern')
+      ? 'preset-modern-wedding'
+      : resolvedCategory
+  );
+  const effectiveCoverImage = resolveEventCoverImage(event, resolvedCategory, fallbackCategoryCover);
 
   return (
     <section id="viewer-share-section" className="relative z-10 py-10 px-4 sm:px-6">
@@ -335,7 +342,10 @@ export default function ViewerShareSection({
                   src={effectiveCoverImage}
                   alt="Invitation Cover"
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-                  crossOrigin="anonymous"
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = fallbackCategoryCover;
+                  }}
                 />
                 <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent flex flex-col justify-end p-3.5">
                   <span className="text-[10px] uppercase font-bold tracking-widest text-amber-300 drop-shadow flex items-center gap-1.5">

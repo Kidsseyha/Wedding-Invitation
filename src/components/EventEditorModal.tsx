@@ -1894,7 +1894,17 @@ export default function EventEditorModal({
                     config={formData.config}
                     onUpdateConfig={handleUpdateConfig}
                     eventImage={formData.image}
-                    onUpdateEventImage={(url) => handleUpdateField('image', url)}
+                    onUpdateEventImage={(url) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        image: url,
+                        cover_image: url,
+                        config: {
+                          ...prev.config,
+                          image: url,
+                        },
+                      }))
+                    }
                     theme={theme}
                     onSave={handleSaveAll}
                     isSaving={isSaving}

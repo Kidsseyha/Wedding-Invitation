@@ -1795,6 +1795,9 @@ app.get('/api/short-link/:code', async (req, res) => {
   if (cleanTarget.includes('ais-dev-')) {
     cleanTarget = cleanTarget.replace('ais-dev-', 'ais-pre-');
   }
+  if (!reqOrigin.includes('.vercel.app') && cleanTarget.startsWith('https://invitationonline-six.vercel.app')) {
+    cleanTarget = cleanTarget.replace('https://invitationonline-six.vercel.app', reqOrigin);
+  }
 
   let guestName = '';
   let eventId = '';
@@ -1873,6 +1876,9 @@ app.get('/s/:code', async (req, res) => {
     }
     if (cleanTarget.includes('ais-dev-')) {
       cleanTarget = cleanTarget.replace('ais-dev-', 'ais-pre-');
+    }
+    if (!reqOrigin.includes('.vercel.app') && cleanTarget.startsWith('https://invitationonline-six.vercel.app')) {
+      cleanTarget = cleanTarget.replace('https://invitationonline-six.vercel.app', reqOrigin);
     }
 
     // Merge any query params from request (e.g. /s/code?name=...) and ensure share=1 is set

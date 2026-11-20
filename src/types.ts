@@ -98,6 +98,7 @@ export interface TemplateConfig {
   portrait_shape?: 'circle' | 'rounded' | 'arch' | 'oval' | 'heart' | 'capsule' | 'leaf' | 'square';
   title_text_shape?: 'straight' | 'arch-up' | 'arch-down' | 'wave';
   details_background: string;
+  image?: string;
   envelope_frame?: string;
   envelope_header_image?: string;
   guest_frame_style?: string;

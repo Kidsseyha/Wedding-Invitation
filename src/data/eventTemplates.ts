@@ -815,6 +815,7 @@ export const EVENT_PRESETS: EventTypePreset[] = [
 
 export const VERIFIED_CATEGORY_COVERS = {
   wedding: khmerRoyalGoldWeddingCover,
+  modernWedding: 'https://images.unsplash.com/photo-1519741497674-611481863552?q=80&w=1200&auto=format&fit=crop',
   engagement: '/assets/aistudio/image_6e49a03a.png',
   housewarming: '/assets/images/khmer_housewarming_villa_emblem_1794537020715.jpg',
   birthday: 'https://images.unsplash.com/photo-1513151233558-d860c5398176?q=80&w=1200&auto=format&fit=crop',
@@ -828,6 +829,7 @@ export function getCategoryCoverImage(eventTypeOrId?: string): string {
   if (str.includes('anniversary') || str.includes('ខួបអាពាហ៍ពិពាហ៍')) return VERIFIED_CATEGORY_COVERS.anniversary;
   if (str.includes('housewarming') || str.includes('ឡើងផ្ទះ') || str.includes('house')) return VERIFIED_CATEGORY_COVERS.housewarming;
   if (str.includes('engagement') || str.includes('ភ្ជាប់ពាក្យ')) return VERIFIED_CATEGORY_COVERS.engagement;
+  if (str.includes('modern') || str.includes('សម័យ')) return VERIFIED_CATEGORY_COVERS.modernWedding;
   return VERIFIED_CATEGORY_COVERS.wedding;
 }
 
@@ -838,15 +840,19 @@ export function findTemplatePreset(idOrType?: string): EventTypePreset | undefin
     EVENT_PRESETS.find(
       (p) =>
         p.id.toLowerCase() === target ||
-        p.type.toLowerCase() === target ||
         p.sampleEvent.id?.toLowerCase() === target
     ) ||
+    EVENT_PRESETS.find((p) => {
+      if ((target.includes('modern') || target.includes('សម័យ')) && p.id === 'preset-modern-wedding') return true;
+      return false;
+    }) ||
+    EVENT_PRESETS.find((p) => p.type.toLowerCase() === target) ||
     EVENT_PRESETS.find((p) => {
       if ((target.includes('birthday') || target.includes('ខួបកំណើត')) && p.type === 'birthday') return true;
       if ((target.includes('anniversary') || target.includes('ខួបអាពាហ៍ពិពាហ៍')) && p.type === 'anniversary') return true;
       if ((target.includes('housewarming') || target.includes('ឡើងផ្ទះ')) && p.type === 'housewarming') return true;
       if ((target.includes('engagement') || target.includes('ភ្ជាប់ពាក្យ')) && p.type === 'engagement') return true;
-      if (target.includes('wedding') && p.type === 'wedding') return true;
+      if (target.includes('wedding') && p.id === 'preset-wedding') return true;
       return false;
     })
   );
