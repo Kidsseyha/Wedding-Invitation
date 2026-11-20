@@ -96,7 +96,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       return res.status(400).json({ success: false, error: 'Missing url parameter' });
     }
 
-    const host = getHeader(req, 'x-forwarded-host') || getHeader(req, 'host') || 'invitationonline-six.vercel.app';
+    const host = getHeader(req, 'x-forwarded-host') || getHeader(req, 'host') || 'wedding-invitation-inky-kappa.vercel.app';
     const proto = getHeader(req, 'x-forwarded-proto') || 'https';
     const requestOrigin = `${proto.split(',')[0].trim()}://${host.split(',')[0].trim()}`;
 
@@ -142,7 +142,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
 
     const code = generateShortCode(cleanUrl);
     const firebaseCfg = loadFirebaseConfig();
-    await saveShortLinkToFirestoreRest({
+    const persisted = await saveShortLinkToFirestoreRest({
       projectId: firebaseCfg.projectId,
       databaseId: firebaseCfg.firestoreDatabaseId,
       code,
@@ -151,9 +151,19 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       apiKey: firebaseCfg.apiKey,
     });
 
+    if (!persisted) {
+      return res.status(503).json({
+        success: false,
+        persisted: false,
+        fallbackUrl: cleanUrl,
+        error: 'Short link persistence unavailable',
+      });
+    }
+
     const shortUrl = `${baseOrigin}/s/${code}`;
     return res.status(200).json({
       success: true,
+      persisted: true,
       shortUrl,
       internalShortUrl: shortUrl,
       code,

@@ -27,7 +27,7 @@ test('getPublicShareUrl supports customOrigin for Vercel deployment', () => {
     lang: 'kh',
   });
   const url = new URL(urlStr);
-  assert.equal(url.origin, 'https://invitationonline-six.vercel.app');
+  assert.equal(url.origin, 'https://wedding-invitation-inky-kappa.vercel.app');
   assert.equal(url.searchParams.get('id'), 'event_QFZHXRKzhgPYeHjpYhuI2blRUBo2');
   assert.equal(url.searchParams.get('lang'), 'kh');
   assert.equal(url.searchParams.get('name'), 'ក្រុមគ្រួសារ និងបងប្អូនសាច់ញាតិ');
@@ -182,4 +182,37 @@ test('distinct templates and distinct guest names produce unique short codes pre
 
   assert.equal(seenCodes.size, templates.length * guests.length);
 });
+
+test('shortenUrl falls back to self-contained full share URL when short-link persistence fails', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    new Response(
+      JSON.stringify({
+        success: false,
+        persisted: false,
+        error: 'Database (default) does not exist',
+      }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } }
+    )) as typeof fetch;
+
+  try {
+    const longUrl = getPublicShareUrl('លោក សុខ ដារ៉ា', 'u_owner__modern-wedding-mw001', 'wedding', {
+      customOrigin: VERCEL_APP_URL,
+      lang: 'kh',
+    });
+    const resolved = await shortenUrl(longUrl, VERCEL_APP_URL);
+    const parsed = new URL(resolved);
+
+    assert.equal(parsed.origin, VERCEL_APP_URL);
+    assert.equal(parsed.pathname, '/');
+    assert.equal(parsed.searchParams.get('id'), 'u_owner__modern-wedding-mw001');
+    assert.equal(parsed.searchParams.get('type'), 'wedding');
+    assert.equal(parsed.searchParams.get('lang'), 'kh');
+    assert.equal(parsed.searchParams.get('share'), '1');
+    assert.equal(extractGuestNameFromSearch(parsed.search), 'លោក សុខ ដារ៉ា');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 

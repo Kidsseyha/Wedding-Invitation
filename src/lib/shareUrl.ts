@@ -1,7 +1,7 @@
 import { GUEST_PUBLIC_SCOPE, extractScopeFromEventId } from './userScope.js';
 
 export const PUBLIC_APP_URL = 'https://ais-pre-hjj7vuznhhxkva5mjjwpax-816970112678.asia-southeast1.run.app';
-export const VERCEL_APP_URL = 'https://invitationonline-six.vercel.app';
+export const VERCEL_APP_URL = 'https://wedding-invitation-inky-kappa.vercel.app';
 
 export interface ShareUrlOptions {
   customOrigin?: string;
@@ -160,7 +160,9 @@ export function getDefaultShareDomain(): 'vercel' | 'preview' {
 }
 
 /**
- * Converts a long URL to a short link (using in-app /s/:code) with Khmer language support
+ * Converts a long URL to a short link (using in-app /s/:code) with Khmer language support.
+ * Only returns a /s/:code URL when short-link persistence succeeds; otherwise falls back to the
+ * self-contained full personalized URL so viewers never open a dead/unresolved short link.
  */
 export async function shortenUrl(longUrl: string, customOrigin?: string): Promise<string> {
   if (!longUrl) return '';
@@ -231,7 +233,7 @@ export async function shortenUrl(longUrl: string, customOrigin?: string): Promis
     });
     if (res.ok) {
       const data = await res.json();
-      if (data.shortUrl) {
+      if (data?.success !== false && data?.persisted !== false && data?.shortUrl) {
         let finalShortUrl = String(data.shortUrl);
         if (finalShortUrl.includes('localhost') || finalShortUrl.includes('127.0.0.1')) {
           finalShortUrl = finalShortUrl.replace(/http:\/\/localhost:\d+/, fallbackOrigin).replace(/https:\/\/localhost:\d+/, fallbackOrigin);
@@ -253,22 +255,39 @@ export async function shortenUrl(longUrl: string, customOrigin?: string): Promis
     console.warn('API shorten failed, trying Firestore direct short link:', err);
   }
 
-  // Client-side Firestore fallback so Vercel short links still work even if /api/shorten is unreachable
-  try {
-    const { doc, setDoc } = await import('firebase/firestore');
-    const { db } = await import('./firebase');
-    const code = generateDeterministicShortCode(cleanedUrl);
-    await setDoc(doc(db, 'short_links', code), {
-      code,
-      url: cleanedUrl,
-      lang: targetLang,
-      createdAt: new Date().toISOString(),
-    });
-    const firestoreShortUrl = `${fallbackOrigin}/s/${code}`;
-    shortUrlCache.set(cacheKey, firestoreShortUrl);
-    return firestoreShortUrl;
-  } catch {
-    // fallback to cleanedUrl if offline
+  // Client-side Firestore fallback with strict timeout so missing/offline DB never hangs or returns a dead /s/ link
+  const isQuotaBlocked =
+    typeof window !== 'undefined' &&
+    typeof localStorage !== 'undefined' &&
+    localStorage.getItem('firestore_quota_exceeded') === 'true';
+
+  if (!isQuotaBlocked) {
+    try {
+      const { doc, setDoc } = await import('firebase/firestore');
+      const { db, IS_FIRESTORE_WRITE_DISABLED } = await import('./firebase');
+      if (!IS_FIRESTORE_WRITE_DISABLED) {
+        const code = generateDeterministicShortCode(cleanedUrl);
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          setDoc(doc(db, 'short_links', code), {
+            code,
+            url: cleanedUrl,
+            lang: targetLang,
+            createdAt: new Date().toISOString(),
+          }),
+          new Promise<never>((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error('Short link Firestore write timed out')), 2500);
+          }),
+        ]).finally(() => {
+          if (timeoutId !== undefined) clearTimeout(timeoutId);
+        });
+        const firestoreShortUrl = `${fallbackOrigin}/s/${code}`;
+        shortUrlCache.set(cacheKey, firestoreShortUrl);
+        return firestoreShortUrl;
+      }
+    } catch {
+      // fallback to self-contained cleanedUrl when Firestore is unreachable/not provisioned
+    }
   }
 
   return cleanedUrl;

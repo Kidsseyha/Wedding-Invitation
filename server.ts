@@ -1964,8 +1964,9 @@ app.post('/api/shorten', async (req, res) => {
   }
 
   try {
+    const serverOrigin = getRequestPublicOrigin(req) || PUBLIC_APP_URL;
     // Determine public origin: NEVER use localhost or dev domain
-    let baseOrigin = getRequestPublicOrigin(req) || PUBLIC_APP_URL;
+    let baseOrigin = serverOrigin;
     if (
       clientOrigin &&
       typeof clientOrigin === 'string' &&
@@ -2004,11 +2005,42 @@ app.post('/api/shorten', async (req, res) => {
       // keep cleanUrl as-is
     }
 
+    let isRemoteOrigin = false;
+    try {
+      isRemoteOrigin = new URL(baseOrigin).host !== new URL(serverOrigin).host;
+    } catch {
+      isRemoteOrigin = false;
+    }
+
+    const tryRemoteShorten = async (): Promise<{ shortUrl: string; code?: string } | null> => {
+      if (!isRemoteOrigin) return null;
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 2500);
+      try {
+        const remoteRes = await fetch(`${baseOrigin}/api/shorten`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: cleanUrl, origin: baseOrigin, lang: targetLang }),
+          signal: controller.signal,
+        });
+        if (!remoteRes.ok) return null;
+        const remoteJson = (await remoteRes.json().catch(() => null)) as any;
+        if (remoteJson?.success === true && remoteJson?.persisted === true && remoteJson?.shortUrl) {
+          return { shortUrl: String(remoteJson.shortUrl), code: remoteJson.code };
+        }
+        return null;
+      } catch {
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
     // Check if an identical URL is already cached/saved
     const existingLinks = getShortLinks();
     for (const [existingCode, targetUrl] of Object.entries(existingLinks)) {
       if (targetUrl === cleanUrl) {
-        await saveShortLinkToFirestoreRest({
+        const persistedToFirestore = await saveShortLinkToFirestoreRest({
           projectId: rawFirebaseConfig.projectId,
           databaseId: (rawFirebaseConfig as any).firestoreDatabaseId || '(default)',
           code: existingCode,
@@ -2016,9 +2048,30 @@ app.post('/api/shorten', async (req, res) => {
           lang: targetLang,
           apiKey: rawFirebaseConfig.apiKey,
         });
+        if (isRemoteOrigin && !persistedToFirestore) {
+          const remote = await tryRemoteShorten();
+          if (!remote) {
+            return res.status(503).json({
+              success: false,
+              persisted: false,
+              fallbackUrl: cleanUrl,
+              error: 'Remote short link persistence unavailable',
+            });
+          }
+          return res.json({
+            success: true,
+            persisted: true,
+            shortUrl: remote.shortUrl,
+            internalShortUrl: remote.shortUrl,
+            code: remote.code || existingCode,
+            lang: targetLang,
+            provider: 'remote',
+          });
+        }
         const cachedShortUrl = `${baseOrigin}/s/${existingCode}`;
         return res.json({
           success: true,
+          persisted: true,
           shortUrl: cachedShortUrl,
           internalShortUrl: cachedShortUrl,
           code: existingCode,
@@ -2038,7 +2091,7 @@ app.post('/api/shorten', async (req, res) => {
     }
 
     saveShortLink(code, cleanUrl);
-    await saveShortLinkToFirestoreRest({
+    const persistedToFirestore = await saveShortLinkToFirestoreRest({
       projectId: rawFirebaseConfig.projectId,
       databaseId: (rawFirebaseConfig as any).firestoreDatabaseId || '(default)',
       code,
@@ -2047,10 +2100,32 @@ app.post('/api/shorten', async (req, res) => {
       apiKey: rawFirebaseConfig.apiKey,
     });
 
+    if (isRemoteOrigin && !persistedToFirestore) {
+      const remote = await tryRemoteShorten();
+      if (!remote) {
+        return res.status(503).json({
+          success: false,
+          persisted: false,
+          fallbackUrl: cleanUrl,
+          error: 'Remote short link persistence unavailable',
+        });
+      }
+      return res.json({
+        success: true,
+        persisted: true,
+        shortUrl: remote.shortUrl,
+        internalShortUrl: remote.shortUrl,
+        code: remote.code || code,
+        lang: targetLang,
+        provider: 'remote',
+      });
+    }
+
     const internalShortUrl = `${baseOrigin}/s/${code}`;
 
     return res.json({
       success: true,
+      persisted: true,
       shortUrl: internalShortUrl,
       internalShortUrl,
       code,

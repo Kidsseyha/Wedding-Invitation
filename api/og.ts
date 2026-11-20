@@ -67,7 +67,7 @@ function getQueryParam(params: URLSearchParams, req: VercelReq, key: string): st
 export default async function handler(req: VercelReq, res: VercelRes) {
   try {
     const firebaseCfg = loadFirebaseConfig();
-    const host = getHeader(req, 'x-forwarded-host') || getHeader(req, 'host') || 'invitationonline-six.vercel.app';
+    const host = getHeader(req, 'x-forwarded-host') || getHeader(req, 'host') || 'wedding-invitation-inky-kappa.vercel.app';
     const proto = getHeader(req, 'x-forwarded-proto') || 'https';
     const origin = `${proto.split(',')[0].trim()}://${host.split(',')[0].trim()}`;
 
@@ -75,10 +75,12 @@ export default async function handler(req: VercelReq, res: VercelRes) {
     let parsedUrl = new URL(rawUrl, origin);
     let params = parsedUrl.searchParams;
     let replaceStatePath: string | undefined;
+    let unresolvedShortLink = false;
 
     // Resolve short links (/s/:code) from Firestore or local saved_short_links.json
     const shortMatch = parsedUrl.pathname.match(/^\/s\/([a-zA-Z0-9_-]+)\/?$/);
     if (shortMatch && shortMatch[1]) {
+      unresolvedShortLink = true;
       const shortCode = shortMatch[1];
       let resolvedTargetUrl: string | null = null;
 
@@ -121,6 +123,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
           parsedUrl = targetObj;
           params = targetObj.searchParams;
           replaceStatePath = `/${targetObj.search}`;
+          unresolvedShortLink = false;
         } catch {
           // ignore invalid URL
         }
@@ -245,7 +248,12 @@ export default async function handler(req: VercelReq, res: VercelRes) {
     const injected = injectMetaIntoHtml(html, meta, replaceStatePath);
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=300');
+    res.setHeader(
+      'Cache-Control',
+      unresolvedShortLink
+        ? 'no-store, max-age=0'
+        : 'public, s-maxage=15, stale-while-revalidate=60'
+    );
     res.status(200).send(injected);
   } catch (err: any) {
     console.error('[Vercel OG Handler Error]:', err);
