@@ -54,6 +54,48 @@ export function generateDeterministicShortCode(targetUrl: string): string {
 }
 
 /**
+ * Safely decodes Khmer/UTF-8 query parameter values (handles %XX, + spaces, and raw Unicode).
+ */
+export function decodeKhmerQueryValue(raw?: string | null): string {
+  if (!raw || typeof raw !== 'string') return '';
+  const withSpaces = raw.replace(/\+/g, ' ');
+  try {
+    return withSpaces.includes('%') ? decodeURIComponent(withSpaces).trim() : withSpaces.trim();
+  } catch {
+    return withSpaces.trim();
+  }
+}
+
+/**
+ * Resolves invitation language from URL search params (?lang=kh|km|en, ?l=...) and path (/kh).
+ * Defaults to Khmer ('kh') when sharing on Vercel or unspecified.
+ */
+export function detectLanguageFromUrl(search?: string | null, pathname?: string | null): 'kh' | 'en' {
+  const params = new URLSearchParams(search || '');
+  const rawLang = (params.get('lang') || params.get('l') || '').toLowerCase().trim();
+  if (rawLang === 'en') return 'en';
+  if (rawLang === 'kh' || rawLang === 'km') return 'kh';
+  const cleanPath = (pathname || '').toLowerCase().trim();
+  if (cleanPath === '/en' || cleanPath.startsWith('/en/')) return 'en';
+  return 'kh';
+}
+
+/**
+ * Normalizes URL query spaces from '+' to '%20' so Khmer guest names never show '+' in chat apps.
+ */
+export function normalizeShareUrlEncoding(urlStr: string): string {
+  if (!urlStr) return '';
+  const hashIdx = urlStr.indexOf('#');
+  const baseAndQuery = hashIdx >= 0 ? urlStr.slice(0, hashIdx) : urlStr;
+  const hashPart = hashIdx >= 0 ? urlStr.slice(hashIdx) : '';
+  const queryIdx = baseAndQuery.indexOf('?');
+  if (queryIdx < 0) return urlStr;
+  const basePart = baseAndQuery.slice(0, queryIdx);
+  const queryPart = baseAndQuery.slice(queryIdx + 1).replace(/\+/g, '%20');
+  return `${basePart}?${queryPart}${hashPart}`;
+}
+
+/**
  * Extracts the invited guest name from a URL query string (?i=, ?guest=, ?name=, ?to=).
  */
 export function extractGuestNameFromSearch(search: string): string {
@@ -64,14 +106,14 @@ export function extractGuestNameFromSearch(search: string): string {
     params.get('name') ||
     params.get('to') ||
     '';
-  const trimmed = raw.trim();
+  const trimmed = decodeKhmerQueryValue(raw);
   return trimmed && trimmed !== 'Your Name' ? trimmed : '';
 }
 
 /**
  * Generates the live working share URL for wedding guests.
- * Automatically converts internal dev URLs (ais-dev-) and localhost to publicly accessible preview URLs (ais-pre-)
- * or honors customOrigin (such as Vercel domain) and adds Khmer language support.
+ * Automatically converts internal dev URLs (ais-dev-) and localhost to publicly accessible URLs
+ * or honors customOrigin (such as Vercel domain) and guarantees Khmer language (?lang=kh) support.
  */
 export function getPublicShareUrl(
   guestName?: string,
@@ -119,10 +161,9 @@ export function getPublicShareUrl(
   }
 
   // Language parameter for 100% Khmer support across social networks and Vercel
-  const targetLang = options?.lang || 'kh';
-  if (targetLang) {
-    url.searchParams.set('lang', targetLang);
-  }
+  const rawLang = (options?.lang || 'kh').toLowerCase().trim();
+  const targetLang = rawLang === 'en' ? 'en' : 'kh';
+  url.searchParams.set('lang', targetLang);
 
   url.searchParams.set('share', '1');
 
@@ -130,7 +171,7 @@ export function getPublicShareUrl(
     url.searchParams.set('name', guestName.trim());
   }
 
-  return url.toString();
+  return normalizeShareUrlEncoding(url.toString());
 }
 
 /**
@@ -149,14 +190,10 @@ export function getPreferredVercelOrigin(): string {
 }
 
 /**
- * Returns 'vercel' only when currently running on a *.vercel.app host,
- * otherwise 'preview' so shared links resolve to the live working server.
+ * Defaults to 'vercel' so shared invitation links use the live Vercel domain with full Khmer language support.
  */
 export function getDefaultShareDomain(): 'vercel' | 'preview' {
-  if (typeof window !== 'undefined' && window.location?.origin?.includes('.vercel.app')) {
-    return 'vercel';
-  }
-  return 'preview';
+  return 'vercel';
 }
 
 /**
@@ -207,14 +244,13 @@ export async function shortenUrl(longUrl: string, customOrigin?: string): Promis
   let targetLang = 'kh';
   try {
     const parsed = new URL(cleanedUrl);
-    if (!parsed.searchParams.get('lang')) {
-      parsed.searchParams.set('lang', 'kh');
-    }
-    targetLang = parsed.searchParams.get('lang') || 'kh';
+    const rawLang = (parsed.searchParams.get('lang') || parsed.searchParams.get('l') || '').toLowerCase().trim();
+    targetLang = rawLang === 'en' ? 'en' : 'kh';
+    parsed.searchParams.set('lang', targetLang);
     if (!parsed.searchParams.get('share')) {
       parsed.searchParams.set('share', '1');
     }
-    cleanedUrl = parsed.toString();
+    cleanedUrl = normalizeShareUrlEncoding(parsed.toString());
   } catch {
     // ignore URL parse error
   }

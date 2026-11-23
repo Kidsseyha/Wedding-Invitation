@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Language, WeddingEvent } from '../types';
 import { ThemeMode } from './ThemeToggle';
-import { getPublicShareUrl, shortenUrl } from '../lib/shareUrl';
+import { getPublicShareUrl, getPreferredVercelOrigin, shortenUrl } from '../lib/shareUrl';
 import { getCategoryCoverImage } from '../data/eventTemplates';
 import { normalizeCategoryString, resolveEventCoverImage } from '../utils/shareMeta';
 
@@ -43,15 +43,17 @@ export default function ViewerShareSection({
   const [shortUrlState, setShortUrlState] = useState<{ targetUrl: string; shortUrl: string } | null>(null);
 
   const currentGuest = guestName && guestName !== 'Your Name' ? guestName.trim() : '';
+  const vercelOrigin = getPreferredVercelOrigin();
   const fullUrl = getPublicShareUrl(currentGuest, event.id, event.eventType, {
+    customOrigin: vercelOrigin,
     ownerId: event.ownerId,
-    lang: language === 'en' ? 'en' : 'kh',
+    lang: 'kh',
   });
   const shortUrl = shortUrlState && shortUrlState.targetUrl === fullUrl ? shortUrlState.shortUrl : '';
 
   useEffect(() => {
     let isMounted = true;
-    shortenUrl(fullUrl).then(res => {
+    shortenUrl(fullUrl, vercelOrigin).then(res => {
       if (isMounted && res) {
         setShortUrlState({ targetUrl: fullUrl, shortUrl: res });
       }
@@ -59,7 +61,7 @@ export default function ViewerShareSection({
     return () => {
       isMounted = false;
     };
-  }, [fullUrl]);
+  }, [fullUrl, vercelOrigin]);
 
   const activeShareLink = shortUrl || fullUrl;
 

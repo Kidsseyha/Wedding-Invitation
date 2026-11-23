@@ -4,6 +4,7 @@ import { EVENT_PRESETS } from '../data/eventTemplates.js';
 import {
   buildAllShareTemplates,
   buildInvitationMeta,
+  injectMetaIntoHtml,
   resolveEventCoverImage,
   resolveSelectedShareTemplateId,
 } from './shareMeta.js';
@@ -208,4 +209,29 @@ test('Modern Wedding repairs contaminated Traditional Wedding covers and ignores
   assert.equal(modernMeta.coverImage, 'https://cdn.example.com/custom-modern-portrait.jpg');
   assert.equal(modernMeta.image, 'https://cdn.example.com/custom-modern-portrait.jpg');
 });
+
+test('injectMetaIntoHtml injects Khmer html lang=km and og:locale=km_KH for Vercel sharing', () => {
+  const origin = 'https://wedding-invitation-inky-kappa.vercel.app';
+  const meta = buildInvitationMeta({
+    event: EVENT_PRESETS[0].sampleEvent,
+    guestName: 'លោក សុខ រតនៈ',
+    queryType: 'wedding',
+    eventId: EVENT_PRESETS[0].sampleEvent.id,
+    origin,
+    pageUrl: `${origin}/?id=${EVENT_PRESETS[0].sampleEvent.id}&type=wedding&lang=kh&share=1&name=%E1%9E%9B%E1%9F%84%E1%9E%80%20%E1%9E%9F%E1%9E%BB%E1%9E%81%20%E1%9E%9A%E1%9E%8F%E1%9E%93%E1%9F%88`,
+  });
+
+  const html = injectMetaIntoHtml(
+    '<!doctype html><html lang="en"><head><meta charset="UTF-8" /><title>Old</title></head><body></body></html>',
+    meta,
+    undefined,
+    { lang: 'kh' }
+  );
+
+  assert.ok(html.includes('<html lang="km">'));
+  assert.ok(html.includes('<meta property="og:locale" content="km_KH" />'));
+  assert.ok(html.includes('<meta property="og:site_name" content="លិខិតអញ្ជើញឌីជីថល" />'));
+  assert.ok(html.includes('សូមគោរពអញ្ជើញ លោក សុខ រតនៈ'));
+});
+
 

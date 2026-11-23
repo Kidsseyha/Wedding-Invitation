@@ -3,6 +3,11 @@ import * as path from 'path';
 import { findTemplatePreset } from '../src/data/eventTemplates.js';
 import { stripScopedEventId } from '../src/lib/userScope.js';
 import {
+  decodeKhmerQueryValue,
+  detectLanguageFromUrl,
+  normalizeShareUrlEncoding,
+} from '../src/lib/shareUrl.js';
+import {
   buildInvitationMeta,
   injectMetaIntoHtml,
   fetchEventFromFirestoreRest,
@@ -77,8 +82,8 @@ export default async function handler(req: VercelReq, res: VercelRes) {
     let replaceStatePath: string | undefined;
     let unresolvedShortLink = false;
 
-    // Resolve short links (/s/:code) from Firestore or local saved_short_links.json
-    const shortMatch = parsedUrl.pathname.match(/^\/s\/([a-zA-Z0-9_-]+)\/?$/);
+    // Resolve short links (/s/:code or /kh/s/:code) from Firestore or local saved_short_links.json
+    const shortMatch = parsedUrl.pathname.match(/^(?:\/(?:kh|km|en))?\/s\/([a-zA-Z0-9_-]+)\/?$/i);
     if (shortMatch && shortMatch[1]) {
       unresolvedShortLink = true;
       const shortCode = shortMatch[1];
@@ -114,20 +119,32 @@ export default async function handler(req: VercelReq, res: VercelRes) {
           for (const [k, v] of Array.from(params.entries())) {
             if (v) targetObj.searchParams.set(k, v);
           }
-          if (!targetObj.searchParams.get('lang')) {
-            targetObj.searchParams.set('lang', fsShortLink?.lang || 'kh');
-          }
+          const rawShortLang = (
+            targetObj.searchParams.get('lang') ||
+            fsShortLink?.lang ||
+            (parsedUrl.pathname.toLowerCase().startsWith('/en') ? 'en' : 'kh')
+          ).toLowerCase();
+          targetObj.searchParams.set('lang', rawShortLang === 'en' ? 'en' : 'kh');
           if (!targetObj.searchParams.get('share')) {
             targetObj.searchParams.set('share', '1');
           }
           parsedUrl = targetObj;
           params = targetObj.searchParams;
-          replaceStatePath = `/${targetObj.search}`;
+          replaceStatePath = normalizeShareUrlEncoding(`/${targetObj.search}`);
           unresolvedShortLink = false;
         } catch {
           // ignore invalid URL
         }
       }
+    }
+
+    const pageLang = detectLanguageFromUrl(parsedUrl.search, parsedUrl.pathname);
+
+    // Support /kh or /kh/ direct Khmer invitation routes on Vercel
+    if (!replaceStatePath && /^\/(?:kh|km)\/?$/i.test(parsedUrl.pathname)) {
+      const khUrl = new URL(parsedUrl.toString());
+      khUrl.searchParams.set('lang', 'kh');
+      replaceStatePath = normalizeShareUrlEncoding(`/${khUrl.search}`);
     }
 
     const eventId = getQueryParam(params, req, 'id').trim();
@@ -140,14 +157,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       getQueryParam(params, req, 'to')
     ).trim();
 
-    let guestName = rawGuest;
-    try {
-      if (rawGuest && rawGuest.includes('%')) {
-        guestName = decodeURIComponent(rawGuest);
-      }
-    } catch {
-      guestName = rawGuest;
-    }
+    const guestName = decodeKhmerQueryValue(rawGuest);
 
     const eventType = normalizeCategoryString(rawType);
     let targetEvent: any = null;
@@ -242,12 +252,13 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       queryType: rawType || null,
       eventId: eventId || null,
       origin,
-      pageUrl: parsedUrl.toString(),
+      pageUrl: normalizeShareUrlEncoding(parsedUrl.toString()),
     });
 
-    const injected = injectMetaIntoHtml(html, meta, replaceStatePath);
+    const injected = injectMetaIntoHtml(html, meta, replaceStatePath, { lang: pageLang });
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Content-Language', pageLang === 'en' ? 'en' : 'km');
     res.setHeader(
       'Cache-Control',
       unresolvedShortLink

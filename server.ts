@@ -24,7 +24,12 @@ import {
   isGlobalSharedPresetId,
   stripScopedEventId,
 } from './src/lib/userScope';
-import { generateDeterministicShortCode } from './src/lib/shareUrl';
+import {
+  generateDeterministicShortCode,
+  normalizeShareUrlEncoding,
+  decodeKhmerQueryValue,
+  detectLanguageFromUrl,
+} from './src/lib/shareUrl';
 import {
   findUserDbEvent,
   shouldIncludePublicRecord,
@@ -633,6 +638,7 @@ async function getInjectedHtmlAsync(
     ownerEmail?: string | null;
     origin: string;
     pageUrl: string;
+    lang?: 'kh' | 'en';
   }
 ): Promise<string> {
   const targetEvent = await resolveTargetEvent({
@@ -651,7 +657,7 @@ async function getInjectedHtmlAsync(
     pageUrl: options.pageUrl,
   });
 
-  return injectMetaIntoHtml(html, meta);
+  return injectMetaIntoHtml(html, meta, undefined, { lang: options.lang || 'kh' });
 }
 
 function getSavedEvents(): Record<string, any> {
@@ -1851,7 +1857,7 @@ app.get('/api/short-link/:code', async (req, res) => {
 });
 
     // In-app short link endpoint with full Open Graph metadata preview for Telegram, Facebook, Messenger
-app.get('/s/:code', async (req, res) => {
+app.get(['/s/:code', '/kh/s/:code'], async (req, res) => {
   const code = req.params.code;
   const links = getShortLinks();
   let target = links[code];
@@ -1881,7 +1887,7 @@ app.get('/s/:code', async (req, res) => {
       cleanTarget = cleanTarget.replace('https://invitationonline-six.vercel.app', reqOrigin);
     }
 
-    // Merge any query params from request (e.g. /s/code?name=...) and ensure share=1 is set
+    // Merge any query params from request (e.g. /s/code?name=...) and ensure share=1 & lang are set
     try {
       const urlObj = new URL(cleanTarget);
       for (const [key, val] of Object.entries(req.query)) {
@@ -1889,10 +1895,13 @@ app.get('/s/:code', async (req, res) => {
           urlObj.searchParams.set(key, val);
         }
       }
+      if (!urlObj.searchParams.get('lang') && !urlObj.searchParams.get('l')) {
+        urlObj.searchParams.set('lang', 'kh');
+      }
       if (!urlObj.searchParams.get('share')) {
         urlObj.searchParams.set('share', '1');
       }
-      cleanTarget = urlObj.toString();
+      cleanTarget = normalizeShareUrlEncoding(urlObj.toString());
     } catch {
       // ignore
     }
@@ -1914,13 +1923,17 @@ app.get('/s/:code', async (req, res) => {
     let eventId: string | null = null;
     let eventType: string | null = null;
     let ownerId: string | null = null;
+    let pageLang: 'kh' | 'en' = 'kh';
     let targetOrigin = reqOrigin;
     try {
       const parsed = new URL(cleanTarget);
-      guestName = parsed.searchParams.get('name') || parsed.searchParams.get('i') || parsed.searchParams.get('guest') || parsed.searchParams.get('to');
+      guestName = decodeKhmerQueryValue(
+        parsed.searchParams.get('name') || parsed.searchParams.get('i') || parsed.searchParams.get('guest') || parsed.searchParams.get('to')
+      ) || null;
       eventId = parsed.searchParams.get('id');
       eventType = parsed.searchParams.get('type') || parsed.searchParams.get('category');
       ownerId = parsed.searchParams.get('ownerId');
+      pageLang = detectLanguageFromUrl(parsed.search, parsed.pathname);
       if (parsed.origin && !parsed.origin.includes('localhost') && !parsed.origin.includes('127.0.0.1')) {
         targetOrigin = parsed.origin;
       }
@@ -1943,9 +1956,11 @@ app.get('/s/:code', async (req, res) => {
           ownerId,
           origin: targetOrigin,
           pageUrl: cleanTarget,
+          lang: pageLang,
         });
         html = html.replace('</head>', `<meta http-equiv="refresh" content="0;url=${cleanTarget.replace(/"/g, '&quot;')}" /></head>`);
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Content-Language', pageLang === 'en' ? 'en' : 'km');
         return res.send(html);
       }
     }
@@ -1975,6 +1990,20 @@ app.post('/api/shorten', async (req, res) => {
       !clientOrigin.includes('127.0.0.1')
     ) {
       baseOrigin = clientOrigin.replace(/\/+$/, '');
+    } else {
+      try {
+        const parsedOrigin = new URL(url).origin;
+        if (
+          parsedOrigin &&
+          parsedOrigin.startsWith('http') &&
+          !parsedOrigin.includes('localhost') &&
+          !parsedOrigin.includes('127.0.0.1')
+        ) {
+          baseOrigin = parsedOrigin.replace(/\/+$/, '');
+        }
+      } catch {
+        // fallback to serverOrigin
+      }
     }
 
     if (baseOrigin.includes('ais-dev-')) {
@@ -1989,18 +2018,17 @@ app.post('/api/shorten', async (req, res) => {
       cleanUrl = cleanUrl.replace('ais-dev-', 'ais-pre-');
     }
 
-    // Ensure Khmer language & share flag are preserved in target URL
+    // Ensure Khmer language & share flag are preserved in target URL with clean UTF-8 %20 encoding
     let targetLang = 'kh';
     try {
       const parsedTarget = new URL(cleanUrl);
-      if (!parsedTarget.searchParams.get('lang')) {
-        parsedTarget.searchParams.set('lang', 'kh');
-      }
-      targetLang = parsedTarget.searchParams.get('lang') || 'kh';
+      const rawLang = (parsedTarget.searchParams.get('lang') || parsedTarget.searchParams.get('l') || '').toLowerCase().trim();
+      targetLang = rawLang === 'en' ? 'en' : 'kh';
+      parsedTarget.searchParams.set('lang', targetLang);
       if (!parsedTarget.searchParams.get('share')) {
         parsedTarget.searchParams.set('share', '1');
       }
-      cleanUrl = parsedTarget.toString();
+      cleanUrl = normalizeShareUrlEncoding(parsedTarget.toString());
     } catch {
       // keep cleanUrl as-is
     }
@@ -2162,11 +2190,14 @@ async function startServer() {
         template = await vite.transformIndexHtml(req.originalUrl, template);
 
         const qStr = (val: unknown) => (Array.isArray(val) ? String(val[0] || '') : typeof val === 'string' ? val : '').trim();
-        const guestName = qStr(req.query.name || req.query.i || req.query.guest || req.query.to);
+        const guestName = decodeKhmerQueryValue(qStr(req.query.name || req.query.i || req.query.guest || req.query.to));
         const eventId = qStr(req.query.id);
         const eventType = qStr(req.query.type || req.query.category);
         const ownerId = qStr(req.query.ownerId);
         const origin = getRequestPublicOrigin(req);
+        const queryIdx = req.originalUrl.indexOf('?');
+        const searchStr = queryIdx >= 0 ? req.originalUrl.slice(queryIdx) : '';
+        const pageLang = detectLanguageFromUrl(searchStr, req.path);
 
         const html = await getInjectedHtmlAsync(template, {
           guestName,
@@ -2175,8 +2206,12 @@ async function startServer() {
           ownerId,
           origin,
           pageUrl: `${origin}${req.originalUrl}`,
+          lang: pageLang,
         });
-        res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).end(html);
+        res.status(200).set({
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Language': pageLang === 'en' ? 'en' : 'km',
+        }).end(html);
       } catch (e: any) {
         vite.ssrFixStacktrace(e);
         next(e);
@@ -2200,11 +2235,14 @@ async function startServer() {
       if (fs.existsSync(indexPath)) {
         let html = fs.readFileSync(indexPath, 'utf-8');
         const qStr = (val: unknown) => (Array.isArray(val) ? String(val[0] || '') : typeof val === 'string' ? val : '').trim();
-        const guestName = qStr(req.query.name || req.query.i || req.query.guest || req.query.to);
+        const guestName = decodeKhmerQueryValue(qStr(req.query.name || req.query.i || req.query.guest || req.query.to));
         const eventId = qStr(req.query.id);
         const eventType = qStr(req.query.type || req.query.category);
         const ownerId = qStr(req.query.ownerId);
         const origin = getRequestPublicOrigin(req);
+        const queryIdx = req.originalUrl.indexOf('?');
+        const searchStr = queryIdx >= 0 ? req.originalUrl.slice(queryIdx) : '';
+        const pageLang = detectLanguageFromUrl(searchStr, req.path);
 
         html = await getInjectedHtmlAsync(html, {
           guestName,
@@ -2213,8 +2251,10 @@ async function startServer() {
           ownerId,
           origin,
           pageUrl: `${origin}${req.originalUrl}`,
+          lang: pageLang,
         });
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Content-Language', pageLang === 'en' ? 'en' : 'km');
         return res.send(html);
       }
       res.sendFile(indexPath);

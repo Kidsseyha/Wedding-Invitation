@@ -124,18 +124,20 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       cleanUrl = cleanUrl.replace('ais-dev-', 'ais-pre-');
     }
 
-    // Ensure Khmer language & share flag are preserved in target URL
+    // Ensure Khmer language & share flag are preserved in target URL with clean UTF-8 %20 encoding
     let targetLang = 'kh';
     try {
       const parsed = new URL(cleanUrl);
-      if (!parsed.searchParams.get('lang')) {
-        parsed.searchParams.set('lang', 'kh');
-      }
-      targetLang = parsed.searchParams.get('lang') || 'kh';
+      const rawLang = (parsed.searchParams.get('lang') || parsed.searchParams.get('l') || '').toLowerCase().trim();
+      targetLang = rawLang === 'en' ? 'en' : 'kh';
+      parsed.searchParams.set('lang', targetLang);
       if (!parsed.searchParams.get('share')) {
         parsed.searchParams.set('share', '1');
       }
-      cleanUrl = parsed.toString();
+      const qIdx = parsed.toString().indexOf('?');
+      cleanUrl = qIdx >= 0
+        ? `${parsed.toString().slice(0, qIdx)}?${parsed.toString().slice(qIdx + 1).replace(/\+/g, '%20')}`
+        : parsed.toString();
     } catch {
       // keep cleanUrl as-is
     }

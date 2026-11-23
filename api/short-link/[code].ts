@@ -3,6 +3,10 @@ import * as path from 'path';
 import { findTemplatePreset } from '../../src/data/eventTemplates.js';
 import { stripScopedEventId } from '../../src/lib/userScope.js';
 import {
+  decodeKhmerQueryValue,
+  normalizeShareUrlEncoding,
+} from '../../src/lib/shareUrl.js';
+import {
   buildInvitationMeta,
   fetchEventFromFirestoreRest,
   fetchShortLinkFromFirestoreRest,
@@ -96,23 +100,24 @@ export default async function handler(req: VercelReq, res: VercelRes) {
   let eventId = '';
   let eventType = '';
   let ownerId = '';
-  let lang = fsLink?.lang || 'kh';
+  let lang = fsLink?.lang === 'en' ? 'en' : 'kh';
   try {
     const parsed = new URL(targetUrl, origin);
     if (!parsed.searchParams.get('share')) parsed.searchParams.set('share', '1');
-    if (!parsed.searchParams.get('lang')) parsed.searchParams.set('lang', lang);
-    guestName = (
+    const rawLang = (parsed.searchParams.get('lang') || parsed.searchParams.get('l') || lang).toLowerCase().trim();
+    lang = rawLang === 'en' ? 'en' : 'kh';
+    parsed.searchParams.set('lang', lang);
+    guestName = decodeKhmerQueryValue(
       parsed.searchParams.get('i') ||
       parsed.searchParams.get('guest') ||
       parsed.searchParams.get('name') ||
       parsed.searchParams.get('to') ||
       ''
-    ).trim();
+    );
     eventId = (parsed.searchParams.get('id') || '').trim();
     eventType = (parsed.searchParams.get('type') || parsed.searchParams.get('category') || '').trim();
     ownerId = (parsed.searchParams.get('ownerId') || '').trim();
-    lang = (parsed.searchParams.get('lang') || 'kh').trim();
-    targetUrl = parsed.toString();
+    targetUrl = normalizeShareUrlEncoding(parsed.toString());
   } catch {
     // keep raw targetUrl
   }

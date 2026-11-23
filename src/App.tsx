@@ -54,7 +54,7 @@ import { WEDDING_EVENT } from './data/weddingData';
 import { sanitizeWeddingEvent, VERIFIED_WEDDING_COVER } from './utils/sanitizeEvent';
 import { findTemplatePreset, getCategoryCoverImage, VERIFIED_CATEGORY_COVERS, EVENT_PRESETS } from './data/eventTemplates';
 import { buildInvitationMeta, normalizeCategoryString, resolveEventCoverImage } from './utils/shareMeta';
-import { PUBLIC_APP_URL, extractGuestNameFromSearch, isSharedInvitationSearch } from './lib/shareUrl';
+import { PUBLIC_APP_URL, detectLanguageFromUrl, extractGuestNameFromSearch, isSharedInvitationSearch } from './lib/shareUrl';
 import { Language, WeddingEvent } from './types';
 import { formatKhmerDate, formatEnDate } from './utils/khmerHelpers';
 import { getEventTimestampMs } from './utils/saveHelpers';
@@ -118,13 +118,16 @@ import { useWebSocket } from './lib/useWebSocket';
 export default function App() {
   const [language, setLanguage] = useState<Language>(() => {
     if (typeof window !== 'undefined') {
-      const p = new URLSearchParams(window.location.search);
-      const l = p.get('lang') || p.get('l');
-      if (l === 'en') return 'en';
-      if (l === 'kh' || l === 'km') return 'kh';
+      return detectLanguageFromUrl(window.location.search, window.location.pathname);
     }
     return 'kh';
   });
+
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = language === 'en' ? 'en' : 'km';
+    }
+  }, [language]);
   const [hasOpenedEnvelope, setHasOpenedEnvelope] = useState(false);
   const [showEnvelopeModal, setShowEnvelopeModal] = useState(true);
   const [showRSVPModal, setShowRSVPModal] = useState(false);
@@ -1456,6 +1459,12 @@ export default function App() {
     try {
       const scopeId = activeUserScope.scopeId;
       const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+      if (typeof window !== 'undefined') {
+        const urlLangParam = params?.get('lang') || params?.get('l');
+        if (urlLangParam || /^\/(?:kh|km|en)(?:\/|$)/i.test(window.location.pathname)) {
+          setLanguage(detectLanguageFromUrl(window.location.search, window.location.pathname));
+        }
+      }
       let urlIdParam = params?.get('id') || null;
       const urlTypeParam = params?.get('type') || params?.get('category') || null;
       const urlOwnerParam = params?.get('ownerId')?.trim() || '';
@@ -1681,8 +1690,8 @@ export default function App() {
       let urlOwnerParam = params.get('ownerId')?.trim() || '';
       let foundGuest = extractGuestNameFromSearch(currentSearch);
 
-      // SPA fallback: if a /s/:code short link lands directly on index.html without server redirect, resolve it cleanly
-      const shortMatch = window.location.pathname.match(/^\/s\/([a-zA-Z0-9_-]+)\/?$/);
+      // SPA fallback: if a /s/:code or /kh/s/:code short link lands directly on index.html without server redirect, resolve it cleanly
+      const shortMatch = window.location.pathname.match(/^(?:\/(?:kh|km|en))?\/s\/([a-zA-Z0-9_-]+)\/?$/i);
       if (shortMatch && (!foundGuest || !urlIdParam)) {
         const shortCode = shortMatch[1];
         let resolvedUrlStr = '';
@@ -1723,10 +1732,7 @@ export default function App() {
             urlTypeParam = params.get('type') || params.get('category');
             urlOwnerParam = params.get('ownerId')?.trim() || '';
             foundGuest = extractGuestNameFromSearch(currentSearch);
-            const resolvedLang = params.get('lang');
-            if (resolvedLang === 'kh' || resolvedLang === 'en') {
-              setLanguage(resolvedLang);
-            }
+            setLanguage(detectLanguageFromUrl(currentSearch, resolvedUrlObj.pathname));
             setIsFromShareLink(true);
           } catch {
             // ignore malformed resolved URL

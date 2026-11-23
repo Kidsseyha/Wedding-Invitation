@@ -1117,6 +1117,7 @@ Your presence will make our day truly special! 🙏✨`;
                         <button
                           type="button"
                           onClick={() => setShareDomain('vercel')}
+                          title={runtimeVercelOrigin}
                           className={`flex-1 sm:flex-none px-2.5 py-1 rounded-lg text-[10px] font-khmer font-bold transition-all border cursor-pointer ${
                             shareDomain === 'vercel'
                               ? isLight
@@ -1127,7 +1128,7 @@ Your presence will make our day truly special! 🙏✨`;
                               : 'bg-black/40 border-white/10 text-neutral-400 hover:text-neutral-200'
                           }`}
                         >
-                          ▲ Vercel (.vercel.app)
+                          ▲ Vercel (KH)
                         </button>
                         <button
                           type="button"
@@ -1147,25 +1148,45 @@ Your presence will make our day truly special! 🙏✨`;
                       </div>
                     </div>
 
-                    {/* Khmer Support Badge & Vercel Helper Trigger */}
-                    <div className={`flex items-center justify-between text-[11px] font-khmer px-2.5 py-1.5 rounded-xl border ${
+                    {/* Khmer Support Badge, Language Link Switch & Vercel Helper Trigger */}
+                    <div className={`flex items-center justify-between flex-wrap gap-1.5 text-[11px] font-khmer px-2.5 py-1.5 rounded-xl border ${
                       isLight ? 'bg-amber-50 border-amber-200/90 text-amber-900' : 'bg-amber-500/10 border-amber-500/25 text-amber-300'
                     }`}>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-sm">🇰🇭</span>
-                        <span className="font-semibold">
-                          {language === 'kh' ? 'គាំទ្រភាសាខ្មែរលើ Vercel ១០០% (&lang=kh)' : '100% Khmer Language on Vercel (&lang=kh)'}
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-sm">{forceKhmerLang ? '🇰🇭' : '🌐'}</span>
+                        <span className="font-semibold truncate">
+                          {forceKhmerLang
+                            ? (language === 'kh' ? 'លីង Vercel ភាសាខ្មែរ ១០០% (&lang=kh)' : 'Vercel Khmer Link Enabled (&lang=kh)')
+                            : (language === 'kh' ? 'លីងភាសាតាមកម្មវិធី (&lang=en)' : 'Match App Language (&lang=en)')}
                         </span>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowVercelGuide(!showVercelGuide)}
-                        className={`flex items-center gap-1 text-[10px] ${isLight ? 'text-amber-800' : 'text-amber-400'} hover:underline cursor-pointer font-bold`}
-                      >
-                        <HelpCircle className="w-3 h-3" />
-                        <span>{language === 'kh' ? (showVercelGuide ? 'លាក់' : 'របៀបដំណើរការ?') : (showVercelGuide ? 'Hide' : 'How it works?')}</span>
-                        {showVercelGuide ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                      </button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setForceKhmerLang((prev) => !prev)}
+                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-all cursor-pointer ${
+                            forceKhmerLang
+                              ? isLight
+                                ? 'bg-emerald-600 text-white border-emerald-600'
+                                : 'bg-emerald-500/25 text-emerald-300 border-emerald-400/50'
+                              : isLight
+                              ? 'bg-white text-neutral-700 border-amber-300'
+                              : 'bg-black/40 text-neutral-300 border-white/15'
+                          }`}
+                          title={language === 'kh' ? 'បើក/បិទ លីងភាសាខ្មែរ (&lang=kh)' : 'Toggle Khmer Language Link (&lang=kh)'}
+                        >
+                          {forceKhmerLang ? '🇰🇭 KH ON' : 'EN'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setShowVercelGuide(!showVercelGuide)}
+                          className={`flex items-center gap-1 text-[10px] ${isLight ? 'text-amber-800' : 'text-amber-400'} hover:underline cursor-pointer font-bold`}
+                        >
+                          <HelpCircle className="w-3 h-3" />
+                          <span>{language === 'kh' ? (showVercelGuide ? 'លាក់' : 'របៀបដំណើរការ?') : (showVercelGuide ? 'Hide' : 'How it works?')}</span>
+                          {showVercelGuide ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                        </button>
+                      </div>
                     </div>
 
                     {/* Expandable Vercel Guide */}

@@ -676,10 +676,21 @@ export function escapeHtml(value: string): string {
 export function injectMetaIntoHtml(
   html: string,
   meta: InvitationMetaResult,
-  replaceStatePath?: string
+  replaceStatePath?: string,
+  options?: { lang?: 'kh' | 'en' }
 ): string {
   const safeTitleText = meta.title.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const isEnglish = options?.lang === 'en';
+  const htmlLang = isEnglish ? 'en' : 'km';
+  const ogLocale = isEnglish ? 'en_US' : 'km_KH';
+  const siteName = isEnglish ? 'Digital Invitation' : 'លិខិតអញ្ជើញឌីជីថល';
   let result = html;
+
+  if (/<html\b[^>]*\blang=["'][^"']*["'][^>]*>/i.test(result)) {
+    result = result.replace(/(<html\b[^>]*\blang=["'])[^"']*(["'][^>]*>)/i, `$1${htmlLang}$2`);
+  } else if (/<html\b[^>]*>/i.test(result)) {
+    result = result.replace(/<html\b([^>]*)>/i, `<html lang="${htmlLang}"$1>`);
+  }
 
   if (replaceStatePath && /<head[^>]*>/i.test(result)) {
     const safePathLiteral = JSON.stringify(replaceStatePath).replace(/</g, '\\u003c');
@@ -706,6 +717,8 @@ export function injectMetaIntoHtml(
   };
 
   upsertMeta('name', 'description', meta.description);
+  upsertMeta('property', 'og:site_name', siteName);
+  upsertMeta('property', 'og:locale', ogLocale);
   upsertMeta('property', 'og:title', meta.title);
   upsertMeta('property', 'og:description', meta.description);
   upsertMeta('property', 'og:type', 'website');

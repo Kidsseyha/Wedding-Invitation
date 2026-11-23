@@ -5,6 +5,8 @@ import {
   isSharedInvitationSearch,
   generateDeterministicShortCode,
   extractGuestNameFromSearch,
+  decodeKhmerQueryValue,
+  detectLanguageFromUrl,
   shortenUrl,
   getDefaultShareDomain,
   VERCEL_APP_URL,
@@ -135,20 +137,39 @@ test('shortenUrl preserves inferred public origin and sends distinct guest URLs 
   }
 });
 
-test('getDefaultShareDomain defaults to preview outside .vercel.app and vercel on .vercel.app', () => {
+test('getDefaultShareDomain defaults to vercel so shared links use Vercel with KH support', () => {
   const originalWindow = (globalThis as any).window;
   try {
     (globalThis as any).window = undefined;
-    assert.equal(getDefaultShareDomain(), 'preview');
+    assert.equal(getDefaultShareDomain(), 'vercel');
 
     (globalThis as any).window = { location: { origin: PUBLIC_APP_URL } };
-    assert.equal(getDefaultShareDomain(), 'preview');
+    assert.equal(getDefaultShareDomain(), 'vercel');
 
     (globalThis as any).window = { location: { origin: VERCEL_APP_URL } };
     assert.equal(getDefaultShareDomain(), 'vercel');
   } finally {
     (globalThis as any).window = originalWindow;
   }
+});
+
+test('Vercel Khmer share URLs use %20 encoding (never +) and detectLanguageFromUrl resolves KH/EN cleanly', () => {
+  const khUrl = getPublicShareUrl('លោក សុខ រតនៈវិសាល និងភរិយា', 'u_owner__wedding', 'wedding', {
+    customOrigin: VERCEL_APP_URL,
+    lang: 'km',
+  });
+  assert.equal(khUrl.includes('+'), false, 'Khmer guest URL should use %20 instead of +');
+  const parsed = new URL(khUrl);
+  assert.equal(parsed.origin, VERCEL_APP_URL);
+  assert.equal(parsed.searchParams.get('lang'), 'kh');
+  assert.equal(extractGuestNameFromSearch(parsed.search), 'លោក សុខ រតនៈវិសាល និងភរិយា');
+  assert.equal(decodeKhmerQueryValue('លោក+សុខ%20រតនៈ'), 'លោក សុខ រតនៈ');
+
+  assert.equal(detectLanguageFromUrl('?lang=kh', '/'), 'kh');
+  assert.equal(detectLanguageFromUrl('?lang=km', '/'), 'kh');
+  assert.equal(detectLanguageFromUrl('', '/kh'), 'kh');
+  assert.equal(detectLanguageFromUrl('', '/'), 'kh');
+  assert.equal(detectLanguageFromUrl('?lang=en', '/'), 'en');
 });
 
 test('distinct templates and distinct guest names produce unique short codes preserving both guest and template', () => {

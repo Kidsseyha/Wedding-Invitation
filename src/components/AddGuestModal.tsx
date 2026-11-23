@@ -25,7 +25,7 @@ import { Language } from '../types';
 import ThemeToggle, { ThemeMode } from './ThemeToggle';
 import LanguageToggle from './LanguageToggle';
 import * as XLSX from 'xlsx';
-import { getPublicShareUrl, shortenUrl } from '../lib/shareUrl';
+import { getPublicShareUrl, getPreferredVercelOrigin, shortenUrl } from '../lib/shareUrl';
 import {
   getSavedGuests,
   DEFAULT_GUEST_PRESETS,
@@ -653,8 +653,10 @@ export default function AddGuestModal({
     }
   };
 
-  const targetShareLang = language === 'en' ? 'en' : 'kh';
+  const vercelOrigin = getPreferredVercelOrigin();
+  const targetShareLang = 'kh';
   const guestLink = getPublicShareUrl(fullName, eventId, eventType, {
+    customOrigin: vercelOrigin,
     ownerId: effectiveOwnerId,
     lang: targetShareLang,
   });
@@ -1220,7 +1222,7 @@ export default function AddGuestModal({
                                 {language === 'kh' ? 'ជ្រើស' : 'Use'}
                               </button>
                               <a
-                                href={getPublicShareUrl(g.name, eventId, eventType, { ownerId: effectiveOwnerId, lang: targetShareLang })}
+                                href={getPublicShareUrl(g.name, eventId, eventType, { customOrigin: vercelOrigin, ownerId: effectiveOwnerId, lang: targetShareLang })}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className={`p-1 rounded transition-all ${
@@ -1235,8 +1237,8 @@ export default function AddGuestModal({
                               <button
                                 type="button"
                                 onClick={async () => {
-                                  const link = getPublicShareUrl(g.name, eventId, eventType, { ownerId: effectiveOwnerId, lang: targetShareLang });
-                                  const short = await shortenUrl(link);
+                                  const link = getPublicShareUrl(g.name, eventId, eventType, { customOrigin: vercelOrigin, ownerId: effectiveOwnerId, lang: targetShareLang });
+                                  const short = await shortenUrl(link, vercelOrigin);
                                   await copyTextSafely(short);
                                   showFeedback(language === 'kh' ? `បានចម្លងតំណភ្ជាប់ខ្លីសម្រាប់ "${g.name}"` : `Copied short link for "${g.name}"`);
                                 }}
