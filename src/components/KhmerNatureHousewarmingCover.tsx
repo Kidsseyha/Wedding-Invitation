@@ -166,7 +166,7 @@ export default function KhmerNatureHousewarmingCover({
   return (
     <div
       data-housewarming-theme={theme}
-      className={`relative isolate w-full h-full min-h-[600px] sm:min-h-[680px] md:min-h-[730px] flex flex-col justify-between items-center text-center overflow-hidden rounded-[28px] select-none px-4 sm:px-7 py-5 sm:py-6 ${
+      className={`relative isolate w-full h-full min-h-[540px] sm:min-h-[680px] md:min-h-[730px] flex flex-col justify-between items-center text-center overflow-hidden rounded-[22px] sm:rounded-[28px] select-none px-3 sm:px-7 py-4 sm:py-6 ${
         isLight ? 'bg-[#f8f5eb] text-[#103b2a]' : 'bg-[#071e16] text-[#fef8e8]'
       }`}
     >
@@ -290,7 +290,7 @@ export default function KhmerNatureHousewarmingCover({
           )}
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className={`${isAdmin ? 'flex' : 'hidden sm:flex'} items-center gap-1.5`}>
           <button
             type="button"
             onClick={onRestartMusic}
@@ -359,7 +359,7 @@ export default function KhmerNatureHousewarmingCover({
         </svg>
 
         <h1
-          className={`text-xl sm:text-2xl md:text-[26px] font-bold leading-[1.55] px-2 text-balance ${
+          className={`text-lg sm:text-2xl md:text-[26px] font-bold leading-[1.55] px-2 text-balance ${
             language === 'kh' ? 'tracking-normal' : 'tracking-wide'
           }`}
           style={{
@@ -399,7 +399,7 @@ export default function KhmerNatureHousewarmingCover({
         className="relative z-20 flex flex-col items-center my-2"
       >
         <div
-          className="relative w-32 h-32 sm:w-36 sm:h-36 rounded-full p-1 shadow-[0_12px_30px_rgba(0,0,0,0.22)]"
+          className="relative w-28 h-28 sm:w-36 sm:h-36 rounded-full p-1 shadow-[0_12px_30px_rgba(0,0,0,0.22)]"
           style={{
             background: isLight
               ? 'linear-gradient(135deg, #d4af37, #fef3c7, #8a5a10)'
@@ -693,7 +693,7 @@ export default function KhmerNatureHousewarmingCover({
           disabled={isOpening}
           whileHover={prefersReducedMotion ? undefined : { scale: 1.03, y: -1 }}
           whileTap={prefersReducedMotion ? undefined : { scale: 0.97 }}
-          className="relative group px-7 py-3 rounded-full bg-gradient-to-r from-[#0e4531] via-[#156045] to-[#0c3c2b] hover:from-[#12563e] hover:to-[#0f4a35] text-amber-100 border border-[#e8bf54]/80 shadow-[0_10px_24px_rgba(8,40,28,0.4)] flex items-center justify-center gap-2.5 whitespace-nowrap shrink-0 overflow-hidden cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2"
+          className="relative group min-h-[44px] px-6 sm:px-7 py-3 rounded-full bg-gradient-to-r from-[#0e4531] via-[#156045] to-[#0c3c2b] hover:from-[#12563e] hover:to-[#0f4a35] text-amber-100 border border-[#e8bf54]/80 shadow-[0_10px_24px_rgba(8,40,28,0.4)] flex items-center justify-center gap-2.5 whitespace-nowrap shrink-0 overflow-hidden cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2"
         >
           <span
             aria-hidden="true"

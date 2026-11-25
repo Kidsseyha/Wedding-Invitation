@@ -110,14 +110,14 @@ export default function AudioPlayer({ audioUrl, hasOpenedEnvelope, language, the
       />
 
       {/* Floating Audio Control Pill */}
-      <div className="fixed top-4 right-4 z-50 flex flex-col items-end gap-2">
+      <div className="fixed top-[max(env(safe-area-inset-top),0.55rem)] right-2.5 sm:top-4 sm:right-4 z-50 flex flex-col items-end gap-1.5 sm:gap-2">
         <motion.button
           id="toggle-music-btn"
           onClick={togglePlay}
           onTap={togglePlay}
           whileHover={{ scale: 1.08 }}
           whileTap={{ scale: 0.94 }}
-          className={`group flex items-center gap-2.5 px-3.5 py-2 rounded-full border shadow-2xl backdrop-blur-md transition-all duration-300 ${
+          className={`group flex items-center gap-2 sm:gap-2.5 px-3 py-1.5 sm:px-3.5 sm:py-2 min-h-[38px] sm:min-h-[40px] rounded-full border shadow-2xl backdrop-blur-md transition-all duration-300 ${
             isPlaying
               ? 'bg-amber-950/80 border-amber-400/60 text-amber-200 ring-2 ring-amber-400/40'
               : theme === 'light'
@@ -146,7 +146,7 @@ export default function AudioPlayer({ audioUrl, hasOpenedEnvelope, language, the
             )}
           </div>
 
-          <span className="text-[14px] font-khmer font-medium tracking-wide">
+          <span className="text-xs sm:text-[14px] font-khmer font-medium tracking-wide whitespace-nowrap">
             {isPlaying ? (
               <span className="flex items-center gap-1">
                 <span>{language === 'kh' ? 'កំពុងចាក់' : 'Playing'}</span>

@@ -86,7 +86,7 @@ export default function GiftKHQRSection({
   };
 
   return (
-    <section id="khqr-section" className="py-8 px-4 text-center">
+    <section id="khqr-section" className="py-6 sm:py-8 px-3 sm:px-4 text-center">
       <motion.div
         initial={{ opacity: 0, y: 25 }}
         whileInView={{ opacity: 1, y: 0 }}
@@ -155,7 +155,7 @@ export default function GiftKHQRSection({
 
         {/* QR Code Presentation Card */}
         <div
-          className={`p-6 sm:p-8 rounded-3xl border-2 max-w-sm sm:max-w-md mx-auto transition-all ${
+          className={`p-4 sm:p-8 rounded-2xl sm:rounded-3xl border-2 max-w-sm sm:max-w-md mx-auto transition-all ${
             isHousewarming
               ? theme === 'light'
                 ? 'bg-gradient-to-b from-[#f3f7ef] via-white to-[#edf4e8] border-emerald-700/30 shadow-[0_8px_30px_rgba(16,59,42,0.1)]'
@@ -177,7 +177,7 @@ export default function GiftKHQRSection({
           </div>
 
           {/* QR Image Container (Larger width & height) */}
-          <div className={`p-4 sm:p-5 bg-white rounded-2xl sm:rounded-3xl shadow-2xl mx-auto mb-5 w-64 h-64 sm:w-72 sm:h-72 flex items-center justify-center border-2 ${theme === 'light' ? 'border-amber-300' : 'border-amber-300/70'} relative overflow-hidden`}>
+          <div className={`p-3 sm:p-5 bg-white rounded-2xl sm:rounded-3xl shadow-2xl mx-auto mb-5 w-52 h-52 sm:w-72 sm:h-72 flex items-center justify-center border-2 ${theme === 'light' ? 'border-amber-300' : 'border-amber-300/70'} relative overflow-hidden`}>
             <img
               src={currentQr}
               alt={`KHQR ${currency}`}

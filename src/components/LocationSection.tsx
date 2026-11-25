@@ -42,7 +42,7 @@ export default function LocationSection({
   };
 
   return (
-    <section id="location-section" className="py-8 px-4 text-center">
+    <section id="location-section" className="py-6 sm:py-8 px-3 sm:px-4 text-center">
       <motion.div
         initial={{ opacity: 0, y: 25 }}
         whileInView={{ opacity: 1, y: 0 }}
@@ -86,8 +86,8 @@ export default function LocationSection({
 
         <p
           onClick={onEditLocation}
-          style={{ color: textColor, fontSize: '20px' }}
-          className={`text-[20px] font-khmer leading-relaxed px-3 py-1 mb-6 inline-flex items-center justify-center gap-2 rounded-xl transition-all ${
+          style={{ color: textColor }}
+          className={`text-base sm:text-xl font-khmer leading-relaxed px-3 py-1 mb-5 sm:mb-6 inline-flex items-center justify-center gap-2 rounded-xl transition-all ${
             onEditLocation
               ? 'cursor-pointer hover:bg-amber-400/10 active:scale-95 group'
               : ''
@@ -115,7 +115,7 @@ export default function LocationSection({
           <img
             src={mapImageUrl}
             alt="Venue Map"
-            className="w-full h-56 object-cover object-center group-hover:scale-105 transition-transform duration-500"
+            className="w-full h-48 sm:h-56 object-cover object-center group-hover:scale-105 transition-transform duration-500"
           />
 
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex items-end p-4">
@@ -139,7 +139,7 @@ export default function LocationSection({
             rel="noopener noreferrer"
             whileHover={{ scale: 1.04, y: -1 }}
             whileTap={{ scale: 0.96 }}
-            className="group relative w-full sm:flex-1 py-3 px-5 rounded-2xl text-sm sm:text-base text-amber-950 font-bold bg-gradient-to-r from-[#ffeaa7] via-[#f5b80f] to-[#e6a100] border-2 border-amber-200/90 shadow-[0_6px_20px_rgba(245,184,15,0.4)] flex items-center justify-center gap-2.5 overflow-hidden transition-all duration-300 select-none cursor-pointer"
+            className="group relative w-full sm:flex-1 min-h-[44px] py-3 px-5 rounded-2xl text-sm sm:text-base text-amber-950 font-bold bg-gradient-to-r from-[#ffeaa7] via-[#f5b80f] to-[#e6a100] border-2 border-amber-200/90 shadow-[0_6px_20px_rgba(245,184,15,0.4)] flex items-center justify-center gap-2.5 overflow-hidden transition-all duration-300 select-none cursor-pointer"
             style={{ fontFamily: "'Bokor', 'Khmer OS Bokor', cursive" }}
           >
             {/* Shimmer sweep */}
@@ -162,7 +162,7 @@ export default function LocationSection({
             onClick={handleCopyAddress}
             whileHover={{ scale: 1.04, y: -1 }}
             whileTap={{ scale: 0.96 }}
-            className={`group relative w-full sm:w-auto py-3 px-5 rounded-2xl text-xs sm:text-sm font-bold font-khmer border-2 flex items-center justify-center gap-2 transition-all duration-300 shadow-md cursor-pointer select-none overflow-hidden ${
+            className={`group relative w-full sm:w-auto min-h-[44px] py-3 px-5 rounded-2xl text-xs sm:text-sm font-bold font-khmer border-2 flex items-center justify-center gap-2 transition-all duration-300 shadow-md cursor-pointer select-none overflow-hidden ${
               copied
                 ? 'bg-gradient-to-r from-emerald-900 via-teal-900 to-emerald-950 text-emerald-200 border-emerald-400 shadow-[0_4px_16px_rgba(16,185,129,0.35)]'
                 : theme === 'light'

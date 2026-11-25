@@ -240,7 +240,7 @@ export default function KhmerStoryAnniversaryCover({
     <div
       data-testid="khmer-story-anniversary-cover"
       data-anniversary-theme={theme}
-      className={`relative isolate w-full h-full min-h-[600px] sm:min-h-[680px] md:min-h-[740px] flex flex-col justify-between items-center text-center overflow-hidden rounded-[28px] select-none px-4 sm:px-7 py-5 sm:py-6 ${
+      className={`relative isolate w-full h-full min-h-[540px] sm:min-h-[680px] md:min-h-[740px] flex flex-col justify-between items-center text-center overflow-hidden rounded-[22px] sm:rounded-[28px] select-none px-3 sm:px-7 py-4 sm:py-6 ${
         isLight ? 'bg-[#fcf7eb] text-[#3d241c]' : 'bg-[#1a070d] text-[#fdf4e3]'
       }`}
     >
@@ -384,7 +384,7 @@ export default function KhmerStoryAnniversaryCover({
           )}
         </div>
 
-        <div className="flex items-center gap-1.5">
+        <div className={`${isAdmin ? 'flex' : 'hidden sm:flex'} items-center gap-1.5`}>
           <button
             type="button"
             onClick={onRestartMusic}
@@ -466,7 +466,7 @@ export default function KhmerStoryAnniversaryCover({
         </p>
 
         <h1
-          className={`mt-1 text-xl sm:text-2xl md:text-[26px] font-bold leading-[1.55] px-2 text-balance ${
+          className={`mt-1 text-lg sm:text-2xl md:text-[26px] font-bold leading-[1.55] px-2 text-balance ${
             language === 'kh' ? 'tracking-normal' : 'tracking-wide'
           }`}
           style={{
@@ -503,7 +503,7 @@ export default function KhmerStoryAnniversaryCover({
         className="relative z-20 flex flex-col items-center my-1.5"
       >
         <div
-          className="relative w-28 h-28 sm:w-32 sm:h-32 rounded-full p-1 shadow-[0_10px_28px_rgba(0,0,0,0.28)]"
+          className="relative w-24 h-24 sm:w-32 sm:h-32 rounded-full p-1 shadow-[0_10px_28px_rgba(0,0,0,0.28)]"
           style={{
             background: isLight
               ? 'linear-gradient(135deg, #d4af37, #fef3c7, #946212)'
@@ -849,7 +849,7 @@ export default function KhmerStoryAnniversaryCover({
           disabled={isOpening}
           whileHover={prefersReducedMotion ? undefined : { scale: 1.03, y: -1 }}
           whileTap={prefersReducedMotion ? undefined : { scale: 0.97 }}
-          className="relative group px-7 py-3 rounded-full bg-gradient-to-r from-[#7c1428] via-[#991b33] to-[#681021] hover:from-[#8d172e] hover:to-[#7a1326] text-amber-100 border border-[#e8bf54]/85 shadow-[0_10px_24px_rgba(90,12,28,0.45)] flex items-center justify-center gap-2.5 whitespace-nowrap shrink-0 overflow-hidden cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2"
+          className="relative group min-h-[44px] px-6 sm:px-7 py-3 rounded-full bg-gradient-to-r from-[#7c1428] via-[#991b33] to-[#681021] hover:from-[#8d172e] hover:to-[#7a1326] text-amber-100 border border-[#e8bf54]/85 shadow-[0_10px_24px_rgba(90,12,28,0.45)] flex items-center justify-center gap-2.5 whitespace-nowrap shrink-0 overflow-hidden cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2"
         >
           <span
             aria-hidden="true"

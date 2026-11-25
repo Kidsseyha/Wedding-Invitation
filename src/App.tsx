@@ -2582,7 +2582,7 @@ export default function App() {
         backgroundSize: 'cover',
         backgroundPosition: 'center',
       }}
-      className={`min-h-screen w-full ${rootTextColor} flex justify-center selection:bg-amber-400 selection:text-amber-950 font-khmer relative transition-colors duration-500 ease-in-out ${
+      className={`min-h-[100dvh] w-full ${rootTextColor} flex justify-center selection:bg-amber-400 selection:text-amber-950 font-khmer relative transition-colors duration-500 ease-in-out ${
         isThemeTransitioning ? 'theme-crossfade-active' : ''
       }`}
     >
@@ -2718,7 +2718,7 @@ export default function App() {
 
       {/* Floating Top Left Controls: Language & Theme (hidden for shared invitation viewers) */}
       {!isSharedViewer && (
-        <div className="fixed top-3 left-2.5 sm:top-4 sm:left-4 z-50 flex flex-wrap items-center gap-1.5 sm:gap-2">
+        <div className="fixed top-[max(env(safe-area-inset-top),0.55rem)] left-2.5 sm:top-4 sm:left-4 z-50 flex flex-wrap items-center gap-1.5 sm:gap-2">
           <LanguageToggle currentLanguage={language} onToggle={toggleLanguage} theme={theme} />
           <ThemeToggle currentTheme={theme} onChangeTheme={handleThemeChange} language={language} />
         </div>
@@ -2733,7 +2733,7 @@ export default function App() {
       />
 
       <div
-        className="fixed right-2 sm:right-4 z-40 flex max-w-[calc(100vw-1rem)] top-[52px] sm:top-16 flex-row flex-wrap justify-end items-center gap-1.5 sm:flex-col sm:items-end sm:gap-2"
+        className="fixed right-2.5 sm:right-4 z-40 flex max-w-[calc(100vw-1.25rem)] top-[max(calc(env(safe-area-inset-top)+48px),54px)] sm:top-16 flex-row flex-wrap justify-end items-center gap-1.5 sm:flex-col sm:items-end sm:gap-2"
       >
         {/* Admin and Auth Controls (hidden for shared link viewers so they only see Reload & Music) */}
         {!isViewer ? (
@@ -2890,7 +2890,7 @@ export default function App() {
           onClick={handleRefreshFromDatabase}
           whileHover={{ scale: 1.05, y: -2 }}
           whileTap={{ scale: 0.94 }}
-          className="group relative flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full border border-amber-500/60 bg-gradient-to-br from-black/95 via-neutral-900 to-black text-amber-200 shadow-[0_4px_18px_rgba(0,0,0,0.5)] backdrop-blur-md hover:border-amber-400 hover:text-amber-100 hover:shadow-[0_4px_22px_rgba(245,158,11,0.4)] transition-all ring-1 ring-amber-500/30 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-black cursor-pointer disabled:opacity-70"
+          className="group relative flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 min-h-[38px] sm:min-h-[40px] rounded-full border border-amber-500/60 bg-gradient-to-br from-black/95 via-neutral-900 to-black text-amber-200 shadow-[0_4px_18px_rgba(0,0,0,0.5)] backdrop-blur-md hover:border-amber-400 hover:text-amber-100 hover:shadow-[0_4px_22px_rgba(245,158,11,0.4)] transition-all ring-1 ring-amber-500/30 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-black cursor-pointer disabled:opacity-70"
           title={language === 'kh' ? 'ត្រួតពិនិត្យ និងទាញយកទិន្នន័យពី Database / Check Database' : 'Check & Reload from Database'}
         >
           <div className="p-1 rounded-full bg-amber-500/20 group-hover:bg-amber-400/30 transition-colors">
@@ -3034,7 +3034,7 @@ export default function App() {
           backgroundPosition: 'center top',
           backgroundRepeat: 'no-repeat',
         }}
-        className={`w-full max-w-xl sm:max-w-2xl md:max-w-3xl lg:max-w-4xl ${mainCardBgClass} shadow-2xl relative border-x overflow-hidden pb-24 transition-colors duration-500 ease-in-out`}
+        className={`w-full max-w-xl sm:max-w-2xl md:max-w-3xl lg:max-w-4xl ${mainCardBgClass} shadow-2xl relative border-0 sm:border-x overflow-hidden pb-20 sm:pb-24 transition-colors duration-500 ease-in-out`}
       >
         {/* Full-height subtle darkening & texture overlay for crisp legibility */}
         {!isHousewarming && !isEngagement && !isAnniversary && !config.hide_main_background && (config.details_background || config.main_background) && (
@@ -3092,7 +3092,7 @@ export default function App() {
           )}
 
           {/* Main Hero Portrait/Villa Emblem with Artistic Frame & Shape */}
-          <div className="relative pt-24 sm:pt-10 pb-4 px-4 sm:px-8 flex flex-col items-center">
+          <div className="relative pt-24 sm:pt-10 pb-3 sm:pb-4 px-3.5 sm:px-8 flex flex-col items-center">
             {(() => {
               const portraitShape = config.portrait_shape || 'circle';
               return (
@@ -3100,23 +3100,23 @@ export default function App() {
                   initial={{ scale: 0.65, opacity: 0, y: -30, rotate: -3 }}
                   animate={{ scale: 1, opacity: 1, y: 0, rotate: 0 }}
                   transition={{ type: 'spring', damping: 18, stiffness: 90, delay: 0.1 }}
-                  className={`relative mb-5 group portrait-hover-floating ${
+                  className={`relative mb-4 sm:mb-5 group portrait-hover-floating ${
                     portraitShape === 'heart'
-                      ? 'w-[250px] sm:w-[310px] md:w-[360px] aspect-square filter drop-shadow-[0_12px_35px_rgba(245,158,11,0.45)]'
+                      ? 'w-[220px] sm:w-[310px] md:w-[360px] aspect-square filter drop-shadow-[0_12px_35px_rgba(245,158,11,0.45)]'
                       : `overflow-hidden ${
                           portraitShape === 'circle'
-                            ? 'w-[240px] h-[240px] sm:w-[300px] sm:h-[300px] md:w-[350px] md:h-[350px] aspect-square rounded-full border-[6px] border-amber-400 shadow-[0_14px_50px_rgba(245,158,11,0.4)]'
+                            ? 'w-[220px] h-[220px] sm:w-[300px] sm:h-[300px] md:w-[350px] md:h-[350px] aspect-square rounded-full border-[5px] sm:border-[6px] border-amber-400 shadow-[0_14px_50px_rgba(245,158,11,0.4)]'
                             : portraitShape === 'arch'
-                            ? 'w-[270px] sm:w-[330px] md:w-[380px] aspect-[3/4] rounded-t-full rounded-b-3xl border-[6px] border-amber-400 shadow-[0_14px_45px_rgba(245,158,11,0.35)]'
+                            ? 'w-[240px] sm:w-[330px] md:w-[380px] aspect-[3/4] rounded-t-full rounded-b-3xl border-[5px] sm:border-[6px] border-amber-400 shadow-[0_14px_45px_rgba(245,158,11,0.35)]'
                             : portraitShape === 'oval'
-                            ? 'w-[240px] sm:w-[300px] md:w-[350px] aspect-[3/4] rounded-[50%] border-[6px] border-amber-400 shadow-[0_14px_45px_rgba(245,158,11,0.4)]'
+                            ? 'w-[220px] sm:w-[300px] md:w-[350px] aspect-[3/4] rounded-[50%] border-[5px] sm:border-[6px] border-amber-400 shadow-[0_14px_45px_rgba(245,158,11,0.4)]'
                             : portraitShape === 'capsule'
-                            ? 'w-[230px] sm:w-[280px] md:w-[330px] aspect-[3/4] rounded-full border-[6px] border-amber-400 shadow-[0_14px_45px_rgba(245,158,11,0.4)]'
+                            ? 'w-[215px] sm:w-[280px] md:w-[330px] aspect-[3/4] rounded-full border-[5px] sm:border-[6px] border-amber-400 shadow-[0_14px_45px_rgba(245,158,11,0.4)]'
                             : portraitShape === 'leaf'
-                            ? 'w-[260px] sm:w-[320px] md:w-[370px] aspect-[3/4] rounded-tl-[90px] rounded-br-[90px] rounded-tr-3xl rounded-bl-3xl sm:rounded-tl-[120px] sm:rounded-br-[120px] border-[6px] border-amber-400 shadow-[0_14px_45px_rgba(245,158,11,0.35)]'
+                            ? 'w-[235px] sm:w-[320px] md:w-[370px] aspect-[3/4] rounded-tl-[85px] rounded-br-[85px] rounded-tr-3xl rounded-bl-3xl sm:rounded-tl-[120px] sm:rounded-br-[120px] border-[5px] sm:border-[6px] border-amber-400 shadow-[0_14px_45px_rgba(245,158,11,0.35)]'
                             : portraitShape === 'square'
-                            ? 'w-[260px] sm:w-[320px] md:w-[370px] aspect-square rounded-3xl border-[6px] border-amber-400 shadow-[0_14px_50px_rgba(245,158,11,0.4)] ring-4 ring-amber-300/30'
-                            : 'w-[300px] sm:w-[360px] md:w-[420px] aspect-[4/3] rounded-3xl border-[6px] border-amber-400 shadow-[0_14px_45px_rgba(245,158,11,0.35)]'
+                            ? 'w-[235px] sm:w-[320px] md:w-[370px] aspect-square rounded-3xl border-[5px] sm:border-[6px] border-amber-400 shadow-[0_14px_50px_rgba(245,158,11,0.4)] ring-4 ring-amber-300/30'
+                            : 'w-[270px] sm:w-[360px] md:w-[420px] aspect-[4/3] rounded-3xl border-[5px] sm:border-[6px] border-amber-400 shadow-[0_14px_45px_rgba(245,158,11,0.35)]'
                         }`
                   } ${!isViewer ? 'cursor-pointer' : ''}`}
                   onClick={() => {
@@ -3212,7 +3212,7 @@ export default function App() {
               </span>
               <h1
                 style={{ color: isAnniversary ? sectionPrimaryColor : isHousewarming ? hwGoldColor : (config.primaryColor || '#f5b80f') }}
-                className="text-2xl sm:text-3xl md:text-4xl font-moul py-1.5 leading-normal drop-shadow-[0_2px_6px_rgba(0,0,0,0.2)]"
+                className="text-xl sm:text-3xl md:text-4xl font-moul py-1 sm:py-1.5 leading-normal drop-shadow-[0_2px_6px_rgba(0,0,0,0.2)] px-1"
               >
                 {textContent.main_title}
               </h1>
@@ -3404,7 +3404,7 @@ export default function App() {
             >
               <div
                 id="header-date-chip"
-                className={`inline-flex items-center gap-2.5 px-5 py-2.5 rounded-full border backdrop-blur-md transition-all duration-300 hover:scale-[1.02] group ${
+                className={`inline-flex items-center gap-2 sm:gap-2.5 px-4 py-2 sm:px-5 sm:py-2.5 max-w-full rounded-full border backdrop-blur-md transition-all duration-300 hover:scale-[1.02] group ${
                   isAnniversary
                     ? theme === 'light'
                       ? 'bg-[#fffdf8]/95 border-[#946212]/35 shadow-[0_6px_22px_rgba(115,19,37,0.1)]'
@@ -3500,13 +3500,13 @@ export default function App() {
         </header>
 
         {/* SECTION: FORMAL INVITATION MESSAGE */}
-        <section id="invitation-text-section" className="relative z-10 py-12 px-6 sm:px-10 md:px-12 text-center">
+        <section id="invitation-text-section" className="relative z-10 py-8 sm:py-12 px-3 sm:px-10 md:px-12 text-center">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }}
             transition={{ duration: 0.6 }}
-            className={`p-8 sm:p-12 rounded-3xl border-2 backdrop-blur-md relative overflow-hidden ${
+            className={`p-5 sm:p-10 md:p-12 rounded-2xl sm:rounded-3xl border-2 backdrop-blur-md relative overflow-hidden ${
               isAnniversary
                 ? theme === 'light'
                   ? 'bg-gradient-to-b from-[#fffdf8] via-[#fcf7eb] to-[#f8eedb] border-[#946212]/30 shadow-[0_15px_40px_rgba(115,19,37,0.09)]'
@@ -3672,7 +3672,7 @@ export default function App() {
         </div>
 
         {/* SECTION: GRATITUDE & SINCERE APOLOGY */}
-        <section id="gratitude-section" className="relative z-10 py-8 px-6 text-center">
+        <section id="gratitude-section" className="relative z-10 py-6 sm:py-8 px-3 sm:px-6 text-center">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}

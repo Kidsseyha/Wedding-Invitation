@@ -3745,7 +3745,7 @@ export function ScallopedParchmentGuestPlaque({
   return (
     <div
       onClick={onClick}
-      className={`relative w-full max-w-[360px] sm:max-w-[400px] h-[58px] sm:h-[64px] flex items-center justify-center filter drop-shadow-[0_4px_12px_rgba(112,26,43,0.18)] ${
+      className={`relative w-full max-w-full sm:max-w-[400px] h-[56px] sm:h-[64px] flex items-center justify-center filter drop-shadow-[0_4px_12px_rgba(112,26,43,0.18)] ${
         isAdmin ? 'cursor-pointer hover:scale-[1.02] transition-transform' : ''
       }`}
     >
@@ -3803,11 +3803,11 @@ export function ScallopedParchmentGuestPlaque({
         style={{
           fontFamily: "'Moul', 'Khmer OS Muol Light', serif",
           color: '#701a2b',
-          fontSize: '17px',
+          fontSize: 'clamp(0.95rem, 4.2vw, 1.0625rem)',
           textShadow: '0 1px 1px rgba(255,255,255,0.9)',
-          lineHeight: '35px',
+          lineHeight: '1.9',
         }}
-        className="relative z-10 px-8 text-center truncate max-w-[320px] sm:max-w-[360px] font-bold tracking-wide"
+        className="relative z-10 px-6 sm:px-8 text-center truncate max-w-[calc(100%-2.5rem)] sm:max-w-[360px] font-bold tracking-wide"
       >
         {guestName}
       </span>
@@ -3932,7 +3932,7 @@ export function KhmerRoyalModernWeddingCover({
 
   return (
     <div
-      className="relative w-full h-full min-h-[640px] sm:min-h-[700px] flex flex-col justify-between items-center text-center px-5 sm:px-8 pt-14 sm:pt-16 pb-7 sm:pb-9 overflow-hidden select-none"
+      className="relative w-full h-full min-h-[540px] sm:min-h-[700px] flex flex-col justify-between items-center text-center px-3.5 sm:px-8 pt-12 sm:pt-16 pb-6 sm:pb-9 overflow-hidden select-none"
       style={{
         background: 'linear-gradient(168deg, #fffafb 0%, #fff1f5 52%, #ffe4ec 100%)',
         color: '#701a2b',

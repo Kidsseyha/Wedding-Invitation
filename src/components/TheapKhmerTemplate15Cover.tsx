@@ -120,7 +120,7 @@ export default function TheapKhmerTemplate15Cover({
 
   return (
     <div
-      className="relative isolate w-full h-full min-h-[620px] sm:min-h-[680px] md:min-h-[720px] flex flex-col justify-between items-center text-center overflow-hidden select-none px-5 sm:px-8 pt-24 sm:pt-28 pb-9 sm:pb-11"
+      className="relative isolate w-full h-full min-h-[540px] sm:min-h-[680px] md:min-h-[720px] flex flex-col justify-between items-center text-center overflow-hidden select-none px-3.5 sm:px-8 pt-16 sm:pt-28 pb-6 sm:pb-11"
       style={{
         backgroundColor: '#fcfaf5',
         color: '#8f6c2e',
@@ -155,8 +155,8 @@ export default function TheapKhmerTemplate15Cover({
           className="font-bold tracking-wide px-2"
           style={{
             fontFamily: 'Moulpali, serif',
-            lineHeight: '62.2px',
-            fontSize: '32px',
+            lineHeight: '1.75',
+            fontSize: 'clamp(1.375rem, 6vw, 2rem)',
             color: '#9c732d',
             textShadow: '0 1px 2px rgba(255,255,255,0.95)',
           }}
@@ -176,7 +176,7 @@ export default function TheapKhmerTemplate15Cover({
       >
         <div
           aria-label={singlePerson ? `${groom} monogram (${groomInit})` : `${groom} & ${bride} monogram (${groomInit} & ${brideInit})`}
-          className="relative w-36 h-36 sm:w-44 sm:h-44 flex items-center justify-center"
+          className="relative w-32 h-32 sm:w-44 sm:h-44 flex items-center justify-center"
         >
           <img
             src="/assets/template15/monogram-frame.webp"

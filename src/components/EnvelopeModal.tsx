@@ -530,9 +530,15 @@ export default function EnvelopeModal({
           <div className={`fixed inset-0 z-0 ${isBirthday ? 'opacity-30' : theme === 'light' ? 'opacity-10' : 'opacity-20'} pointer-events-none bg-[radial-gradient(#fde047_1px,transparent_1px)] [background-size:28px_28px]`} />
 
           <div
-            className={`min-h-screen w-full flex flex-col items-center justify-center relative z-10 ${
+            className={`min-h-[100dvh] w-full flex flex-col items-center justify-start sm:justify-center relative z-10 ${
               isHousewarming || isAnniversary
-                ? `px-3 sm:px-6 md:px-8 ${isAnniversary && isAdmin ? 'pt-[182px]' : 'pt-[92px]'} pb-5 sm:py-8 ${
+                ? `px-2.5 sm:px-6 md:px-8 ${
+                    isAnniversary && isAdmin
+                      ? 'pt-[182px]'
+                      : isAdmin
+                      ? 'pt-[96px]'
+                      : 'pt-[max(calc(env(safe-area-inset-top)+82px),84px)] sm:pt-[92px]'
+                  } pb-[max(calc(env(safe-area-inset-bottom)+18px),20px)] sm:py-8 ${
                     isHousewarming
                       ? theme === 'light'
                         ? 'bg-[radial-gradient(circle_at_50%_40%,rgba(232,191,84,0.16),transparent_65%)]'
@@ -541,7 +547,11 @@ export default function EnvelopeModal({
                       ? 'bg-[radial-gradient(circle_at_50%_40%,rgba(212,175,55,0.14),transparent_66%)]'
                       : 'bg-[radial-gradient(circle_at_50%_40%,rgba(153,27,51,0.16),transparent_68%)]'
                   }`
-                : 'p-3 sm:p-6 md:p-8 py-5 sm:py-8'
+                : `px-2.5 sm:p-6 md:p-8 ${
+                    isAdmin
+                      ? 'pt-[88px] sm:pt-8'
+                      : 'pt-[max(calc(env(safe-area-inset-top)+82px),84px)] sm:pt-8'
+                  } pb-[max(calc(env(safe-area-inset-bottom)+18px),20px)] sm:py-8`
             }`}
           >
             {/* Envelope Card Container */}
@@ -556,7 +566,7 @@ export default function EnvelopeModal({
                 duration: isOpening ? 0.75 : 0.8,
                 ease: [0.22, 1, 0.36, 1],
               }}
-              className={`relative w-full ${isBirthday ? 'max-w-[360px] sm:max-w-[395px] md:max-w-[425px]' : 'max-w-sm sm:max-w-md md:max-w-lg'} mx-auto my-auto rounded-[32px] p-0.5 transition-shadow duration-500 ${
+              className={`relative w-full ${isBirthday ? 'max-w-[380px] sm:max-w-[395px] md:max-w-[425px]' : 'max-w-[calc(100%-0.25rem)] sm:max-w-md md:max-w-lg'} mx-auto my-auto rounded-[24px] sm:rounded-[32px] p-0.5 transition-shadow duration-500 ${
                 isBirthday
                   ? 'bg-gradient-to-b from-[#2dd4bf]/50 via-[#fde047]/35 to-[#0d9488]/60 shadow-[0_25px_60px_rgba(1,14,18,0.9),0_0_40px_rgba(45,212,191,0.2)]'
                   : isHousewarming
@@ -578,7 +588,7 @@ export default function EnvelopeModal({
             >
               {/* Modern Invitation Card Body */}
               <div
-                className={`relative rounded-[30px] overflow-hidden min-h-[580px] sm:min-h-[660px] md:min-h-[720px] flex flex-col justify-between items-center text-center border backdrop-blur-xl transition-all duration-300 ${
+                className={`relative rounded-[22px] sm:rounded-[30px] overflow-hidden min-h-[500px] sm:min-h-[660px] md:min-h-[720px] flex flex-col justify-between items-center text-center border backdrop-blur-xl transition-all duration-300 ${
                   isBirthday
                     ? 'p-0 border-[#2dd4bf]/40 shadow-[0_20px_50px_rgba(1,14,18,0.85),inset_0_1px_3px_rgba(255,255,255,0.25)] bg-gradient-to-b from-[#051f26]/95 via-[#082d36]/90 to-[#021317]/98'
                     : isHousewarming
@@ -587,8 +597,8 @@ export default function EnvelopeModal({
                         : 'p-0 border-[#f4cb5c]/45 shadow-[0_20px_55px_rgba(2,14,10,0.8)] bg-[#071e16]')
                     : isEngagement
                     ? (theme === 'light'
-                        ? 'py-7 sm:py-9 md:py-10 px-4 sm:px-7 md:px-9 border-amber-400/60 shadow-[inset_0_1px_3px_rgba(255,255,255,0.75),0_16px_45px_rgba(180,83,9,0.2)] bg-[#fdf6ec]'
-                        : 'py-7 sm:py-9 md:py-10 px-4 sm:px-7 md:px-9 border-amber-300/50 shadow-[inset_0_1px_2px_rgba(255,255,255,0.18),0_22px_60px_rgba(0,0,0,0.75)] bg-[#140a0e]')
+                        ? 'py-6 sm:py-9 md:py-10 px-3.5 sm:px-7 md:px-9 border-amber-400/60 shadow-[inset_0_1px_3px_rgba(255,255,255,0.75),0_16px_45px_rgba(180,83,9,0.2)] bg-[#fdf6ec]'
+                        : 'py-6 sm:py-9 md:py-10 px-3.5 sm:px-7 md:px-9 border-amber-300/50 shadow-[inset_0_1px_2px_rgba(255,255,255,0.18),0_22px_60px_rgba(0,0,0,0.75)] bg-[#140a0e]')
                     : isAnniversary
                     ? (theme === 'light'
                         ? 'p-0 border-[#c9972c]/55 shadow-[0_18px_45px_rgba(115,19,37,0.18)] bg-[#fcf7eb]'
@@ -598,8 +608,8 @@ export default function EnvelopeModal({
                         ? 'p-0 border-[#d4af37]/60 shadow-[0_15px_45px_rgba(30,58,138,0.18)] bg-[#fbfcf9]'
                         : 'p-0 border-[#ad8b55]/30 shadow-[0_0_42px_rgba(91,76,54,0.14)] bg-[#faf7f2]')
                     : theme === 'light'
-                    ? 'py-8 sm:py-10 md:py-12 px-4 sm:px-8 md:px-10 border-amber-300/70 shadow-[inset_0_1px_3px_rgba(255,255,255,0.8),0_10px_35px_rgba(245,184,15,0.2)]'
-                    : 'py-8 sm:py-10 md:py-12 px-4 sm:px-8 md:px-10 border-amber-400/40 shadow-[inset_0_1px_2px_rgba(255,255,255,0.2),0_15px_45px_rgba(0,0,0,0.5)]'
+                    ? 'py-6 sm:py-10 md:py-12 px-3.5 sm:px-8 md:px-10 border-amber-300/70 shadow-[inset_0_1px_3px_rgba(255,255,255,0.8),0_10px_35px_rgba(245,184,15,0.2)]'
+                    : 'py-6 sm:py-10 md:py-12 px-3.5 sm:px-8 md:px-10 border-amber-400/40 shadow-[inset_0_1px_2px_rgba(255,255,255,0.2),0_15px_45px_rgba(0,0,0,0.5)]'
                 }`}
               >
                 {/* Crisp Cover Background Layer Inside Envelope Card */}
@@ -700,13 +710,13 @@ export default function EnvelopeModal({
                 ) : isWeddingStyle ? (
                   isModernWedding ? (
                     <div className="relative z-20 w-full h-full flex flex-col justify-between items-center">
-                      {/* Top Right Floating Controls: Next Track & Audio Toggle & Quick Design Editor */}
-                      <div className="absolute top-2 right-2 z-30 flex items-center gap-1.5">
+                      {/* Top Right Floating Controls: Language, Quick Design Editor & Audio */}
+                      <div className="absolute top-2.5 right-2.5 z-30 flex items-center gap-1.5">
                         {onToggleLanguage && (
                           <button
                             type="button"
                             onClick={onToggleLanguage}
-                            className="px-2 py-0.5 rounded-full bg-white/90 hover:bg-white text-[11px] font-khmer font-bold flex items-center gap-1 shadow-sm backdrop-blur-sm border cursor-pointer text-amber-900 border-amber-300"
+                            className="px-2.5 py-1 rounded-full bg-white/90 hover:bg-white text-[11px] font-khmer font-bold flex items-center gap-1 shadow-sm backdrop-blur-sm border cursor-pointer text-amber-900 border-amber-300"
                             title={language === 'kh' ? 'ប្តូរទៅអង់គ្លេស / Switch to English' : 'Switch to Khmer / ប្តូរទៅខ្មែរ'}
                           >
                             <Globe className="w-3 h-3" />
@@ -717,7 +727,7 @@ export default function EnvelopeModal({
                           <button
                             type="button"
                             onClick={onOpenDesignTab}
-                            className="px-2 py-0.5 rounded-full bg-white/90 hover:bg-white text-[11px] font-khmer font-bold flex items-center gap-1 shadow-sm backdrop-blur-sm border cursor-pointer text-amber-900 border-amber-300"
+                            className="px-2.5 py-1 rounded-full bg-white/90 hover:bg-white text-[11px] font-khmer font-bold flex items-center gap-1 shadow-sm backdrop-blur-sm border cursor-pointer text-amber-900 border-amber-300"
                             title={language === 'kh' ? 'កែពណ៌សំបុត្រក្នុង "ការរចនា"' : 'Edit Color in "Design" Tab'}
                           >
                             <span
@@ -727,29 +737,31 @@ export default function EnvelopeModal({
                             <span>{language === 'kh' ? 'កែ' : 'Edit'}</span>
                           </button>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const audio = document.getElementById('wedding-audio') as HTMLAudioElement | null;
-                            if (audio) {
-                              audio.currentTime = 0;
-                              audio.play().catch(() => {});
-                              setIsPlayingMusic(true);
-                            }
-                          }}
-                          className="w-7 h-7 rounded-full bg-white/90 hover:bg-white flex items-center justify-center shadow-sm backdrop-blur-sm border cursor-pointer text-amber-900 border-amber-300"
-                          title="Replay / Restart Music"
-                        >
-                          <SkipForward className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={toggleMusicPlay}
-                          className="w-7 h-7 rounded-full bg-white/90 hover:bg-white flex items-center justify-center shadow-md backdrop-blur-sm border cursor-pointer text-amber-900 border-amber-300"
-                          title={isPlayingMusic ? 'Mute' : 'Play'}
-                        >
-                          {isPlayingMusic ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-                        </button>
+                        <div className={`${isAdmin ? 'flex' : 'hidden sm:flex'} items-center gap-1.5`}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const audio = document.getElementById('wedding-audio') as HTMLAudioElement | null;
+                              if (audio) {
+                                audio.currentTime = 0;
+                                audio.play().catch(() => {});
+                                setIsPlayingMusic(true);
+                              }
+                            }}
+                            className="w-7 h-7 rounded-full bg-white/90 hover:bg-white flex items-center justify-center shadow-sm backdrop-blur-sm border cursor-pointer text-amber-900 border-amber-300"
+                            title="Replay / Restart Music"
+                          >
+                            <SkipForward className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={toggleMusicPlay}
+                            className="w-7 h-7 rounded-full bg-white/90 hover:bg-white flex items-center justify-center shadow-md backdrop-blur-sm border cursor-pointer text-amber-900 border-amber-300"
+                            title={isPlayingMusic ? 'Mute' : 'Play'}
+                          >
+                            {isPlayingMusic ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
                       </div>
 
                       <KhmerRoyalModernWeddingCover
@@ -774,13 +786,13 @@ export default function EnvelopeModal({
                     </div>
                   ) : (
                     <div className="relative z-20 w-full h-full flex flex-col justify-between items-center">
-                      {/* Top Right Floating Controls: Next Track & Audio Toggle & Quick Design Editor */}
-                      <div className="absolute top-2 right-2 z-30 flex items-center gap-1.5">
+                      {/* Top Right Floating Controls: Language, Quick Design Editor & Audio */}
+                      <div className="absolute top-2.5 right-2.5 z-30 flex items-center gap-1.5">
                         {onToggleLanguage && (
                           <button
                             type="button"
                             onClick={onToggleLanguage}
-                            className="px-2 py-0.5 rounded-full bg-white/90 hover:bg-white text-[11px] font-khmer font-bold flex items-center gap-1 shadow-sm backdrop-blur-sm border cursor-pointer text-[#ad8b55] border-[#ad8b55]/40"
+                            className="px-2.5 py-1 rounded-full bg-white/90 hover:bg-white text-[11px] font-khmer font-bold flex items-center gap-1 shadow-sm backdrop-blur-sm border cursor-pointer text-[#ad8b55] border-[#ad8b55]/40"
                             title={language === 'kh' ? 'ប្តូរទៅអង់គ្លេស / Switch to English' : 'Switch to Khmer / ប្តូរទៅខ្មែរ'}
                           >
                             <Globe className="w-3 h-3" />
@@ -791,7 +803,7 @@ export default function EnvelopeModal({
                           <button
                             type="button"
                             onClick={onOpenDesignTab}
-                            className="px-2 py-0.5 rounded-full bg-white/90 hover:bg-white text-[11px] font-khmer font-bold flex items-center gap-1 shadow-sm backdrop-blur-sm border cursor-pointer text-[#ad8b55] border-[#ad8b55]/40"
+                            className="px-2.5 py-1 rounded-full bg-white/90 hover:bg-white text-[11px] font-khmer font-bold flex items-center gap-1 shadow-sm backdrop-blur-sm border cursor-pointer text-[#ad8b55] border-[#ad8b55]/40"
                             title={language === 'kh' ? 'កែពណ៌សំបុត្រក្នុង "ការរចនា"' : 'Edit Color in "Design" Tab'}
                           >
                             <span
@@ -801,29 +813,31 @@ export default function EnvelopeModal({
                             <span>{language === 'kh' ? 'កែ' : 'Edit'}</span>
                           </button>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const audio = document.getElementById('wedding-audio') as HTMLAudioElement | null;
-                            if (audio) {
-                              audio.currentTime = 0;
-                              audio.play().catch(() => {});
-                              setIsPlayingMusic(true);
-                            }
-                          }}
-                          className="w-7 h-7 rounded-full bg-white/90 hover:bg-white flex items-center justify-center shadow-sm backdrop-blur-sm border cursor-pointer text-[#ad8b55] border-[#ad8b55]/40"
-                          title="Replay / Restart Music"
-                        >
-                          <SkipForward className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={toggleMusicPlay}
-                          className="w-7 h-7 rounded-full bg-white/90 hover:bg-white flex items-center justify-center shadow-md backdrop-blur-sm border cursor-pointer text-[#ad8b55] border-[#ad8b55]/40"
-                          title={isPlayingMusic ? 'Mute' : 'Play'}
-                        >
-                          {isPlayingMusic ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
-                        </button>
+                        <div className={`${isAdmin ? 'flex' : 'hidden sm:flex'} items-center gap-1.5`}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const audio = document.getElementById('wedding-audio') as HTMLAudioElement | null;
+                              if (audio) {
+                                audio.currentTime = 0;
+                                audio.play().catch(() => {});
+                                setIsPlayingMusic(true);
+                              }
+                            }}
+                            className="w-7 h-7 rounded-full bg-white/90 hover:bg-white flex items-center justify-center shadow-sm backdrop-blur-sm border cursor-pointer text-[#ad8b55] border-[#ad8b55]/40"
+                            title="Replay / Restart Music"
+                          >
+                            <SkipForward className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={toggleMusicPlay}
+                            className="w-7 h-7 rounded-full bg-white/90 hover:bg-white flex items-center justify-center shadow-md backdrop-blur-sm border cursor-pointer text-[#ad8b55] border-[#ad8b55]/40"
+                            title={isPlayingMusic ? 'Mute' : 'Play'}
+                          >
+                            {isPlayingMusic ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
                       </div>
 
                       <TheapKhmerTemplate15Cover
@@ -856,7 +870,7 @@ export default function EnvelopeModal({
                   )
                 ) : isBirthday ? (
                   /* Premium Luxury Midnight Teal & Champagne Gold Birthday Party Invitation */
-                  <div className="relative z-10 w-full max-w-[360px] sm:max-w-[395px] md:max-w-[420px] mx-auto my-auto self-center h-full min-h-[600px] sm:min-h-[650px] flex flex-col justify-between items-center text-center px-3.5 sm:px-5 py-4 sm:py-5 overflow-hidden rounded-[28px] bg-gradient-to-b from-[#072d36]/90 via-[#0a3843]/80 to-[#02181d]/95 backdrop-blur-2xl text-white shadow-[0_20px_60px_rgba(1,14,18,0.9),inset_0_1px_2px_rgba(255,255,255,0.25)] select-none border border-[#2dd4bf]/40">
+                  <div className="relative z-10 w-full max-w-[380px] sm:max-w-[395px] md:max-w-[420px] mx-auto my-auto self-center h-full min-h-[500px] sm:min-h-[650px] flex flex-col justify-between items-center text-center px-3 sm:px-5 py-3.5 sm:py-5 overflow-hidden rounded-[22px] sm:rounded-[28px] bg-gradient-to-b from-[#072d36]/90 via-[#0a3843]/80 to-[#02181d]/95 backdrop-blur-2xl text-white shadow-[0_20px_60px_rgba(1,14,18,0.9),inset_0_1px_2px_rgba(255,255,255,0.25)] select-none border border-[#2dd4bf]/40">
                     {/* Inner Beveled Double Gold Hairline Border */}
                     <div className="absolute inset-2 sm:inset-2.5 rounded-[22px] border border-[#fde047]/30 pointer-events-none z-10" />
                     <div className="absolute inset-3 sm:inset-3.5 rounded-[20px] border border-[#2dd4bf]/20 pointer-events-none z-10" />
@@ -986,7 +1000,7 @@ export default function EnvelopeModal({
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
+                      <div className={`${isAdmin ? 'flex' : 'hidden sm:flex'} items-center gap-1.5`}>
                         <button
                           type="button"
                           onClick={() => {
@@ -1028,8 +1042,8 @@ export default function EnvelopeModal({
                         className="tracking-wide font-bold font-moul bg-gradient-to-r from-[#fef08a] via-[#fde047] to-[#2dd4bf] bg-clip-text text-transparent drop-shadow-[0_2px_12px_rgba(253,224,71,0.4)]"
                         style={{
                           fontFamily: "'Moul', serif",
-                          fontSize: '26px',
-                          lineHeight: '46px',
+                          fontSize: 'clamp(1.25rem, 5.2vw, 1.625rem)',
+                          lineHeight: '1.6',
                         }}
                       >
                         {language === 'kh' 
@@ -1059,8 +1073,8 @@ export default function EnvelopeModal({
                           className="text-[#99f6e4] tracking-wide mb-0.5 drop-shadow-[0_1px_4px_rgba(0,0,0,0.5)]"
                           style={{
                             fontFamily: "'Khmer OS Bokor', 'Bokor', display",
-                            fontSize: '22px',
-                            lineHeight: '30px',
+                            fontSize: 'clamp(1.125rem, 4.8vw, 1.375rem)',
+                            lineHeight: '1.4',
                           }}
                         >
                           {singlePerson ? groom : (groom || bride)}
@@ -1070,8 +1084,8 @@ export default function EnvelopeModal({
                         className="tracking-wider text-white py-0.5 drop-shadow-[0_2px_10px_rgba(45,212,191,0.6)] font-bold"
                         style={{
                           fontFamily: "'Dancing Script', cursive",
-                          fontSize: '30px',
-                          lineHeight: '36px',
+                          fontSize: 'clamp(1.5rem, 6.2vw, 1.875rem)',
+                          lineHeight: '1.2',
                         }}
                       >
                         {(singlePerson ? (groomEn || groom) : (groomEn || groom)) || 'SAMARA'}
@@ -1230,7 +1244,7 @@ export default function EnvelopeModal({
                           {ribbonLabel || (language === 'kh' ? 'សូមគោរពអញ្ជើញ' : 'Cordially Invited')}
                         </span>
                         <span
-                          className="font-bold tracking-wide truncate max-w-[260px] mt-0.5 text-center text-white drop-shadow-[0_2px_8px_rgba(45,212,191,0.5)]"
+                          className="font-bold tracking-wide truncate max-w-[230px] sm:max-w-[260px] mt-0.5 text-center text-white drop-shadow-[0_2px_8px_rgba(45,212,191,0.5)]"
                           style={{
                             fontFamily: guestNameFontFamily || "'Moul', serif",
                             fontSize: guestNameFontSize ? `${guestNameFontSize}px` : '16px',
@@ -1250,7 +1264,7 @@ export default function EnvelopeModal({
                         disabled={isOpening}
                         whileHover={{ scale: 1.04, y: -2 }}
                         whileTap={{ scale: 0.96 }}
-                        className="relative group w-auto max-w-[260px] sm:max-w-[280px] mx-auto py-2.5 sm:py-3 px-6 sm:px-8 rounded-full text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-[#0d9488] via-[#14b8a6] to-[#0f766e] hover:from-[#14b8a6] hover:to-[#0d9488] shadow-[0_8px_25px_rgba(20,184,166,0.55),0_0_20px_rgba(253,224,71,0.3)] border-2 border-[#fde047]/80 flex items-center justify-center gap-2.5 transition-all duration-300 overflow-hidden cursor-pointer"
+                        className="relative group w-auto max-w-[260px] sm:max-w-[280px] min-h-[44px] mx-auto py-2.5 sm:py-3 px-6 sm:px-8 rounded-full text-xs sm:text-sm font-bold text-white bg-gradient-to-r from-[#0d9488] via-[#14b8a6] to-[#0f766e] hover:from-[#14b8a6] hover:to-[#0d9488] shadow-[0_8px_25px_rgba(20,184,166,0.55),0_0_20px_rgba(253,224,71,0.3)] border-2 border-[#fde047]/80 flex items-center justify-center gap-2.5 transition-all duration-300 overflow-hidden cursor-pointer"
                       >
                         {/* Golden Shimmer Sweep */}
                         <div className="pointer-events-none absolute inset-0 z-[1] -translate-x-[100%] bg-gradient-to-r from-transparent via-[#fde047]/40 to-transparent transition-transform duration-1000 group-hover:translate-x-[100%]" />
@@ -1374,7 +1388,7 @@ export default function EnvelopeModal({
                             repeat: Infinity,
                             ease: 'easeInOut',
                           }}
-                          className="w-full max-w-[340px] h-auto overflow-visible"
+                          className="w-full max-w-[290px] sm:max-w-[340px] h-auto overflow-visible"
                         >
                           <defs>
                             <linearGradient id="curveGoldGradient" x1="0%" y1="0%" x2="100%" y2="0%">
@@ -1407,16 +1421,16 @@ export default function EnvelopeModal({
                       </motion.div>
 
                       {/* Couple / Host Names */}
-                      <div className="space-y-0.5 my-1 flex flex-col items-center">
+                      <div className="space-y-0.5 my-1 flex flex-col items-center px-2">
                         <motion.h1
                           style={{
                             color: primaryColor || '#f5b80f',
-                            fontSize: '24px',
+                            fontSize: 'clamp(1.15rem, 4.8vw, 1.5rem)',
                             fontWeight: 'normal',
                             fontFamily: "'Moul', serif",
-                            lineHeight: '35px',
+                            lineHeight: '1.5',
                           }}
-                          className="font-moul text-[24px] py-0.5 tracking-wide drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)]"
+                          className="font-moul py-0.5 tracking-wide drop-shadow-[0_2px_4px_rgba(0,0,0,0.3)] text-balance"
                         >
                           <span>{singlePerson ? groom : (bride ? `${groom} & ${bride}` : groom)}</span>
                         </motion.h1>
@@ -1429,17 +1443,17 @@ export default function EnvelopeModal({
                           style={{
                             color: coverEnNameColor || '#fde047',
                             fontFamily: coverEnFontFamily || "'Norican', cursive",
-                            fontSize: '20px',
-                            lineHeight: '28px',
+                            fontSize: 'clamp(1rem, 4.2vw, 1.25rem)',
+                            lineHeight: '1.4',
                             letterSpacing: '0.06em',
                           }}
-                          className="font-norican text-[20px] drop-shadow-[0_1px_3px_rgba(0,0,0,0.4)] capitalize tracking-wider select-none"
+                          className="font-norican drop-shadow-[0_1px_3px_rgba(0,0,0,0.4)] capitalize tracking-wider select-none"
                         >
                           <span>{singlePerson ? (groomEn || groom) : (brideEn ? `${groomEn || groom} & ${brideEn}` : (groomEn || (bride ? `${groom} & ${bride}` : groom)))}</span>
                         </motion.p>
                       </div>
 
-                      <KhmerDividerKbach className="w-52 sm:w-64 h-5 my-3" color={primaryColor} />
+                      <KhmerDividerKbach className="w-44 sm:w-64 h-5 my-2.5 sm:my-3" color={primaryColor} />
                     </motion.div>
 
                     {/* Middle Section: Guest */}
@@ -1447,7 +1461,7 @@ export default function EnvelopeModal({
                       initial={{ opacity: 0, y: 24 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ duration: 0.8, delay: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                      className="relative z-10 my-3 sm:my-5 text-center w-full flex flex-col items-center"
+                      className="relative z-10 my-2.5 sm:my-5 text-center w-full flex flex-col items-center"
                     >
                       {/* Database Guests Drop Box */}
                       {savedGuestsList.length > 0 && (
@@ -1483,11 +1497,11 @@ export default function EnvelopeModal({
                         </span>
                         <div className="text-lg sm:text-xl md:text-2xl font-moul text-[#172554] tracking-wide flex items-center justify-center">
                           <span
-                            className="truncate max-w-[280px]"
+                            className="truncate max-w-[230px] sm:max-w-[280px]"
                             style={{
                               fontFamily: "'Moul', serif",
-                              fontSize: '20px',
-                              lineHeight: '35px',
+                              fontSize: 'clamp(1rem, 4.4vw, 1.25rem)',
+                              lineHeight: '1.7',
                             }}
                           >
                             {guestName && guestName !== 'Your Name' ? guestName : (language === 'kh' ? 'ភ្ញៀវកិត្តិយស' : 'Honored Guest')}
