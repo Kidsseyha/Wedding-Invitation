@@ -774,6 +774,23 @@ export function parseFirestoreDocumentFields(fields: Record<string, any> | undef
   return out;
 }
 
+const firestoreRestMissingCache = new Map<string, number>();
+
+function isFirestoreRestTemporarilyMissing(projectId: string, dbSegment: string): boolean {
+  const key = `${projectId}::${dbSegment}`;
+  const until = firestoreRestMissingCache.get(key);
+  if (!until) return false;
+  if (Date.now() > until) {
+    firestoreRestMissingCache.delete(key);
+    return false;
+  }
+  return true;
+}
+
+function markFirestoreRestMissing(projectId: string, dbSegment: string, ttlMs = 60_000): void {
+  firestoreRestMissingCache.set(`${projectId}::${dbSegment}`, Date.now() + ttlMs);
+}
+
 export async function fetchEventFromFirestoreRest(options: {
   projectId: string;
   databaseId?: string;
@@ -783,14 +800,18 @@ export async function fetchEventFromFirestoreRest(options: {
   apiKey?: string;
   timeoutMs?: number;
 }): Promise<Record<string, any> | null> {
-  const { projectId, databaseId = '(default)', eventId, ownerId, ownerEmail, apiKey, timeoutMs = 2500 } = options;
+  const { projectId, databaseId = '(default)', eventId, ownerId, ownerEmail, apiKey, timeoutMs = 1200 } = options;
   if (!projectId || !eventId) return null;
 
   const dbSegment = databaseId || '(default)';
+  if (isFirestoreRestTemporarilyMissing(projectId, dbSegment)) {
+    return null;
+  }
   const keyParam = apiKey ? `?key=${encodeURIComponent(apiKey)}` : '';
   const targetDbId = resolveRecordDatabaseId({ ownerId, ownerEmail, eventId });
 
   const fetchDocAtPath = async (docPath: string): Promise<Record<string, any> | null> => {
+    if (isFirestoreRestTemporarilyMissing(projectId, dbSegment)) return null;
     const endpoint = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
       projectId
     )}/databases/${encodeURIComponent(dbSegment)}/documents/${docPath}${keyParam}`;
@@ -806,7 +827,15 @@ export async function fetchEventFromFirestoreRest(options: {
         )}/databases/(default)/documents/${docPath}${keyParam}`;
         res = await fetch(fallbackEndpoint, { signal: controller.signal });
       }
-      if (!res.ok) return null;
+      if (!res.ok) {
+        if (res.status === 404) {
+          const errText = await res.text().catch(() => '');
+          if (errText.includes('does not exist')) {
+            markFirestoreRestMissing(projectId, dbSegment);
+          }
+        }
+        return null;
+      }
       const json = (await res.json()) as { fields?: Record<string, any> };
       if (!json || !json.fields) return null;
       const parsed = parseFirestoreDocumentFields(json.fields);
@@ -841,8 +870,10 @@ export async function fetchShortLinkFromFirestoreRest(options: {
   apiKey?: string;
   timeoutMs?: number;
 }): Promise<{ code: string; url: string; lang?: string; createdAt?: string } | null> {
-  const { projectId, databaseId = '(default)', code, apiKey, timeoutMs = 2500 } = options;
+  const { projectId, databaseId = '(default)', code, apiKey, timeoutMs = 1200 } = options;
   if (!projectId || !code || !/^[a-zA-Z0-9_-]{1,128}$/.test(code)) return null;
+  const dbSegmentCheck = databaseId || '(default)';
+  if (isFirestoreRestTemporarilyMissing(projectId, dbSegmentCheck)) return null;
 
   const dbSegment = databaseId || '(default)';
   const keyParam = apiKey ? `?key=${encodeURIComponent(apiKey)}` : '';

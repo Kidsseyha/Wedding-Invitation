@@ -43,6 +43,23 @@ if (typeof window !== 'undefined') {
 }
 
 let isNetworkDisabled = false;
+let firestoreUnavailableUntil = 0;
+
+export function isFirestoreKnownUnavailable(): boolean {
+  return Date.now() < firestoreUnavailableUntil;
+}
+
+export function markFirestoreUnavailable(ttlMs = 45_000): void {
+  firestoreUnavailableUntil = Date.now() + ttlMs;
+  if (!isNetworkDisabled) {
+    isNetworkDisabled = true;
+    disableNetwork(db).catch(() => {});
+  }
+}
+
+export function markFirestoreAvailable(): void {
+  firestoreUnavailableUntil = 0;
+}
 
 export interface FirestoreConnectionStatus {
   connected: boolean;
@@ -54,9 +71,20 @@ export interface FirestoreConnectionStatus {
 }
 
 // Test connection on boot and on manual database checks
-export async function testFirestoreConnection(timeoutMs = 3500): Promise<FirestoreConnectionStatus> {
+export async function testFirestoreConnection(timeoutMs = 800): Promise<FirestoreConnectionStatus> {
   const startedAt = Date.now();
   let reconnected = false;
+
+  if (isFirestoreKnownUnavailable()) {
+    return {
+      connected: false,
+      reconnected: false,
+      databaseId: firebaseConfig.firestoreDatabaseId,
+      projectId: firebaseConfig.projectId,
+      latencyMs: 0,
+      error: 'Firestore temporarily unavailable (cached)',
+    };
+  }
 
   try {
     if (isNetworkDisabled) {
@@ -80,6 +108,7 @@ export async function testFirestoreConnection(timeoutMs = 3500): Promise<Firesto
       ),
     ]);
 
+    markFirestoreAvailable();
     return {
       connected: true,
       reconnected,
@@ -97,6 +126,7 @@ export async function testFirestoreConnection(timeoutMs = 3500): Promise<Firesto
       code.includes('permission-denied') ||
       message.includes('Missing or insufficient permissions')
     ) {
+      markFirestoreAvailable();
       return {
         connected: true,
         reconnected,
@@ -106,15 +136,7 @@ export async function testFirestoreConnection(timeoutMs = 3500): Promise<Firesto
       };
     }
 
-    if (
-      message.includes('the client is offline') ||
-      message.includes('offline') ||
-      code === 'unavailable'
-    ) {
-      console.warn('Firestore connection offline, attempting reconnection.');
-      await enableNetwork(db).catch(() => {});
-      reconnected = true;
-    }
+    markFirestoreUnavailable(45_000);
 
     return {
       connected: false,

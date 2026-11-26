@@ -1458,16 +1458,23 @@ export default function App() {
     }
 
     setIsRefreshingFromDb(true);
-    setRefreshValidationFeedback(
-      language === 'kh'
-        ? 'កំពុងត្រួតពិនិត្យ Database (Firestore & Server) និងផ្ទុកទិន្នន័យឡើងវិញ...'
-        : 'Checking database (Firestore & Server) and reloading...'
-    );
+    setShowShareModal(false);
+    setShowAddGuestModal(false);
+    setShowEditorModal(false);
+    setShowEventTypeModal(false);
 
     try {
       const scopeId = activeUserScope.scopeId;
       const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
       if (typeof window !== 'undefined') {
+        const freshGuest = extractGuestNameFromSearch(window.location.search);
+        if (freshGuest) {
+          setGuestName(freshGuest);
+        }
+        const freshFont = extractKhmerFontFromSearch(window.location.search);
+        if (freshFont) {
+          setUrlKhmerFont(freshFont);
+        }
         const urlLangParam = params?.get('lang') || params?.get('l');
         if (urlLangParam || /^\/(?:kh|km|en)(?:\/|$)/i.test(window.location.pathname)) {
           setLanguage(detectLanguageFromUrl(window.location.search, window.location.pathname));
@@ -1545,7 +1552,6 @@ export default function App() {
         }
       };
 
-      let appliedFast = false;
       const checkResult = await checkDatabasesAndFetchEvent(fetchId, targetOwnerFilter || undefined, {
         templateType: templateTypeHint || undefined,
         ownerEmail: !isFromShareLink
@@ -1553,9 +1559,8 @@ export default function App() {
           : targetOwnerFilter
           ? undefined
           : event.ownerEmail || undefined,
-        timeoutMs: 4000,
+        timeoutMs: 650,
         onFastResult: (fastEvt) => {
-          appliedFast = true;
           applyDbEvent(fastEvt);
         },
       });
@@ -1568,11 +1573,11 @@ export default function App() {
             ? fetchEventFromFirebase(`event_${authUser.uid}`, undefined, {
                 includeServerApi: true,
                 forceServer: true,
-                timeoutMs: 2500,
+                timeoutMs: 500,
               })
             : Promise.resolve(null),
           !urlIdParam && !urlTypeParam
-            ? fetchUserTemplatesFromFirebase(scopeId, { timeoutMs: 2500 })
+            ? fetchUserTemplatesFromFirebase(scopeId, { timeoutMs: 500 })
             : Promise.resolve([]),
         ]);
 
@@ -1604,49 +1609,21 @@ export default function App() {
         loadDbUsers().catch(() => {});
       }
 
-      const dbParts: string[] = [];
-      if (checkResult.firestoreConnected) dbParts.push('Firestore');
-      if (checkResult.serverConnected) dbParts.push('Server');
-      const dbStatusLabel = dbParts.join(' & ');
-
       if (dbEvent) {
         applyDbEvent(dbEvent);
-        setRefreshValidationFeedback(
-          language === 'kh'
-            ? `✓ Database (${dbStatusLabel || 'Cloud'}) ដំណើរការល្អ — បានផ្ទុកទិន្នន័យចុងក្រោយឡើងវិញរួចរាល់!`
-            : `✓ Database (${dbStatusLabel || 'Cloud'}) verified — Reloaded latest saved data!`
-        );
-      } else if (appliedFast) {
-        setRefreshValidationFeedback(
-          language === 'kh'
-            ? `✓ Database (${dbStatusLabel || 'Cloud'}) — បានផ្ទុកទិន្នន័យចុងក្រោយឡើងវិញរួចរាល់!`
-            : `✓ Database (${dbStatusLabel || 'Cloud'}) — Reloaded latest data!`
-        );
-      } else if (!checkResult.firestoreConnected && !checkResult.serverConnected) {
-        setRefreshValidationFeedback(
-          language === 'kh'
-            ? '⚠️ មិនអាចភ្ជាប់ទៅ Database (Firestore / Server) បានទេ សូមពិនិត្យអ៊ីនធឺណិត'
-            : '⚠️ Cannot reach Database (Firestore / Server). Please check connection'
-        );
-      } else {
-        setRefreshValidationFeedback(
-          language === 'kh'
-            ? `✓ Database (${dbStatusLabel}) ភ្ជាប់ជោគជ័យ — មិនទាន់មានការកែប្រែថ្មីរក្សាទុកទេ`
-            : `✓ Database (${dbStatusLabel}) connected — no new saved updates found yet`
-        );
       }
-    } catch (err) {
-      console.warn('Database refresh check error:', err);
       setRefreshValidationFeedback(
         language === 'kh'
-          ? 'មិនអាចភ្ជាប់ទៅ Database បានទេ សូមព្យាយាមម្តងទៀត'
-          : 'Could not reach database, please try again'
+          ? '✓ បានផ្ទុកទំព័រឡើងវិញរួចរាល់!'
+          : '✓ Webpage reloaded!'
       );
+    } catch (err) {
+      console.warn('Reload error:', err);
     } finally {
       setIsRefreshingFromDb(false);
       refreshToastTimerRef.current = setTimeout(() => {
         setRefreshValidationFeedback(null);
-      }, 3000);
+      }, 1600);
     }
   };
 
@@ -2910,12 +2887,7 @@ export default function App() {
           id="reload-refresh-btn"
           type="button"
           disabled={isRefreshingFromDb}
-          onClick={() => {
-            setIsRefreshingFromDb(true);
-            if (typeof window !== 'undefined') {
-              window.location.reload();
-            }
-          }}
+          onClick={handleRefreshFromDatabase}
           whileHover={{ scale: 1.05, y: -2 }}
           whileTap={{ scale: 0.94 }}
           className="group relative flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 min-h-[38px] sm:min-h-[40px] rounded-full border border-amber-500/60 bg-gradient-to-br from-black/95 via-neutral-900 to-black text-amber-200 shadow-[0_4px_18px_rgba(0,0,0,0.5)] backdrop-blur-md hover:border-amber-400 hover:text-amber-100 hover:shadow-[0_4px_22px_rgba(245,158,11,0.4)] transition-all ring-1 ring-amber-500/30 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-black cursor-pointer disabled:opacity-70"

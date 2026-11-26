@@ -17,6 +17,9 @@ import {
   IS_FIRESTORE_WRITE_DISABLED,
   handleFirestoreError,
   testFirestoreConnection,
+  isFirestoreKnownUnavailable,
+  markFirestoreUnavailable,
+  markFirestoreAvailable,
   OperationType,
 } from './firebase';
 import type { WeddingEvent } from '../types';
@@ -800,55 +803,60 @@ export async function fetchEventFromFirebase(
   };
 
   const readDocFast = async (ref: ReturnType<typeof doc>): Promise<WeddingEvent | null> => {
+    if (isFirestoreKnownUnavailable()) return null;
+    const effectiveFsTimeout = Math.min(branchTimeoutMs, 650);
     if (options?.forceServer) {
       let failed = false;
       const serverRes = await raceWithTimeout(
         getDocFromServer(ref)
           .then((snap) => {
             firestoreResponded = true;
+            markFirestoreAvailable();
             return snap.exists() ? (snap.data() as WeddingEvent) : null;
           })
           .catch(() => {
             failed = true;
             return null;
           }),
-        Math.min(branchTimeoutMs, 4000),
+        effectiveFsTimeout,
         null as WeddingEvent | null
       );
       if (!serverRes.timedOut && !failed) {
         return serverRes.value;
       }
-      const cacheRes = await raceWithTimeout(
-        getDoc(ref)
-          .then((snap) => (snap.exists() ? (snap.data() as WeddingEvent) : null))
-          .catch(() => null),
-        300,
-        null as WeddingEvent | null
-      );
-      return cacheRes.value;
+      if (serverRes.timedOut || failed) {
+        markFirestoreUnavailable(45_000);
+      }
+      return null;
     }
 
     const res = await raceWithTimeout(
       getDoc(ref)
         .then((snap) => {
           firestoreResponded = true;
+          markFirestoreAvailable();
           return snap.exists() ? (snap.data() as WeddingEvent) : null;
         })
         .catch(() => null),
-      branchTimeoutMs,
+      effectiveFsTimeout,
       null as WeddingEvent | null
     );
+    if (res.timedOut) {
+      markFirestoreUnavailable(45_000);
+    }
     return res.value;
   };
 
+  const skipFirestoreReads = IS_FIRESTORE_WRITE_DISABLED || isFirestoreKnownUnavailable();
+
   const scopedFsPromise: Promise<WeddingEvent | null> =
-    !IS_FIRESTORE_WRITE_DISABLED && targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE
+    !skipFirestoreReads && targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE
       ? readDocFast(doc(db, USER_DATABASES_COLLECTION, targetDbId, 'events', targetId)).then(considerFastResult)
       : Promise.resolve(null);
 
   const shouldSkipGlobalTopDoc = Boolean(targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE && isGlobalSharedPresetId(targetId));
   const topFsPromise: Promise<WeddingEvent | null> =
-    !IS_FIRESTORE_WRITE_DISABLED && !shouldSkipGlobalTopDoc
+    !skipFirestoreReads && !shouldSkipGlobalTopDoc
       ? readDocFast(doc(db, 'events', targetId))
           .catch((error) => {
             handleFirestoreError(error, OperationType.GET, `events/${targetId}`);
@@ -972,14 +980,14 @@ export async function checkDatabasesAndFetchEvent(
   };
 
   const [fsStatus, healthOk, dbEvent] = await Promise.all([
-    testFirestoreConnection(Math.min(timeoutMs, 3500)),
+    testFirestoreConnection(Math.min(timeoutMs, 650)),
     checkServerHealth(),
     fetchEventFromFirebase(eventId, ownerId, {
       includeServerApi: true,
       templateType: options?.templateType,
       ownerEmail: options?.ownerEmail,
       forceServer: true,
-      timeoutMs,
+      timeoutMs: Math.min(timeoutMs, 800),
       onFastResult: options?.onFastResult,
       onSourceResolved: (info) => {
         sourceStatus = info;
@@ -1034,8 +1042,11 @@ export async function fetchUserTemplatesFromFirebase(
     return [] as WeddingEvent[];
   })();
 
+  const skipFsTemplates = IS_FIRESTORE_WRITE_DISABLED || isFirestoreKnownUnavailable();
+  const fsTemplateTimeoutMs = Math.min(timeoutMs, 600);
+
   const subFsPromise: Promise<WeddingEvent[]> =
-    !IS_FIRESTORE_WRITE_DISABLED && targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE
+    !skipFsTemplates && targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE
       ? raceWithTimeout(
           getDocs(collection(db, USER_DATABASES_COLLECTION, targetDbId, 'events'))
             .then((subSnap) => {
@@ -1049,12 +1060,15 @@ export async function fetchUserTemplatesFromFirebase(
               return list;
             })
             .catch(() => [] as WeddingEvent[]),
-          timeoutMs,
+          fsTemplateTimeoutMs,
           [] as WeddingEvent[]
-        ).then((r) => r.value)
+        ).then((r) => {
+          if (r.timedOut) markFirestoreUnavailable(45_000);
+          return r.value;
+        })
       : Promise.resolve([]);
 
-  const topFsPromise: Promise<WeddingEvent[]> = !IS_FIRESTORE_WRITE_DISABLED
+  const topFsPromise: Promise<WeddingEvent[]> = !skipFsTemplates
     ? raceWithTimeout(
         getDocs(query(collection(db, 'events'), where('ownerId', '==', ownerId)))
           .then((snap) => {
@@ -1068,9 +1082,12 @@ export async function fetchUserTemplatesFromFirebase(
             return list;
           })
           .catch(() => [] as WeddingEvent[]),
-        timeoutMs,
+        fsTemplateTimeoutMs,
         [] as WeddingEvent[]
-      ).then((r) => r.value)
+      ).then((r) => {
+        if (r.timedOut) markFirestoreUnavailable(45_000);
+        return r.value;
+      })
     : Promise.resolve([]);
 
   const [restList, subList, topList] = await Promise.all([restPromise, subFsPromise, topFsPromise]);
