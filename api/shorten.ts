@@ -125,15 +125,17 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       cleanUrl = cleanUrl.replace('ais-dev-', 'ais-pre-');
     }
 
-    // Ensure Khmer language, clean Khmer guest name & share flag are preserved in target URL
+    // Keep clean Khmer guest name and omit redundant default params
     let targetLang = 'kh';
     try {
       const parsed = new URL(cleanUrl);
       const rawLang = (parsed.searchParams.get('lang') || parsed.searchParams.get('l') || '').toLowerCase().trim();
       targetLang = rawLang === 'en' ? 'en' : 'kh';
-      parsed.searchParams.set('lang', targetLang);
-      if (!parsed.searchParams.get('share')) {
-        parsed.searchParams.set('share', '1');
+      if (targetLang === 'en') {
+        parsed.searchParams.set('lang', 'en');
+      } else {
+        parsed.searchParams.delete('lang');
+        parsed.searchParams.delete('l');
       }
       const rawGuest = parsed.searchParams.get('name');
       if (rawGuest) {
@@ -141,6 +143,15 @@ export default async function handler(req: VercelReq, res: VercelRes) {
         if (cleanGuest && cleanGuest !== 'Your Name') {
           parsed.searchParams.set('name', cleanGuest);
         }
+      }
+      const hasGuest = Boolean(
+        parsed.searchParams.get('name') ||
+        parsed.searchParams.get('i') ||
+        parsed.searchParams.get('guest') ||
+        parsed.searchParams.get('to')
+      );
+      if (!hasGuest && !parsed.searchParams.get('share')) {
+        parsed.searchParams.set('share', '1');
       }
       cleanUrl = normalizeShareUrlEncoding(parsed.toString());
     } catch {

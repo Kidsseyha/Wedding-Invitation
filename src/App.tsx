@@ -60,6 +60,7 @@ import {
   extractGuestNameFromSearch,
   extractKhmerFontFromSearch,
   isSharedInvitationSearch,
+  normalizeShareUrlEncoding,
   resolveKhmerFontFamily,
 } from './lib/shareUrl';
 import { Language, WeddingEvent } from './types';
@@ -1737,7 +1738,7 @@ export default function App() {
             window.history.replaceState(
               {},
               '',
-              resolvedUrlObj.pathname + resolvedUrlObj.search + window.location.hash
+              normalizeShareUrlEncoding(resolvedUrlObj.pathname + resolvedUrlObj.search + window.location.hash)
             );
             currentSearch = resolvedUrlObj.search;
             params = new URLSearchParams(currentSearch);
@@ -1779,7 +1780,7 @@ export default function App() {
           cleanUrl.searchParams.delete('id');
           cleanUrl.searchParams.delete('type');
           cleanUrl.searchParams.delete('category');
-          window.history.replaceState({}, '', cleanUrl.toString());
+          window.history.replaceState({}, '', normalizeShareUrlEncoding(cleanUrl.toString()));
         } catch {}
       }
 
@@ -2841,7 +2842,7 @@ export default function App() {
                     cleanUrl.searchParams.delete('type');
                     cleanUrl.searchParams.delete('category');
                     cleanUrl.searchParams.delete('ownerId');
-                    window.history.replaceState({}, '', cleanUrl.toString());
+                    window.history.replaceState({}, '', normalizeShareUrlEncoding(cleanUrl.toString()));
                   } catch {}
                 }
                 setEvent(sanitizeWeddingEvent({

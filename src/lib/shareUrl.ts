@@ -240,12 +240,12 @@ export function generateDeterministicShortCode(targetUrl: string): string {
   let prefix = 'kh';
   try {
     const parsed = new URL(targetUrl);
-    const typeParam = (parsed.searchParams.get('type') || '').toLowerCase().trim();
-    if (typeParam.startsWith('wedding')) prefix = 'wd';
-    else if (typeParam.startsWith('engage')) prefix = 'eg';
-    else if (typeParam.startsWith('house')) prefix = 'hw';
-    else if (typeParam.startsWith('birth')) prefix = 'bd';
-    else if (typeParam.startsWith('anniv')) prefix = 'an';
+    const typeParam = (parsed.searchParams.get('type') || parsed.searchParams.get('id') || '').toLowerCase().trim();
+    if (typeParam.includes('wedding') || typeParam.includes('cmgrawhnk')) prefix = 'wd';
+    else if (typeParam.includes('engage')) prefix = 'eg';
+    else if (typeParam.includes('house')) prefix = 'hw';
+    else if (typeParam.includes('birth')) prefix = 'bd';
+    else if (typeParam.includes('anniv')) prefix = 'an';
 
     const nameParam = parsed.searchParams.get('name') || '';
     const asciiSlug = nameParam
@@ -317,8 +317,8 @@ function restoreReadableKhmerPercentEncoding(encodedQuery: string): string {
 
 /**
  * Normalizes URL query encoding so Khmer guest names display in clean, readable Khmer script
- * with %20 spaces (never '+' and never unreadable %E1%9E%9B... gibberish) while remaining
- * 100% valid across browsers, Vercel, Telegram, Messenger, WhatsApp, and QR scanners.
+ * with '+' word separators (zero '%20' and zero unreadable '%E1%9E%9B...' gibberish) while
+ * remaining 100% valid across browsers, Vercel, Telegram, Messenger, WhatsApp, and QR scanners.
  */
 export function normalizeShareUrlEncoding(urlStr: string): string {
   if (!urlStr) return '';
@@ -329,9 +329,29 @@ export function normalizeShareUrlEncoding(urlStr: string): string {
   if (queryIdx < 0) return urlStr;
   const basePart = baseAndQuery.slice(0, queryIdx);
   const queryPart = restoreReadableKhmerPercentEncoding(
-    baseAndQuery.slice(queryIdx + 1).replace(/\+/g, '%20')
+    baseAndQuery.slice(queryIdx + 1).replace(/%20/gi, '+')
   );
   return `${basePart}?${queryPart}${hashPart}`;
+}
+
+/**
+ * Checks whether an eventId already uniquely implies its invitation category
+ * so redundant `&type=...` clutter can be omitted from public share links.
+ */
+function doesEventIdImplyType(eventId?: string, eventType?: string): boolean {
+  if (!eventId || !eventType) return false;
+  const cleanId = eventId.includes('__') ? eventId.split('__').slice(1).join('__') : eventId;
+  const lowerId = cleanId.toLowerCase().trim();
+  const lowerType = eventType.toLowerCase().trim();
+  if (!lowerId || !lowerType) return false;
+  if (lowerType === 'wedding') {
+    return lowerId === 'cmgrawhnk0003le0434762j7n' || lowerId.includes('wedding');
+  }
+  if (lowerType === 'engagement') return lowerId.includes('engagement');
+  if (lowerType === 'housewarming') return lowerId.includes('housewarming');
+  if (lowerType === 'birthday') return lowerId.includes('birthday');
+  if (lowerType === 'anniversary') return lowerId.includes('anniversary');
+  return false;
 }
 
 /**
@@ -381,16 +401,25 @@ export function getPublicShareUrl(
 
   const url = new URL(origin + '/');
 
-  // Append ID if customized or needed for the invitation type (ប្រភេទធៀប)
+  // 1. Put the Khmer guest name FIRST so viewers immediately see their name in Khmer right after the domain
+  const decodedGuest = decodeKhmerQueryValue(guestName);
+  const hasGuestName = Boolean(decodedGuest && decodedGuest !== 'Your Name');
+  if (hasGuestName) {
+    url.searchParams.set('name', decodedGuest);
+  }
+
+  // 2. Append event ID so the exact invitation template & owner edits load
   if (eventId) {
     url.searchParams.set('id', eventId);
   }
 
-  if (eventType && eventType.trim()) {
-    url.searchParams.set('type', eventType.trim());
+  // 3. Only append type when the eventId does not already uniquely identify the category
+  const cleanType = eventType?.trim() || '';
+  if (cleanType && !doesEventIdImplyType(eventId, cleanType)) {
+    url.searchParams.set('type', cleanType);
   }
 
-  // Include ownerId if provided and not already encoded inside scoped eventId
+  // 4. Include ownerId only when provided and not already encoded inside scoped eventId
   const cleanOwnerId = options?.ownerId?.trim();
   if (
     cleanOwnerId &&
@@ -400,22 +429,23 @@ export function getPublicShareUrl(
     url.searchParams.set('ownerId', cleanOwnerId);
   }
 
-  // Language parameter for 100% Khmer support across social networks and Vercel
+  // 5. Khmer ('kh') is the default everywhere on Vercel & SPA, so only append lang=en when English is selected
   const rawLang = (options?.lang || 'kh').toLowerCase().trim();
-  const targetLang = rawLang === 'en' ? 'en' : 'kh';
-  url.searchParams.set('lang', targetLang);
-
-  // Khmer font parameter so Vercel viewers render the exact chosen Khmer font on any device
-  if (options?.khFont && options.khFont.trim()) {
-    const fontSlug = resolveKhmerFontSlug(options.khFont);
-    url.searchParams.set('font', fontSlug);
+  if (rawLang === 'en') {
+    url.searchParams.set('lang', 'en');
   }
 
-  url.searchParams.set('share', '1');
+  // 6. Moul is the default royal Khmer font; only append font=<slug> when a custom Khmer font is chosen
+  if (options?.khFont && options.khFont.trim()) {
+    const fontSlug = resolveKhmerFontSlug(options.khFont);
+    if (fontSlug && fontSlug !== 'moul') {
+      url.searchParams.set('font', fontSlug);
+    }
+  }
 
-  const decodedGuest = decodeKhmerQueryValue(guestName);
-  if (decodedGuest && decodedGuest !== 'Your Name') {
-    url.searchParams.set('name', decodedGuest);
+  // 7. Presence of ?name= already activates viewer share mode; only add share=1 when no guest name is present
+  if (!hasGuestName) {
+    url.searchParams.set('share', '1');
   }
 
   return normalizeShareUrlEncoding(url.toString());
@@ -487,14 +517,25 @@ export async function shortenUrl(longUrl: string, customOrigin?: string): Promis
     cleanedUrl = cleanedUrl.replace('ais-dev-', 'ais-pre-');
   }
 
-  // Guarantee Khmer language & share=1 parameters are preserved in target URL
+  // Keep clean Khmer-first parameters without re-injecting redundant lang=kh or share=1 bloat
   let targetLang = 'kh';
   try {
     const parsed = new URL(cleanedUrl);
     const rawLang = (parsed.searchParams.get('lang') || parsed.searchParams.get('l') || '').toLowerCase().trim();
     targetLang = rawLang === 'en' ? 'en' : 'kh';
-    parsed.searchParams.set('lang', targetLang);
-    if (!parsed.searchParams.get('share')) {
+    if (targetLang === 'en') {
+      parsed.searchParams.set('lang', 'en');
+    } else {
+      parsed.searchParams.delete('lang');
+      parsed.searchParams.delete('l');
+    }
+    const hasGuest = Boolean(
+      parsed.searchParams.get('name') ||
+      parsed.searchParams.get('i') ||
+      parsed.searchParams.get('guest') ||
+      parsed.searchParams.get('to')
+    );
+    if (!hasGuest && !parsed.searchParams.get('share')) {
       parsed.searchParams.set('share', '1');
     }
     cleanedUrl = normalizeShareUrlEncoding(parsed.toString());

@@ -768,23 +768,26 @@ Your presence will make our day truly special! 🙏✨`;
       });
   };
 
+  const buildTelegramCaption = () => {
+    if (language === 'kh') {
+      return `💌 ${displayHeaderKh}\n\nសូមគោរពអញ្ជើញ៖ ${displayShareGuest}\nចូលរួមជាអធិបតី និងជាភ្ញៀវកិត្តិយសក្នុងកម្មវិធីរបស់យើងខ្ញុំ៖\n${celebrationCelebrants.replace(/\*/g, '')}\n\n📅 កាលបរិច្ឆេទ៖ ${effectiveDate}\n📍 ទីតាំង៖ ${effectiveLocation}`;
+    }
+    return `💌 ${displayHeaderEn}\n\nCordially Invited: ${displayShareGuest}\n${celebrationCelebrants.replace(/\*/g, '')}\n\n📅 Date: ${effectiveDate}\n📍 Venue: ${effectiveLocation}`;
+  };
+
   const shareTelegram = async () => {
+    const caption = buildTelegramCaption();
     if (!pendingTemplateSaveRef.current && (shortUrl || !loadingShort)) {
       window.open(
-        `https://t.me/share/url?url=${encodeURIComponent(activeShareLink)}&text=${encodeURIComponent(
-          activeMessage
-        )}`,
+        `https://t.me/share/url?url=${encodeURIComponent(activeShareLink)}&text=${encodeURIComponent(caption)}`,
         '_blank',
         'noopener,noreferrer'
       );
       return;
     }
     const resolvedLink = await resolveFreshShareLink();
-    const resolvedMessage = buildShareMessage(resolvedLink);
     window.open(
-      `https://t.me/share/url?url=${encodeURIComponent(resolvedLink)}&text=${encodeURIComponent(
-        resolvedMessage
-      )}`,
+      `https://t.me/share/url?url=${encodeURIComponent(resolvedLink)}&text=${encodeURIComponent(caption)}`,
       '_blank',
       'noopener,noreferrer'
     );
@@ -1245,8 +1248,8 @@ Your presence will make our day truly special! 🙏✨`;
                         <span className="text-sm">{forceKhmerLang ? '🇰🇭' : '🌐'}</span>
                         <span className="font-semibold truncate">
                           {forceKhmerLang
-                            ? (language === 'kh' ? `លីង Vercel ភាសាខ្មែរ & ហ្វុតខ្មែរ (&lang=kh&font=${selectedKhmerFontSlug})` : `Vercel Khmer Lang & Font (&lang=kh&font=${selectedKhmerFontSlug})`)
-                            : (language === 'kh' ? `លីងភាសាតាមកម្មវិធី (&lang=en&font=${selectedKhmerFontSlug})` : `Match App Language (&lang=en&font=${selectedKhmerFontSlug})`)}
+                            ? (language === 'kh' ? 'លីង Vercel ភាសាខ្មែរស្អាត (បង្ហាញឈ្មោះភ្ញៀវជាភាសាខ្មែរ)' : 'Clean Vercel Khmer Link (Khmer Guest Name)')
+                            : (language === 'kh' ? 'លីងភាសាតាមកម្មវិធី (&lang=en)' : 'English Share Link (&lang=en)')}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -1403,34 +1406,57 @@ Your presence will make our day truly special! 🙏✨`;
 
                     {/* Direct Readable Khmer Share Link Preview Row */}
                     <div
-                      className={`p-2 rounded-xl border flex items-center gap-2 ${
+                      className={`p-2.5 rounded-xl border space-y-1.5 ${
                         isLight
                           ? 'bg-white border-amber-300 text-amber-950'
                           : 'bg-black/75 border-amber-500/35 text-amber-200'
                       }`}
                     >
-                      <Link2 className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                      <span
-                        className="flex-1 text-[11px] font-khmer truncate select-all"
-                        title={activeShareLink}
-                      >
-                        {activeShareLink}
-                      </span>
-                      <a
-                        href={activeShareLink}
-                        onClick={(e) => openPendingAwareLink(e, activeShareLink)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={`px-2 py-1 rounded-lg border text-[10.5px] font-khmer font-semibold flex items-center gap-1 shrink-0 transition-colors ${
-                          isLight
-                            ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 text-amber-900'
-                            : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-400/40 text-amber-200'
-                        }`}
-                        title={language === 'kh' ? 'បើកលីងភ្ញៀវសាកល្បង' : 'Test viewer link'}
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        <span>{language === 'kh' ? 'បើក' : 'Open'}</span>
-                      </a>
+                      <div className="flex items-start gap-2">
+                        <Link2 className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+                        <span
+                          className="flex-1 text-[11px] font-khmer break-all leading-relaxed select-all"
+                          title={activeShareLink}
+                        >
+                          {activeShareLink}
+                        </span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={handleCopyOnlyShortLink}
+                            disabled={copyingAction === 'link'}
+                            className={`px-2 py-1 rounded-lg border text-[10.5px] font-khmer font-semibold flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-70 ${
+                              isLight
+                                ? 'bg-amber-500 hover:bg-amber-600 border-amber-500 text-neutral-950'
+                                : 'bg-amber-500/25 hover:bg-amber-500/35 border-amber-400/60 text-amber-100'
+                            }`}
+                            title={language === 'kh' ? 'ចម្លងលីងភាសាខ្មែរស្អាត' : 'Copy clean Khmer link'}
+                          >
+                            {copiedLink ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                            <span>{copiedLink ? (language === 'kh' ? 'រួចរាល់' : 'Copied') : (language === 'kh' ? 'ចម្លង' : 'Copy')}</span>
+                          </button>
+                          <a
+                            href={activeShareLink}
+                            onClick={(e) => openPendingAwareLink(e, activeShareLink)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className={`px-2 py-1 rounded-lg border text-[10.5px] font-khmer font-semibold flex items-center gap-1 transition-colors ${
+                              isLight
+                                ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 text-amber-900'
+                                : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-400/40 text-amber-200'
+                            }`}
+                            title={language === 'kh' ? 'បើកលីងភ្ញៀវសាកល្បង' : 'Test viewer link'}
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            <span>{language === 'kh' ? 'បើក' : 'Open'}</span>
+                          </a>
+                        </div>
+                      </div>
+                      <p className={`text-[10px] font-khmer leading-snug ${isLight ? 'text-amber-800/80' : 'text-amber-300/75'}`}>
+                        {language === 'kh'
+                          ? 'គន្លឹះ៖ ចុចប៊ូតុង «ចម្លង» ដើម្បីរក្សាឈ្មោះភ្ញៀវជាអក្សរខ្មែរស្អាត (ជៀសវាងចម្លងពីរបារអាសយដ្ឋាន Browser ដែលប្តូរជា %E1%9E...)។'
+                          : 'Tip: Use the Copy button to keep the clean Khmer guest name (copying from the browser bar turns Khmer into %E1%9E...).'}
+                      </p>
                     </div>
 
                     {/* Header and Actions */}

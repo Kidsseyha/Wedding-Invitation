@@ -2024,15 +2024,17 @@ app.post('/api/shorten', async (req, res) => {
       cleanUrl = cleanUrl.replace('ais-dev-', 'ais-pre-');
     }
 
-    // Ensure Khmer language & share flag are preserved in target URL with clean UTF-8 %20 encoding
+    // Keep clean Khmer guest name and omit redundant default params
     let targetLang = 'kh';
     try {
       const parsedTarget = new URL(cleanUrl);
       const rawLang = (parsedTarget.searchParams.get('lang') || parsedTarget.searchParams.get('l') || '').toLowerCase().trim();
       targetLang = rawLang === 'en' ? 'en' : 'kh';
-      parsedTarget.searchParams.set('lang', targetLang);
-      if (!parsedTarget.searchParams.get('share')) {
-        parsedTarget.searchParams.set('share', '1');
+      if (targetLang === 'en') {
+        parsedTarget.searchParams.set('lang', 'en');
+      } else {
+        parsedTarget.searchParams.delete('lang');
+        parsedTarget.searchParams.delete('l');
       }
       const rawNameParam = parsedTarget.searchParams.get('name');
       if (rawNameParam) {
@@ -2040,6 +2042,15 @@ app.post('/api/shorten', async (req, res) => {
         if (cleanNameParam && cleanNameParam !== 'Your Name') {
           parsedTarget.searchParams.set('name', cleanNameParam);
         }
+      }
+      const hasGuest = Boolean(
+        parsedTarget.searchParams.get('name') ||
+        parsedTarget.searchParams.get('i') ||
+        parsedTarget.searchParams.get('guest') ||
+        parsedTarget.searchParams.get('to')
+      );
+      if (!hasGuest && !parsedTarget.searchParams.get('share')) {
+        parsedTarget.searchParams.set('share', '1');
       }
       cleanUrl = normalizeShareUrlEncoding(parsedTarget.toString());
     } catch {

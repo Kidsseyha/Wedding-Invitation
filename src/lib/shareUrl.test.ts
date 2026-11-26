@@ -17,17 +17,22 @@ import {
   PUBLIC_APP_URL,
 } from './shareUrl';
 
-test('getPublicShareUrl defaults to lang=kh and includes share=1', () => {
+test('getPublicShareUrl puts Khmer guest name first and omits redundant default params', () => {
   const urlStr = getPublicShareUrl('សុខ វិបុល', 'event_123', 'housewarming');
   const url = new URL(urlStr);
+  assert.ok(urlStr.includes('/?name=សុខ+វិបុល&'), `Expected Khmer guest name first, got: ${urlStr}`);
   assert.equal(url.searchParams.get('id'), 'event_123');
   assert.equal(url.searchParams.get('type'), 'housewarming');
-  assert.equal(url.searchParams.get('lang'), 'kh');
-  assert.equal(url.searchParams.get('share'), '1');
+  assert.equal(detectLanguageFromUrl(url.search, url.pathname), 'kh');
+  assert.equal(isSharedInvitationSearch(url.search), true);
   assert.equal(url.searchParams.get('name'), 'សុខ វិបុល');
+
+  // When no guest name is provided, share=1 is included so viewer mode still activates
+  const noGuestUrl = new URL(getPublicShareUrl('', 'event_123', 'housewarming'));
+  assert.equal(noGuestUrl.searchParams.get('share'), '1');
 });
 
-test('getPublicShareUrl supports customOrigin for Vercel deployment', () => {
+test('getPublicShareUrl supports customOrigin for Vercel deployment with clean Khmer guest name', () => {
   const urlStr = getPublicShareUrl('ក្រុមគ្រួសារ និងបងប្អូនសាច់ញាតិ', 'event_QFZHXRKzhgPYeHjpYhuI2blRUBo2', 'housewarming', {
     customOrigin: VERCEL_APP_URL,
     lang: 'kh',
@@ -35,8 +40,9 @@ test('getPublicShareUrl supports customOrigin for Vercel deployment', () => {
   const url = new URL(urlStr);
   assert.equal(url.origin, 'https://wedding-invitation-inky-kappa.vercel.app');
   assert.equal(url.searchParams.get('id'), 'event_QFZHXRKzhgPYeHjpYhuI2blRUBo2');
-  assert.equal(url.searchParams.get('lang'), 'kh');
+  assert.equal(detectLanguageFromUrl(url.search, url.pathname), 'kh');
   assert.equal(url.searchParams.get('name'), 'ក្រុមគ្រួសារ និងបងប្អូនសាច់ញាតិ');
+  assert.equal(urlStr.includes('%E1%9E'), false);
 });
 
 test('getPublicShareUrl supports English lang override when requested', () => {
@@ -157,15 +163,17 @@ test('getDefaultShareDomain defaults to vercel so shared links use Vercel with K
   }
 });
 
-test('Vercel Khmer share URLs use %20 encoding (never +) and detectLanguageFromUrl resolves KH/EN cleanly', () => {
+test('Vercel Khmer share URLs use clean + spaces (zero %20 or %E1%9E) and detectLanguageFromUrl resolves KH/EN cleanly', () => {
   const khUrl = getPublicShareUrl('លោក សុខ រតនៈវិសាល និងភរិយា', 'u_owner__wedding', 'wedding', {
     customOrigin: VERCEL_APP_URL,
     lang: 'km',
   });
-  assert.equal(khUrl.includes('+'), false, 'Khmer guest URL should use %20 instead of +');
+  assert.equal(khUrl.includes('%20'), false, 'Khmer guest URL should use clean + instead of %20');
+  assert.equal(khUrl.includes('%E1%9E'), false, 'Khmer guest URL should not show %E1%9E gibberish');
+  assert.ok(khUrl.startsWith(`${VERCEL_APP_URL}/?name=លោក+សុខ+រតនៈវិសាល+និងភរិយា`));
   const parsed = new URL(khUrl);
   assert.equal(parsed.origin, VERCEL_APP_URL);
-  assert.equal(parsed.searchParams.get('lang'), 'kh');
+  assert.equal(detectLanguageFromUrl(parsed.search, parsed.pathname), 'kh');
   assert.equal(extractGuestNameFromSearch(parsed.search), 'លោក សុខ រតនៈវិសាល និងភរិយា');
   assert.equal(decodeKhmerQueryValue('លោក+សុខ%20រតនៈ'), 'លោក សុខ រតនៈ');
 
@@ -195,9 +203,8 @@ test('distinct templates and distinct guest names produce unique short codes pre
       });
       const parsed = new URL(shareUrl);
       assert.equal(parsed.searchParams.get('id'), tpl.id);
-      assert.equal(parsed.searchParams.get('type'), tpl.type);
       assert.equal(extractGuestNameFromSearch(parsed.search), guest);
-      assert.equal(parsed.searchParams.get('share'), '1');
+      assert.equal(isSharedInvitationSearch(parsed.search), true);
 
       const code = generateDeterministicShortCode(shareUrl);
       assert.equal(seenCodes.has(code), false, `Duplicate short code ${code} for ${tpl.id} / ${guest}`);
@@ -231,16 +238,16 @@ test('shortenUrl falls back to self-contained full share URL when short-link per
     assert.equal(parsed.origin, VERCEL_APP_URL);
     assert.equal(parsed.pathname, '/');
     assert.equal(parsed.searchParams.get('id'), 'u_owner__modern-wedding-mw001');
-    assert.equal(parsed.searchParams.get('type'), 'wedding');
-    assert.equal(parsed.searchParams.get('lang'), 'kh');
-    assert.equal(parsed.searchParams.get('share'), '1');
+    assert.equal(detectLanguageFromUrl(parsed.search, parsed.pathname), 'kh');
+    assert.equal(isSharedInvitationSearch(parsed.search), true);
     assert.equal(extractGuestNameFromSearch(parsed.search), 'លោក សុខ ដារ៉ា');
+    assert.ok(resolved.startsWith(`${VERCEL_APP_URL}/?name=លោក+សុខ+ដារ៉ា&id=u_owner__modern-wedding-mw001`));
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
 
-test('Vercel Khmer font support encodes &font= slug and resolves web-safe Google Font stacks for viewers', () => {
+test('Vercel Khmer font support encodes non-default &font= slug and resolves web-safe Google Font stacks for viewers', () => {
   assert.ok(KHMER_SHARE_FONTS.length >= 12);
   assert.equal(resolveKhmerFontSlug("'Moulpali', serif"), 'moulpali');
   assert.equal(resolveKhmerFontSlug("'AKbalthom Kbach', 'Moul', serif"), 'kbach');
@@ -254,7 +261,7 @@ test('Vercel Khmer font support encodes &font= slug and resolves web-safe Google
   });
   const parsed = new URL(urlStr);
   assert.equal(parsed.origin, VERCEL_APP_URL);
-  assert.equal(parsed.searchParams.get('lang'), 'kh');
+  assert.equal(detectLanguageFromUrl(parsed.search, parsed.pathname), 'kh');
   assert.equal(parsed.searchParams.get('font'), 'moulpali');
 
   const extractedFont = extractKhmerFontFromSearch(parsed.search);
@@ -265,27 +272,31 @@ test('Vercel Khmer font support encodes &font= slug and resolves web-safe Google
   );
 });
 
-test('Khmer guest name share links render readable Khmer script without %E1%9E gibberish and decode multi-encoded values', () => {
-  const encodedSample = '%E1%9E%9B%E1%9F%84%E1%9E%80%20%E1%9E%9C%E1%9F%89%E1%9E%B6%E1%9E%93%E1%9F%8B%20%E1%9E%9F%E1%9E%BB%E1%9E%81%E1%9E%B6';
+test('Khmer guest name share links put readable Khmer name first without %E1%9E/%20 or scammy query bloat', () => {
+  const encodedSample = '%E1%9E%9B%E1%9F%84%E1%9E%80%20%E1%9E%93%E1%9E%B7%E1%9E%84%E1%9E%A2%E1%9F%92%E1%9E%93%E1%9E%80%E1%9E%9F%E1%9F%92%E1%9E%9A%E1%9E%B8';
   const doubleEncodedSample = encodeURIComponent(encodedSample);
 
-  assert.equal(decodeKhmerQueryValue(encodedSample), 'លោក វ៉ាន់ សុខា');
-  assert.equal(decodeKhmerQueryValue(doubleEncodedSample), 'លោក វ៉ាន់ សុខា');
-  assert.equal(extractGuestNameFromSearch(`?name=${encodedSample}`), 'លោក វ៉ាន់ សុខា');
-  assert.equal(extractGuestNameFromSearch(`?name=${doubleEncodedSample}`), 'លោក វ៉ាន់ សុខា');
+  assert.equal(decodeKhmerQueryValue(encodedSample), 'លោក និងអ្នកស្រី');
+  assert.equal(decodeKhmerQueryValue(doubleEncodedSample), 'លោក និងអ្នកស្រី');
+  assert.equal(extractGuestNameFromSearch(`?name=${encodedSample}`), 'លោក និងអ្នកស្រី');
+  assert.equal(extractGuestNameFromSearch(`?name=${doubleEncodedSample}`), 'លោក និងអ្នកស្រី');
 
-  const urlFromKhmer = getPublicShareUrl('លោក វ៉ាន់ សុខា', 'cmgrawhnk0003le0434762j7n', 'wedding', {
+  const urlFromKhmer = getPublicShareUrl('លោក និងអ្នកស្រី', 'u_seyhafb7_2a0lb5__modern-wedding-mw001', 'wedding', {
     customOrigin: VERCEL_APP_URL,
     lang: 'kh',
     khFont: 'moul',
   });
-  assert.ok(urlFromKhmer.includes('name=លោក%20វ៉ាន់%20សុខា'), `Expected readable Khmer name in URL, got: ${urlFromKhmer}`);
-  assert.equal(urlFromKhmer.includes('%E1%9E'), false, 'Share URL should not show raw %E1%9E percent-encoding for Khmer');
+  assert.equal(
+    urlFromKhmer,
+    `${VERCEL_APP_URL}/?name=លោក+និងអ្នកស្រី&id=u_seyhafb7_2a0lb5__modern-wedding-mw001`,
+    `Expected clean Khmer-first URL, got: ${urlFromKhmer}`
+  );
+  assert.equal(urlFromKhmer.includes('%'), false, 'Clean Khmer link should have zero percent-encoding');
   assert.equal(urlFromKhmer.includes(' '), false, 'Share URL must not contain raw spaces that break hyperlinks in chat apps');
-  assert.equal(new URL(urlFromKhmer).searchParams.get('name'), 'លោក វ៉ាន់ សុខា');
+  assert.equal(new URL(urlFromKhmer).searchParams.get('name'), 'លោក និងអ្នកស្រី');
 
   // Passing an already percent-encoded Khmer guest name must never double-encode
-  const urlFromEncoded = getPublicShareUrl(encodedSample, 'cmgrawhnk0003le0434762j7n', 'wedding', {
+  const urlFromEncoded = getPublicShareUrl(encodedSample, 'u_seyhafb7_2a0lb5__modern-wedding-mw001', 'wedding', {
     customOrigin: VERCEL_APP_URL,
     lang: 'kh',
     khFont: 'moul',
@@ -297,7 +308,7 @@ test('Khmer guest name share links render readable Khmer script without %E1%9E g
     customOrigin: VERCEL_APP_URL,
     lang: 'kh',
   });
-  assert.ok(urlWithAmp.includes('name=លោក%20វ៉ាន់%20សុខា%20%26%20ភរិយា'));
+  assert.ok(urlWithAmp.startsWith(`${VERCEL_APP_URL}/?name=លោក+វ៉ាន់+សុខា+%26+ភរិយា`));
   assert.equal(new URL(urlWithAmp).searchParams.get('name'), 'លោក វ៉ាន់ សុខា & ភរិយា');
 });
 
