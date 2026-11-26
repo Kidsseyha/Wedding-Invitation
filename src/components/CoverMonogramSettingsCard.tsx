@@ -1,4 +1,4 @@
-import { Sparkles, RefreshCw, Check, Save } from 'lucide-react';
+import { Sparkles, RefreshCw, Check, Save, Languages } from 'lucide-react';
 import { Language, TemplateConfig } from '../types';
 import { ThemeMode } from './ThemeToggle';
 import {
@@ -40,7 +40,8 @@ export default function CoverMonogramSettingsCard({
   justSaved = false,
   compact = false,
 }: CoverMonogramSettingsCardProps) {
-  const isKhmer = language === 'kh';
+  const monogramLang: Language = config.cover_monogram_lang || language || 'kh';
+  const isKhmer = monogramLang === 'kh';
   const autoGroomEn = getFirstNameInitial(groomEn, groom, 'M');
   const autoBrideEn = getFirstNameInitial(brideEn, bride, 'V');
   const autoGroomKh = getFirstNameInitial(groom, groomEn, 'ម');
@@ -54,7 +55,7 @@ export default function CoverMonogramSettingsCard({
     /^[A-Za-z0-9.\s]+$/.test(effectiveGroomInit) &&
     (singlePerson || /^[A-Za-z0-9.\s]+$/.test(effectiveBrideInit));
   const effectiveFontFamily = resolveMonogramFontFamily(
-    language,
+    monogramLang,
     config.cover_monogram_font_family,
     config.cover_monogram_font_family_en,
     isLatinPreview
@@ -192,6 +193,57 @@ export default function CoverMonogramSettingsCard({
         </div>
 
         <div className="space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span
+              className={`text-[11px] font-khmer font-semibold ${
+                theme === 'light' ? 'text-amber-950/80' : 'text-amber-200/80'
+              }`}
+            >
+              {singlePerson
+                ? isKhmer
+                  ? 'ឈ្មោះម្ចាស់កម្មវិធី (ភាសាខ្មែរ):'
+                  : 'Host Name (English):'
+                : isKhmer
+                ? 'ឈ្មោះកូនប្រុស-ស្រី (ភាសាខ្មែរ):'
+                : 'Groom & Bride Names (English):'}
+            </span>
+            <button
+              type="button"
+              onClick={() => onUpdateConfig('cover_monogram_lang', isKhmer ? 'en' : 'kh')}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-khmer font-bold inline-flex items-center gap-1.5 border transition-all active:scale-95 cursor-pointer ${
+                theme === 'light'
+                  ? 'bg-white hover:bg-amber-100 text-amber-950 border-amber-300 shadow-2xs'
+                  : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 border-amber-500/40'
+              }`}
+              title={
+                isKhmer
+                  ? 'ប្តូរឈ្មោះកូនប្រុស និងកូនស្រី ពីភាសាខ្មែរ ទៅជាភាសាអង់គ្លេស (Change Groom & Bride names to English)'
+                  : 'ប្តូរឈ្មោះកូនប្រុស និងកូនស្រី ពីភាសាអង់គ្លេស ទៅជាភាសាខ្មែរ (Change Groom & Bride names to Khmer)'
+              }
+            >
+              <Languages className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+              <span
+                className={
+                  isKhmer
+                    ? 'text-amber-500 font-extrabold underline decoration-amber-500/60 underline-offset-2'
+                    : 'opacity-70'
+                }
+              >
+                ខ្មែរ (KH)
+              </span>
+              <span className="opacity-40">⇄</span>
+              <span
+                className={
+                  !isKhmer
+                    ? 'text-amber-500 font-extrabold underline decoration-amber-500/60 underline-offset-2'
+                    : 'opacity-70'
+                }
+              >
+                English (EN)
+              </span>
+            </button>
+          </div>
+
           <div className={`grid grid-cols-1 ${singlePerson ? '' : 'sm:grid-cols-2'} gap-3`}>
             <div
               className={`px-3 py-2.5 rounded-xl border flex items-center justify-between gap-2 ${
@@ -202,7 +254,13 @@ export default function CoverMonogramSettingsCard({
             >
               <div className="min-w-0">
                 <span className="block text-[10px] font-khmer opacity-75">
-                  {singlePerson ? 'ម្ចាស់កម្មវិធី (ពីគំរូធៀប):' : 'កូនប្រុស (ពីគំរូធៀបអាពាហ៍ពិពាហ៍):'}
+                  {singlePerson
+                    ? isKhmer
+                      ? 'ម្ចាស់កម្មវិធី (ពីគំរូធៀប):'
+                      : 'Host (from template):'
+                    : isKhmer
+                    ? 'កូនប្រុស (ពីគំរូធៀបអាពាហ៍ពិពាហ៍):'
+                    : 'Groom (from wedding template):'}
                 </span>
                 <span className="block text-xs font-khmer font-bold truncate">
                   {isKhmer ? groom || 'រ៉ូ ម៉ាឡេ' : groomEn || groom || 'Ro Malay'}
@@ -226,7 +284,9 @@ export default function CoverMonogramSettingsCard({
               >
                 <div className="min-w-0">
                   <span className="block text-[10px] font-khmer opacity-75">
-                    កូនស្រី (ពីគំរូធៀបអាពាហ៍ពិពាហ៍):
+                    {isKhmer
+                      ? 'កូនស្រី (ពីគំរូធៀបអាពាហ៍ពិពាហ៍):'
+                      : 'Bride (from wedding template):'}
                   </span>
                   <span className="block text-xs font-khmer font-bold truncate">
                     {isKhmer ? bride || 'អួម វល្ខ័ក' : brideEn || bride || 'Uom Volak'}
@@ -367,7 +427,7 @@ export default function CoverMonogramSettingsCard({
             const isSelected = activeSelectedFont === font.fontFamily;
             return (
               <button
-                key={`mono-font-${language}-${font.id}`}
+                key={`mono-font-${monogramLang}-${font.id}`}
                 type="button"
                 onClick={() => onUpdateConfig(activeFontKey, font.fontFamily)}
                 className={`p-2 rounded-xl border text-left transition-all flex flex-col gap-0.5 active:scale-95 cursor-pointer ${

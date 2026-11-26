@@ -87,6 +87,7 @@ export interface TemplateConfig {
   cover_en_font_family?: string;
   cover_monogram_groom?: string;
   cover_monogram_bride?: string;
+  cover_monogram_lang?: 'kh' | 'en';
   cover_monogram_font_family?: string;
   cover_monogram_font_family_en?: string;
   cover_monogram_color?: string;

@@ -58,13 +58,19 @@ export default function CoverInfoEditor({
     formData.name?.includes('House');
   const isWedding = !isAnniversary && !isBirthday && !isEngagement && !isHousewarming;
 
-  const groomInit = getFirstNameInitial(formData.groom, formData.groomEn, 'ម');
-  const brideInit = getFirstNameInitial(formData.bride, formData.brideEn, 'វ');
+  const monogramLang = formData.config.cover_monogram_lang || 'kh';
+  const isKhmerMonogram = monogramLang === 'kh';
+  const groomInit = isKhmerMonogram
+    ? getFirstNameInitial(formData.groom, formData.groomEn, 'ម')
+    : getFirstNameInitial(formData.groomEn, formData.groom, 'M');
+  const brideInit = isKhmerMonogram
+    ? getFirstNameInitial(formData.bride, formData.brideEn, 'វ')
+    : getFirstNameInitial(formData.brideEn, formData.bride, 'V');
   const isLatinMonogram =
     /^[A-Za-z0-9.\s]+$/.test(groomInit) &&
     (Boolean(formData.singlePerson) || /^[A-Za-z0-9.\s]+$/.test(brideInit));
   const monogramFontFamily = resolveMonogramFontFamily(
-    'kh',
+    monogramLang,
     formData.config.cover_monogram_font_family,
     formData.config.cover_monogram_font_family_en,
     isLatinMonogram

@@ -117,6 +117,7 @@ interface EnvelopeModalProps {
   coverEnFontFamily?: string;
   coverMonogramGroom?: string;
   coverMonogramBride?: string;
+  coverMonogramLang?: 'kh' | 'en';
   coverMonogramFontFamily?: string;
   coverMonogramFontFamilyEn?: string;
   coverMonogramColor?: string;
@@ -191,6 +192,7 @@ export default function EnvelopeModal({
   coverEnFontFamily,
   coverMonogramGroom,
   coverMonogramBride,
+  coverMonogramLang,
   coverMonogramFontFamily,
   coverMonogramFontFamilyEn,
   coverMonogramColor,
@@ -833,6 +835,7 @@ export default function EnvelopeModal({
                         language={language}
                         coverMonogramGroom={coverMonogramGroom}
                         coverMonogramBride={coverMonogramBride}
+                        coverMonogramLang={coverMonogramLang}
                         coverMonogramFontFamily={resolvedMonogramFontFamily}
                         coverMonogramFontFamilyEn={coverMonogramFontFamilyEn}
                         coverMonogramColor={coverMonogramColor}
@@ -911,6 +914,7 @@ export default function EnvelopeModal({
                         subtitleKh={subtitleKh}
                         coverMonogramGroom={coverMonogramGroom}
                         coverMonogramBride={coverMonogramBride}
+                        coverMonogramLang={coverMonogramLang}
                         coverMonogramFontFamily={resolvedMonogramFontFamily}
                         coverMonogramFontFamilyEn={coverMonogramFontFamilyEn}
                         coverMonogramColor={coverMonogramColor}

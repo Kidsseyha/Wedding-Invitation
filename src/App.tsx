@@ -2687,6 +2687,7 @@ export default function App() {
         coverEnFontFamily={config.cover_en_font_family}
         coverMonogramGroom={config.cover_monogram_groom}
         coverMonogramBride={config.cover_monogram_bride}
+        coverMonogramLang={config.cover_monogram_lang}
         coverMonogramFontFamily={config.cover_monogram_font_family}
         coverMonogramFontFamilyEn={config.cover_monogram_font_family_en}
         coverMonogramColor={config.cover_monogram_color}

@@ -13,6 +13,7 @@ interface TheapKhmerTemplate15CoverProps {
   subtitleEn?: string;
   coverMonogramGroom?: string;
   coverMonogramBride?: string;
+  coverMonogramLang?: 'kh' | 'en';
   coverMonogramFontFamily?: string;
   coverMonogramFontFamilyEn?: string;
   coverMonogramColor?: string;
@@ -59,6 +60,7 @@ export default function TheapKhmerTemplate15Cover({
   subtitleEn = 'Wedding Celebration',
   coverMonogramGroom,
   coverMonogramBride,
+  coverMonogramLang,
   coverMonogramFontFamily,
   coverMonogramFontFamilyEn,
   coverMonogramColor,
@@ -86,17 +88,18 @@ export default function TheapKhmerTemplate15Cover({
       ? 'លោក វ៉ាន់ សុខា'
       : 'Honored Guest';
 
-  const isKhmer = language === 'kh';
-  const groomInit = isKhmer
+  const effectiveMonogramLang = coverMonogramLang || language || 'kh';
+  const isKhmerMonogram = effectiveMonogramLang === 'kh';
+  const groomInit = isKhmerMonogram
     ? getFirstNameInitial(groom, groomEn, 'ម')
     : getFirstNameInitial(groomEn, groom, 'M');
-  const brideInit = isKhmer
+  const brideInit = isKhmerMonogram
     ? getFirstNameInitial(bride, brideEn, 'វ')
     : getFirstNameInitial(brideEn, bride, 'V');
   const isLatinMonogram =
     /^[A-Za-z0-9.\s]+$/.test(groomInit) && (singlePerson || /^[A-Za-z0-9.\s]+$/.test(brideInit));
   const monogramFontFamily = resolveMonogramFontFamily(
-    language,
+    effectiveMonogramLang,
     coverMonogramFontFamily,
     coverMonogramFontFamilyEn,
     isLatinMonogram

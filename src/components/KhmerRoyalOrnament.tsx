@@ -3893,6 +3893,7 @@ export function KhmerRoyalModernWeddingCover({
   language = 'kh',
   coverMonogramGroom,
   coverMonogramBride,
+  coverMonogramLang,
   coverMonogramFontFamily,
   coverMonogramFontFamilyEn,
   coverMonogramColor,
@@ -3919,6 +3920,7 @@ export function KhmerRoyalModernWeddingCover({
   language?: string;
   coverMonogramGroom?: string;
   coverMonogramBride?: string;
+  coverMonogramLang?: 'kh' | 'en';
   coverMonogramFontFamily?: string;
   coverMonogramFontFamilyEn?: string;
   coverMonogramColor?: string;
@@ -3934,17 +3936,18 @@ export function KhmerRoyalModernWeddingCover({
   const [isEditingInlineGuest, setIsEditingInlineGuest] = useState(false);
   const [tempGuestInput, setTempGuestInput] = useState(guestName || '');
 
-  const isKhmer = language === 'kh';
-  const groomInit = isKhmer
+  const effectiveMonogramLang = coverMonogramLang || language || 'kh';
+  const isKhmerMonogram = effectiveMonogramLang === 'kh';
+  const groomInit = isKhmerMonogram
     ? getFirstNameInitial(groom, groomEn, 'ម')
     : getFirstNameInitial(groomEn || 'Ro Malay', groom, 'M');
-  const brideInit = isKhmer
+  const brideInit = isKhmerMonogram
     ? getFirstNameInitial(bride, brideEn, 'វ')
     : getFirstNameInitial(brideEn || 'Uom Volak', bride, 'V');
   const isLatinMonogram =
     /^[A-Za-z0-9.\s]+$/.test(groomInit) && (singlePerson || /^[A-Za-z0-9.\s]+$/.test(brideInit));
   const monogramFontFamily = resolveMonogramFontFamily(
-    language,
+    effectiveMonogramLang,
     coverMonogramFontFamily,
     coverMonogramFontFamilyEn,
     isLatinMonogram

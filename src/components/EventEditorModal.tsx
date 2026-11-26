@@ -565,6 +565,7 @@ export default function EventEditorModal({
       'cover_monogram_font_size',
       'cover_monogram_font_family',
       'cover_monogram_font_family_en',
+      'cover_monogram_lang',
       'cover_monogram_groom',
       'cover_monogram_bride',
     ];
