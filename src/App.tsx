@@ -1890,9 +1890,15 @@ export default function App() {
             ? `&ownerEmail=${encodeURIComponent(activeUserScope.ownerEmail)}`
             : '';
 
+        const isFastReloadBoot = Boolean((window as any).__FAST_RELOAD_FORCE_SERVER__);
+        if (isFastReloadBoot) {
+          (window as any).__FAST_RELOAD_FORCE_SERVER__ = false;
+        }
+
         const [primaryFbEvent, ownerDefaultApiEvent] = await Promise.all([
           fetchEventFromFirebase(fetchId, targetOwnerFilter || undefined, {
             includeServerApi: true,
+            forceServer: isFastReloadBoot,
             templateType: urlTypeParam || undefined,
             ownerEmail: !effectiveShareMode ? activeUserScope.ownerEmail || undefined : undefined,
           }),
@@ -2887,7 +2893,13 @@ export default function App() {
           id="reload-refresh-btn"
           type="button"
           disabled={isRefreshingFromDb}
-          onClick={handleRefreshFromDatabase}
+          onClick={() => {
+            setIsRefreshingFromDb(true);
+            if (typeof window !== 'undefined') {
+              (window as any).__FAST_RELOAD_FORCE_SERVER__ = true;
+              window.dispatchEvent(new CustomEvent('wedding:fast-page-reload'));
+            }
+          }}
           whileHover={{ scale: 1.05, y: -2 }}
           whileTap={{ scale: 0.94 }}
           className="group relative flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 min-h-[38px] sm:min-h-[40px] rounded-full border border-amber-500/60 bg-gradient-to-br from-black/95 via-neutral-900 to-black text-amber-200 shadow-[0_4px_18px_rgba(0,0,0,0.5)] backdrop-blur-md hover:border-amber-400 hover:text-amber-100 hover:shadow-[0_4px_22px_rgba(245,158,11,0.4)] transition-all ring-1 ring-amber-500/30 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-black cursor-pointer disabled:opacity-70"

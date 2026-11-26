@@ -1,4 +1,4 @@
-import { Component, ReactNode } from 'react';
+import { Component, ReactNode, useState, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SpeedInsights } from '@vercel/speed-insights/react';
 import App from './App';
@@ -132,9 +132,48 @@ const root = createRoot(container, {
   },
 });
 
+function RootReloadController() {
+  const [reloadKey, setReloadKey] = useState(0);
+  const [isReloading, setIsReloading] = useState(false);
+
+  useEffect(() => {
+    const onFastReload = () => {
+      setIsReloading(true);
+      try {
+        if (window.location.hash === '#template') {
+          window.history.replaceState({}, '', window.location.pathname + window.location.search);
+        }
+        window.scrollTo({ top: 0, left: 0, behavior: 'instant' as ScrollBehavior });
+      } catch {}
+      window.setTimeout(() => {
+        setReloadKey((k) => k + 1);
+        window.setTimeout(() => {
+          setIsReloading(false);
+        }, 90);
+      }, 50);
+    };
+    window.addEventListener('wedding:fast-page-reload', onFastReload);
+    return () => window.removeEventListener('wedding:fast-page-reload', onFastReload);
+  }, []);
+
+  return (
+    <>
+      <App key={reloadKey} />
+      {isReloading && (
+        <div
+          className="fixed inset-0 z-[9999] bg-[#121110]/70 backdrop-blur-xs pointer-events-none transition-opacity duration-100"
+          aria-hidden="true"
+        >
+          <div className="h-1 w-full bg-gradient-to-r from-amber-500 via-yellow-300 to-amber-500 animate-pulse" />
+        </div>
+      )}
+    </>
+  );
+}
+
 root.render(
   <SafeErrorBoundary>
-    <App />
+    <RootReloadController />
     <SpeedInsights />
   </SafeErrorBoundary>
 );
