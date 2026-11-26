@@ -372,11 +372,35 @@ export default function ShareInvitationModal({
       : rawActiveEventId;
 
   useEffect(() => {
-    if (isOpen) {
+    let isMounted = true;
+    const loadDbGuests = () => {
       fetchGuestsFromFirebase(effectiveScope, activeEventId, selectedCategory).then((list) => {
-        setAllDbGuests(Array.isArray(list) ? list : []);
+        if (isMounted) {
+          setAllDbGuests(Array.isArray(list) ? list : []);
+        }
       });
+    };
+
+    if (isOpen) {
+      loadDbGuests();
     }
+
+    const handleGuestsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ ownerId?: string; eventId?: string; guests?: GuestPreset[] }>).detail;
+      if (detail?.ownerId && detail.ownerId !== effectiveScope) return;
+      if (detail?.eventId && detail.eventId !== activeEventId) return;
+      if (Array.isArray(detail?.guests)) {
+        if (isMounted) setAllDbGuests(detail.guests);
+        return;
+      }
+      loadDbGuests();
+    };
+
+    window.addEventListener('wedding:guests-updated', handleGuestsUpdated);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('wedding:guests-updated', handleGuestsUpdated);
+    };
   }, [isOpen, effectiveScope, activeEventId, selectedCategory]);
 
   const runtimeVercelOrigin = getPreferredVercelOrigin();
@@ -1662,14 +1686,29 @@ Your presence will make our day truly special! 🙏✨`;
                                             onClick={async () => {
                                               setBatchGuests(batchGuests.filter((g) => g.trim() !== name));
                                               const dbMatch = allDbGuests.find((g) => (g.name || '').trim() === name);
+                                              setAllDbGuests(allDbGuests.filter((g) => (g.name || '').trim() !== name));
                                               if (dbMatch && dbMatch.id) {
                                                 try {
                                                   await deleteGuestFromFirebase(dbMatch.id, effectiveScope, activeEventId);
+                                                  const reloadedGuests = await fetchGuestsFromFirebase(
+                                                    effectiveScope,
+                                                    activeEventId,
+                                                    selectedCategory
+                                                  );
+                                                  setAllDbGuests(Array.isArray(reloadedGuests) ? reloadedGuests : []);
+                                                  window.dispatchEvent(
+                                                    new CustomEvent('wedding:guests-updated', {
+                                                      detail: {
+                                                        ownerId: effectiveScope,
+                                                        eventId: activeEventId,
+                                                        guests: reloadedGuests,
+                                                      },
+                                                    })
+                                                  );
                                                 } catch (err) {
                                                   console.error('Error deleting guest:', err);
                                                 }
                                               }
-                                              setAllDbGuests(allDbGuests.filter((g) => (g.name || '').trim() !== name));
                                             }}
                                             className="p-1.5 rounded-lg text-neutral-400 hover:text-rose-500 hover:bg-rose-500/10 transition-colors"
                                             title={language === 'kh' ? 'លុប' : 'Delete'}

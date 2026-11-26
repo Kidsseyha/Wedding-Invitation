@@ -96,7 +96,9 @@ export async function fetchGuestsFromFirebase(
 
   // 1. Check scoped server API first (strictly filtered by ownerId + eventId)
   try {
-    const res = await fetch(buildGuestsApiUrl(effectiveOwner, effectiveEventId));
+    const res = await fetch(buildGuestsApiUrl(effectiveOwner, effectiveEventId), {
+      cache: 'no-store',
+    });
     if (res.ok) {
       const data = await res.json();
       if (data && data.success && Array.isArray(data.guests)) {
@@ -303,7 +305,7 @@ export function subscribeToGuests(
   const storageKey = getGuestStorageKey(effectiveOwner, effectiveEventId);
 
   const fallbackGuests = () => {
-    fetch(buildGuestsApiUrl(effectiveOwner, effectiveEventId))
+    fetch(buildGuestsApiUrl(effectiveOwner, effectiveEventId), { cache: 'no-store' })
       .then(res => res.json())
       .then(data => {
         if (data && data.success && Array.isArray(data.guests)) {
@@ -584,6 +586,13 @@ export async function deleteGuestFromFirebase(id: string, ownerId?: string, even
         const list = parsed.filter((g: any) => g.id !== id);
         localStorage.setItem(storageKey, JSON.stringify(list));
       }
+    } else {
+      const defaults = getScopedDefaultGuests(effectiveOwner, effectiveEventId);
+      if (defaults.some(d => d.id === id)) {
+        localStorage.setItem(storageKey, JSON.stringify(defaults.filter(d => d.id !== id)));
+      } else {
+        localStorage.setItem(storageKey, JSON.stringify([]));
+      }
     }
   } catch {
     // ignore
@@ -592,6 +601,7 @@ export async function deleteGuestFromFirebase(id: string, ownerId?: string, even
   try {
     await fetch(buildGuestsApiUrl(effectiveOwner, effectiveEventId, { id }), {
       method: 'DELETE',
+      cache: 'no-store',
     });
   } catch {
     // ignore

@@ -5,7 +5,8 @@ import { MessageSquareHeart, Heart, Send, Sparkles, Trash2, ShieldCheck, Lock, X
 import confetti from 'canvas-confetti';
 import { INITIAL_WISHES } from '../data/weddingData';
 import { Language, WishMessage } from '../types';
-import { getSavedGuests } from '../data/guests';
+import { getSavedGuests, GuestPreset } from '../data/guests';
+import { fetchGuestsFromFirebase } from '../lib/firebaseGuests';
 import { DEFAULT_PRESET_EVENT_ID, extractScopeFromEventId, resolveUserScope } from '../lib/userScope';
 import {
   subscribeToWishes,
@@ -196,13 +197,48 @@ export default function WishesSection({
 
   // Fetch list of honored guests for auto-suggestion scoped to current owner & invitation
   useEffect(() => {
-    try {
-      const list = getSavedGuests(effectiveOwnerId, effectiveEventId);
+    let isMounted = true;
+    const applyGuestNames = (list: GuestPreset[]) => {
+      if (!isMounted) return;
       setSavedGuestNames((list || []).map(g => g.name).filter(Boolean));
+    };
+
+    try {
+      applyGuestNames(getSavedGuests(effectiveOwnerId, effectiveEventId, eventType));
     } catch {
       setSavedGuestNames([]);
     }
-  }, [effectiveOwnerId, effectiveEventId]);
+
+    const reloadFromDb = () => {
+      fetchGuestsFromFirebase(effectiveOwnerId, effectiveEventId, eventType)
+        .then((fresh) => {
+          if (Array.isArray(fresh)) applyGuestNames(fresh);
+        })
+        .catch(() => {});
+    };
+
+    reloadFromDb();
+
+    const handleGuestsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ ownerId?: string; eventId?: string; guests?: GuestPreset[] }>).detail;
+      if (detail?.ownerId && detail.ownerId !== effectiveOwnerId) return;
+      if (detail?.eventId && detail.eventId !== effectiveEventId) return;
+      if (Array.isArray(detail?.guests)) {
+        applyGuestNames(detail.guests);
+        return;
+      }
+      reloadFromDb();
+    };
+
+    window.addEventListener('wedding:guests-updated', handleGuestsUpdated);
+    window.addEventListener('wedding:db-refresh', reloadFromDb);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('wedding:guests-updated', handleGuestsUpdated);
+      window.removeEventListener('wedding:db-refresh', reloadFromDb);
+    };
+  }, [effectiveOwnerId, effectiveEventId, eventType]);
 
   const triggerHeartCelebration = () => {
     // 1. Generate floating rising heart particles

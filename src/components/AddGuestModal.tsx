@@ -151,13 +151,25 @@ export default function AddGuestModal({
         })
         .catch(() => {});
     };
+    const handleGuestsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ ownerId?: string; eventId?: string; guests?: GuestPreset[] }>).detail;
+      if (detail?.ownerId && detail.ownerId !== effectiveOwnerId) return;
+      if (detail?.eventId && detail.eventId !== effectiveEventId) return;
+      if (Array.isArray(detail?.guests)) {
+        setSavedGuests(detail.guests);
+        return;
+      }
+      handleDbRefresh();
+    };
     if (isOpen) {
       handleDbRefresh();
     }
     window.addEventListener('wedding:db-refresh', handleDbRefresh);
+    window.addEventListener('wedding:guests-updated', handleGuestsUpdated);
     return () => {
       unsubscribe();
       window.removeEventListener('wedding:db-refresh', handleDbRefresh);
+      window.removeEventListener('wedding:guests-updated', handleGuestsUpdated);
     };
   }, [effectiveOwnerId, effectiveEventId, effectiveEventType, isOpen]);
 
@@ -333,7 +345,13 @@ export default function AddGuestModal({
         effectiveEventId,
         effectiveEventType
       );
-      setSavedGuests(prev => [...prev.filter(g => g.id !== saved.id), saved]);
+      const nextGuests = getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType);
+      setSavedGuests(nextGuests);
+      window.dispatchEvent(
+        new CustomEvent('wedding:guests-updated', {
+          detail: { ownerId: effectiveOwnerId, eventId: effectiveEventId, guests: nextGuests },
+        })
+      );
       setGuestInput(newGuestQuickName.trim());
       setCategory(newGuestQuickCategory);
       setNewGuestQuickName('');
@@ -368,7 +386,13 @@ export default function AddGuestModal({
         effectiveEventId,
         effectiveEventType
       );
-      setSavedGuests(prev => [...prev.filter(g => g.id !== saved.id), saved]);
+      const nextGuests = getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType);
+      setSavedGuests(nextGuests);
+      window.dispatchEvent(
+        new CustomEvent('wedding:guests-updated', {
+          detail: { ownerId: effectiveOwnerId, eventId: effectiveEventId, guests: nextGuests },
+        })
+      );
       showFeedback(language === 'kh' ? 'បានរក្សាទុកឈ្មោះក្នុង Database!' : 'Saved to Database!');
     } catch (err) {
       showFeedback(language === 'kh' ? 'បានរក្សាទុកឈ្មោះក្នុង Drop box!' : 'Saved to drop box!');
@@ -404,7 +428,13 @@ export default function AddGuestModal({
         effectiveEventId,
         effectiveEventType
       );
-      setSavedGuests(prev => prev.map(g => (g.id === id ? updated : g)));
+      const nextGuests = getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType);
+      setSavedGuests(nextGuests);
+      window.dispatchEvent(
+        new CustomEvent('wedding:guests-updated', {
+          detail: { ownerId: effectiveOwnerId, eventId: effectiveEventId, guests: nextGuests },
+        })
+      );
       setEditingGuestId(null);
       showFeedback(language === 'kh' ? 'បានកែប្រែឈ្មោះដោយជោគជ័យ!' : 'Updated successfully!');
     } catch (err) {
@@ -414,13 +444,28 @@ export default function AddGuestModal({
     }
   };
 
-  // Delete guest from list (Syncs to Firebase & server scoped by user + invitation)
+  // Delete guest from list (Syncs to Firebase & server scoped by user + invitation, then reloads guest database)
   const handleDeleteGuest = async (id: string, name: string) => {
     setIsSyncingWithCloud(true);
+    setSavedGuests(prev => prev.filter(g => g.id !== id));
     try {
       await deleteGuestFromFirebase(id, effectiveOwnerId, effectiveEventId);
-      setSavedGuests(prev => prev.filter(g => g.id !== id));
-      showFeedback(language === 'kh' ? `បានលុប "${name}"` : `Deleted "${name}"`);
+      const reloadedGuests = await fetchGuestsFromFirebase(
+        effectiveOwnerId,
+        effectiveEventId,
+        effectiveEventType
+      );
+      setSavedGuests(reloadedGuests);
+      window.dispatchEvent(
+        new CustomEvent('wedding:guests-updated', {
+          detail: { ownerId: effectiveOwnerId, eventId: effectiveEventId, guests: reloadedGuests },
+        })
+      );
+      showFeedback(
+        language === 'kh'
+          ? `បានលុប "${name}" និងផ្ទុកបញ្ជីភ្ញៀវពី Database ឡើងវិញ!`
+          : `Deleted "${name}" & reloaded guest database`
+      );
     } catch (err) {
       showFeedback(language === 'kh' ? `បានលុប "${name}"` : `Deleted "${name}"`);
     } finally {
@@ -433,7 +478,17 @@ export default function AddGuestModal({
     setIsSyncingWithCloud(true);
     try {
       await clearAllGuestsFromFirebase(effectiveOwnerId, effectiveEventId);
-      setSavedGuests([]);
+      const reloadedGuests = await fetchGuestsFromFirebase(
+        effectiveOwnerId,
+        effectiveEventId,
+        effectiveEventType
+      );
+      setSavedGuests(reloadedGuests);
+      window.dispatchEvent(
+        new CustomEvent('wedding:guests-updated', {
+          detail: { ownerId: effectiveOwnerId, eventId: effectiveEventId, guests: reloadedGuests },
+        })
+      );
       showFeedback(language === 'kh' ? 'បានសម្អាតបញ្ជីភ្ញៀវសម្រាប់លិខិតនេះ' : 'Cleared guests for this invitation');
     } catch (err) {
       showFeedback(language === 'kh' ? 'មានបញ្ហាក្នុងការសម្អាតបញ្ជី' : 'Error clearing list');
@@ -575,7 +630,13 @@ export default function AddGuestModal({
         effectiveEventId,
         effectiveEventType
       );
-      setSavedGuests(getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType));
+      const nextGuests = getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType);
+      setSavedGuests(nextGuests);
+      window.dispatchEvent(
+        new CustomEvent('wedding:guests-updated', {
+          detail: { ownerId: effectiveOwnerId, eventId: effectiveEventId, guests: nextGuests },
+        })
+      );
       const count = savedBatch.length;
 
       showFeedback(
@@ -697,7 +758,13 @@ export default function AddGuestModal({
         effectiveEventId,
         effectiveEventType
       );
-      setSavedGuests(getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType));
+      const nextGuests = getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType);
+      setSavedGuests(nextGuests);
+      window.dispatchEvent(
+        new CustomEvent('wedding:guests-updated', {
+          detail: { ownerId: effectiveOwnerId, eventId: effectiveEventId, guests: nextGuests },
+        })
+      );
       const count = savedBatch.length;
 
       showFeedback(
@@ -728,7 +795,13 @@ export default function AddGuestModal({
         effectiveEventId,
         effectiveEventType
       );
-      setSavedGuests(getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType));
+      const nextGuests = getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType);
+      setSavedGuests(nextGuests);
+      window.dispatchEvent(
+        new CustomEvent('wedding:guests-updated', {
+          detail: { ownerId: effectiveOwnerId, eventId: effectiveEventId, guests: nextGuests },
+        })
+      );
       showFeedback(
         language === 'kh'
           ? `បានរក្សាទុកឈ្មោះភ្ញៀវ ${savedGuests.length} នាក់ចូល Database តាមគណនី និងប្រភេទលិខិត!`
@@ -746,7 +819,13 @@ export default function AddGuestModal({
     setIsSyncingWithCloud(true);
     try {
       await seedDefaultGuestsToFirebase(effectiveOwnerId, effectiveEventId, effectiveEventType);
-      setSavedGuests(getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType));
+      const nextGuests = getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType);
+      setSavedGuests(nextGuests);
+      window.dispatchEvent(
+        new CustomEvent('wedding:guests-updated', {
+          detail: { ownerId: effectiveOwnerId, eventId: effectiveEventId, guests: nextGuests },
+        })
+      );
       showFeedback(language === 'kh' ? 'បានស្ដារបញ្ជីដើមឡើងវិញដោយជោគជ័យ' : 'Restored default guests successfully');
     } catch (err) {
       showFeedback(language === 'kh' ? 'មានបញ្ហាក្នុងការស្ដារបញ្ជីដើម' : 'Error restoring default guests');
@@ -1396,7 +1475,9 @@ export default function AddGuestModal({
                               <button
                                 type="button"
                                 onClick={() => handleDeleteGuest(g.id, g.name)}
-                                className={`p-1 rounded transition-all ${
+                                disabled={isSyncingWithCloud}
+                                title={language === 'kh' ? 'លុបឈ្មោះភ្ញៀវ និងផ្ទុក Database ឡើងវិញ' : 'Delete guest and reload database'}
+                                className={`p-1 rounded transition-all disabled:opacity-50 ${
                                   isLight
                                     ? 'text-neutral-500 hover:text-rose-600 hover:bg-rose-100'
                                     : 'text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10'

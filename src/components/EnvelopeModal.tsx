@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { Language, WeddingEvent } from '../types';
 import { getSavedGuests, GuestPreset } from '../data/guests';
-import { subscribeToGuests } from '../lib/firebaseGuests';
+import { fetchGuestsFromFirebase, subscribeToGuests } from '../lib/firebaseGuests';
 import { extractScopeFromEventId, normalizeGuestEventId, resolveUserScope } from '../lib/userScope';
 import { decodeKhmerQueryValue, resolveKhmerFontFamily } from '../lib/shareUrl';
 import RoyalGoldRibbonBanner from './RoyalGoldRibbonBanner';
@@ -392,23 +392,49 @@ export default function EnvelopeModal({
 
   useEffect(() => {
     setTempGuestName(guestName);
-    const guests = getSavedGuests(effectiveOwnerId, effectiveEventId, eventType);
-    setSavedGuestsList(guests);
-    const match = guests.find(g => g.name.toLowerCase() === (guestName || '').toLowerCase());
-    setCurrentGuestInfo(match || null);
+    const applyGuests = (list: GuestPreset[]) => {
+      setSavedGuestsList(list);
+      const match = list.find(g => g.name.toLowerCase() === (guestName || '').toLowerCase());
+      setCurrentGuestInfo(match || null);
+    };
 
-    if (!isOpen) return;
+    applyGuests(getSavedGuests(effectiveOwnerId, effectiveEventId, eventType));
+
+    const handleGuestsUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{ ownerId?: string; eventId?: string; guests?: GuestPreset[] }>).detail;
+      if (detail?.ownerId && detail.ownerId !== effectiveOwnerId) return;
+      if (detail?.eventId && detail.eventId !== effectiveEventId) return;
+      if (Array.isArray(detail?.guests)) {
+        applyGuests(detail.guests);
+        return;
+      }
+      fetchGuestsFromFirebase(effectiveOwnerId, effectiveEventId, eventType)
+        .then((fresh) => {
+          if (Array.isArray(fresh)) applyGuests(fresh);
+        })
+        .catch(() => {});
+    };
+
+    window.addEventListener('wedding:guests-updated', handleGuestsUpdated);
+
+    if (!isOpen) {
+      return () => {
+        window.removeEventListener('wedding:guests-updated', handleGuestsUpdated);
+      };
+    }
+
     const unsubscribe = subscribeToGuests(
       (liveGuests) => {
-        setSavedGuestsList(liveGuests);
-        const liveMatch = liveGuests.find(g => g.name.toLowerCase() === (guestName || '').toLowerCase());
-        setCurrentGuestInfo(liveMatch || null);
+        applyGuests(liveGuests);
       },
       effectiveOwnerId,
       effectiveEventId,
       eventType
     );
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      window.removeEventListener('wedding:guests-updated', handleGuestsUpdated);
+    };
   }, [guestName, isOpen, effectiveOwnerId, effectiveEventId, eventType]);
 
   useEffect(() => {
