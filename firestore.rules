@@ -54,6 +54,7 @@ service cloud.firestore {
         && (!('note' in data) || (data.note is string && data.note.size() <= 500))
         && (!('ownerId' in data) || (data.ownerId is string && data.ownerId.size() <= 128))
         && (!('eventId' in data) || (data.eventId is string && data.eventId.size() <= 128))
+        && (!('eventType' in data) || (data.eventType is string && data.eventType.size() <= 50))
         && (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
     }
 
@@ -230,6 +231,28 @@ service cloud.firestore {
         allow delete: if isValidId(eventId)
           && hasActiveUserDatabase(dbId)
           && (!isGlobalPresetId(eventId) || isVerifiedOwner());
+
+        match /guests/{guestId} {
+          allow get: if isValidId(dbId) && isValidId(eventId) && isValidId(guestId);
+          allow list: if isValidId(dbId)
+            && isValidId(eventId)
+            && existing().name is string
+            && existing().ownerId == dbId;
+          allow create: if isValidId(eventId)
+            && isValidId(guestId)
+            && isValidGuest(incoming())
+            && hasActiveUserDatabase(dbId)
+            && incoming().ownerId == dbId
+            && incoming().eventId == eventId;
+          allow update: if isValidId(eventId)
+            && isValidId(guestId)
+            && isValidGuest(incoming())
+            && hasActiveUserDatabase(dbId)
+            && incoming().ownerId == dbId
+            && incoming().eventId == eventId
+            && (!('ownerId' in existing()) || existing().ownerId == '' || incoming().ownerId == existing().ownerId || isVerifiedAdmin());
+          allow delete: if isValidId(eventId) && isValidId(guestId) && hasActiveUserDatabase(dbId);
+        }
       }
 
       match /guests/{guestId} {

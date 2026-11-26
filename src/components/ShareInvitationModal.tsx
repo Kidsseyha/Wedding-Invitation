@@ -347,14 +347,6 @@ export default function ShareInvitationModal({
   const [searchQuery, setSearchQuery] = useState('');
   const [allDbGuests, setAllDbGuests] = useState<GuestPreset[]>([]);
 
-  useEffect(() => {
-    if (isOpen) {
-      fetchGuestsFromFirebase(effectiveScope).then((list) => {
-        setAllDbGuests(Array.isArray(list) ? list : []);
-      });
-    }
-  }, [isOpen, effectiveScope]);
-
   const normalizedTargetGuest = decodeKhmerQueryValue(targetGuest);
   const currentShareGuest = normalizedTargetGuest || 'Your Name';
   const displayShareGuest =
@@ -378,6 +370,14 @@ export default function ShareInvitationModal({
     effectiveScope !== 'guest_public'
       ? getScopedEventId(rawActiveEventId, effectiveScope)
       : rawActiveEventId;
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchGuestsFromFirebase(effectiveScope, activeEventId, selectedCategory).then((list) => {
+        setAllDbGuests(Array.isArray(list) ? list : []);
+      });
+    }
+  }, [isOpen, effectiveScope, activeEventId, selectedCategory]);
 
   const runtimeVercelOrigin = getPreferredVercelOrigin();
   const selectedDomainOrigin = runtimeVercelOrigin;
@@ -1664,7 +1664,7 @@ Your presence will make our day truly special! 🙏✨`;
                                               const dbMatch = allDbGuests.find((g) => (g.name || '').trim() === name);
                                               if (dbMatch && dbMatch.id) {
                                                 try {
-                                                  await deleteGuestFromFirebase(dbMatch.id, effectiveScope);
+                                                  await deleteGuestFromFirebase(dbMatch.id, effectiveScope, activeEventId);
                                                 } catch (err) {
                                                   console.error('Error deleting guest:', err);
                                                 }

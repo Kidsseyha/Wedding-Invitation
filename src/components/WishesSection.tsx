@@ -194,15 +194,15 @@ export default function WishesSection({
     }
   }, [defaultGuestName]);
 
-  // Fetch list of honored guests for auto-suggestion scoped to current owner
+  // Fetch list of honored guests for auto-suggestion scoped to current owner & invitation
   useEffect(() => {
     try {
-      const list = getSavedGuests(effectiveOwnerId);
+      const list = getSavedGuests(effectiveOwnerId, effectiveEventId);
       setSavedGuestNames((list || []).map(g => g.name).filter(Boolean));
     } catch {
       setSavedGuestNames([]);
     }
-  }, [effectiveOwnerId]);
+  }, [effectiveOwnerId, effectiveEventId]);
 
   const triggerHeartCelebration = () => {
     // 1. Generate floating rising heart particles

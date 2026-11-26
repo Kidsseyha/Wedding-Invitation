@@ -21,7 +21,10 @@ import {
 import {
   GUEST_PUBLIC_SCOPE,
   extractScopeFromEventId,
+  getScopedGuestId,
+  guestMatchesEventScope,
   isGlobalSharedPresetId,
+  normalizeGuestEventId,
   stripScopedEventId,
 } from './src/lib/userScope';
 import {
@@ -172,7 +175,12 @@ function getSafeUserDbDir(dbId: string): string | null {
   if (!cleanId || cleanId === GUEST_PUBLIC_SCOPE || !/^[a-zA-Z0-9_-]{1,128}$/.test(cleanId)) {
     return null;
   }
-  return path.join(USER_DATABASES_DIR, cleanId);
+  const baseDir = path.resolve(USER_DATABASES_DIR);
+  const resolved = path.resolve(baseDir, cleanId);
+  if (!resolved.startsWith(baseDir + path.sep)) {
+    return null;
+  }
+  return resolved;
 }
 
 function userDbFileExists(dbId: string, filename: string): boolean {
@@ -1020,40 +1028,94 @@ app.post('/api/notifications', (req, res) => {
   res.json({ success: true, notification: normalizedNotif });
 });
 
-// Guests API (strictly isolated in each user's personal database directory)
+function sanitizeServerGuest(
+  raw: any,
+  dbId: string,
+  fallbackEventId?: string,
+  fallbackEventType?: string
+): Record<string, any> | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, 256) : '';
+  if (!name) return null;
+
+  const effectiveOwner = dbId && dbId !== GUEST_PUBLIC_SCOPE ? dbId : GUEST_PUBLIC_SCOPE;
+  const rawEventId = typeof raw.eventId === 'string' && raw.eventId.trim() ? raw.eventId.trim() : fallbackEventId;
+  const effectiveEventId = normalizeGuestEventId(rawEventId, effectiveOwner);
+  const rawId = typeof raw.id === 'string' && raw.id.trim() ? raw.id.trim() : `guest-${Date.now()}`;
+  const scopedId = getScopedGuestId(rawId, effectiveOwner, effectiveEventId);
+
+  const allowedCategories = new Set(['family', 'vip', 'friends', 'colleagues', 'general']);
+  const rawCat = typeof raw.category === 'string' ? raw.category.trim().toLowerCase() : 'general';
+  const category = allowedCategories.has(rawCat) ? rawCat : 'general';
+
+  const eventType =
+    typeof raw.eventType === 'string' && raw.eventType.trim()
+      ? raw.eventType.trim().slice(0, 50)
+      : fallbackEventType
+      ? fallbackEventType.trim().slice(0, 50)
+      : '';
+
+  return {
+    id: scopedId,
+    name,
+    category,
+    categoryLabelKh: typeof raw.categoryLabelKh === 'string' ? raw.categoryLabelKh.slice(0, 100) : 'ទូទៅ',
+    categoryLabelEn: typeof raw.categoryLabelEn === 'string' ? raw.categoryLabelEn.slice(0, 100) : 'General',
+    note: typeof raw.note === 'string' ? raw.note.slice(0, 500) : '',
+    ownerId: effectiveOwner,
+    eventId: effectiveEventId,
+    ...(eventType ? { eventType } : {}),
+    updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt.slice(0, 64) : new Date().toISOString(),
+  };
+}
+
+// Guests API (strictly isolated per user database AND per invitation eventId)
 app.get('/api/guests', (req, res) => {
   const ownerId = (req.query.ownerId as string | undefined)?.trim();
   const ownerEmail = (req.query.ownerEmail as string | undefined)?.trim();
-  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail });
+  const eventId = (req.query.eventId as string | undefined)?.trim();
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail, eventId });
 
   if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
+    let dbGuests: any[];
     if (userDbFileExists(dbId, 'guests.json')) {
-      const dbGuests = readUserDbJson<any[]>(dbId, 'guests.json', []);
-      return res.json({ success: true, guests: dbGuests });
+      dbGuests = readUserDbJson<any[]>(dbId, 'guests.json', []);
+    } else {
+      dbGuests = getSavedGuests().filter((g: any) => g && g.ownerId === dbId);
+      if (dbGuests.length > 0) {
+        writeUserDbJson(dbId, 'guests.json', dbGuests);
+      }
     }
-    const legacyGuests = getSavedGuests().filter((g: any) => g.ownerId === dbId);
-    if (legacyGuests.length > 0) {
-      writeUserDbJson(dbId, 'guests.json', legacyGuests);
-    }
-    return res.json({ success: true, guests: legacyGuests });
+    const filtered = eventId
+      ? dbGuests.filter((g: any) => guestMatchesEventScope(g, dbId, eventId))
+      : dbGuests;
+    return res.json({ success: true, guests: filtered, ownerId: dbId, ...(eventId ? { eventId } : {}) });
   }
 
   const allGuests = getSavedGuests();
-  const guests = allGuests.filter((g: any) => shouldIncludePublicRecord(g));
-  res.json({ success: true, guests });
+  const publicGuests = allGuests.filter((g: any) => {
+    if (!shouldIncludePublicRecord(g)) return false;
+    return eventId ? guestMatchesEventScope(g, GUEST_PUBLIC_SCOPE, eventId) : true;
+  });
+  res.json({ success: true, guests: publicGuests, ownerId: GUEST_PUBLIC_SCOPE, ...(eventId ? { eventId } : {}) });
 });
 
 app.post('/api/guests', (req, res) => {
   const guest = req.body;
-  if (!guest || !guest.id) {
+  if (!guest || typeof guest !== 'object') {
     return res.status(400).json({ error: 'Invalid guest data' });
   }
   const ownerId = typeof guest.ownerId === 'string' ? guest.ownerId.trim() : '';
-  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail: guest.ownerEmail });
-  const normalizedGuest = dbId && dbId !== GUEST_PUBLIC_SCOPE ? { ...guest, ownerId: dbId } : guest;
+  const ownerEmail = typeof guest.ownerEmail === 'string' ? guest.ownerEmail.trim() : '';
+  const eventId = typeof guest.eventId === 'string' ? guest.eventId.trim() : '';
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail, eventId });
+  const normalizedGuest = sanitizeServerGuest(guest, dbId, eventId);
+  if (!normalizedGuest) {
+    return res.status(400).json({ error: 'Invalid guest name or payload' });
+  }
 
   if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
-    ensureUserDatabaseOnDisk({ scopeId: dbId, email: guest.ownerEmail });
+    ensureUserDatabaseOnDisk({ scopeId: dbId, email: ownerEmail });
     const dbGuests = readUserDbJson<any[]>(dbId, 'guests.json', []);
     const dbIdx = dbGuests.findIndex((g: any) => g.id === normalizedGuest.id);
     if (dbIdx >= 0) dbGuests[dbIdx] = normalizedGuest;
@@ -1073,26 +1135,103 @@ app.post('/api/guests', (req, res) => {
   broadcastWebSocket({
     type: 'guests:update',
     ownerId: dbId || GUEST_PUBLIC_SCOPE,
+    eventId: normalizedGuest.eventId,
     guest: normalizedGuest,
   });
   res.json({ success: true, guest: normalizedGuest });
+});
+
+app.post('/api/guests/batch', (req, res) => {
+  const body = req.body;
+  if (!body || !Array.isArray(body.guests)) {
+    return res.status(400).json({ error: 'Invalid batch guest payload' });
+  }
+  const ownerId = typeof body.ownerId === 'string' ? body.ownerId.trim() : '';
+  const ownerEmail = typeof body.ownerEmail === 'string' ? body.ownerEmail.trim() : '';
+  const eventId = typeof body.eventId === 'string' ? body.eventId.trim() : '';
+  const eventType = typeof body.eventType === 'string' ? body.eventType.trim() : '';
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail, eventId });
+
+  const sanitizedList = body.guests
+    .slice(0, 5000)
+    .map((item: any) => sanitizeServerGuest(item, dbId, eventId, eventType))
+    .filter((item: Record<string, any> | null): item is Record<string, any> => item !== null);
+
+  if (sanitizedList.length === 0) {
+    return res.status(400).json({ error: 'No valid guests in batch' });
+  }
+
+  if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
+    ensureUserDatabaseOnDisk({ scopeId: dbId, email: ownerEmail });
+    const dbGuests = readUserDbJson<any[]>(dbId, 'guests.json', []);
+    for (const item of sanitizedList) {
+      const idx = dbGuests.findIndex(
+        (g: any) =>
+          g.id === item.id ||
+          (g.name?.toLowerCase?.() === item.name.toLowerCase() &&
+            guestMatchesEventScope(g, dbId, item.eventId))
+      );
+      if (idx >= 0) dbGuests[idx] = { ...dbGuests[idx], ...item, id: dbGuests[idx].id };
+      else dbGuests.push(item);
+    }
+    writeUserDbJson(dbId, 'guests.json', dbGuests);
+  } else {
+    const guests = getSavedGuests();
+    for (const item of sanitizedList) {
+      const idx = guests.findIndex(
+        (g: any) =>
+          g.id === item.id ||
+          (g.name?.toLowerCase?.() === item.name.toLowerCase() &&
+            guestMatchesEventScope(g, GUEST_PUBLIC_SCOPE, item.eventId))
+      );
+      if (idx >= 0) guests[idx] = { ...guests[idx], ...item, id: guests[idx].id };
+      else guests.push(item);
+    }
+    saveGuests(guests);
+  }
+
+  broadcastWebSocket({
+    type: 'guests:update',
+    ownerId: dbId || GUEST_PUBLIC_SCOPE,
+    eventId: normalizeGuestEventId(eventId, dbId || GUEST_PUBLIC_SCOPE),
+    batchCount: sanitizedList.length,
+  });
+  res.json({ success: true, count: sanitizedList.length, guests: sanitizedList });
 });
 
 app.delete('/api/guests', (req, res) => {
   const id = (req.query.id as string | undefined)?.trim();
   const ownerId = (req.query.ownerId as string | undefined)?.trim();
   const ownerEmail = (req.query.ownerEmail as string | undefined)?.trim();
-  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail });
+  const eventId = (req.query.eventId as string | undefined)?.trim();
+  const dbId = resolveRecordDatabaseId({ ownerId, ownerEmail, eventId });
   const clearAll = req.query.all === '1' || req.query.all === 'true';
 
-  if (clearAll && (dbId || ownerId)) {
+  if (clearAll && (dbId || ownerId || eventId)) {
     if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
-      writeUserDbJson(dbId, 'guests.json', []);
+      if (eventId) {
+        const dbGuests = readUserDbJson<any[]>(dbId, 'guests.json', []);
+        const remaining = dbGuests.filter((g: any) => !guestMatchesEventScope(g, dbId, eventId));
+        writeUserDbJson(dbId, 'guests.json', remaining);
+      } else {
+        writeUserDbJson(dbId, 'guests.json', []);
+      }
     } else {
-      const guests = getSavedGuests().filter((g: any) => g.ownerId !== ownerId && shouldIncludePublicRecord(g));
+      const guests = getSavedGuests().filter((g: any) => {
+        if (!shouldIncludePublicRecord(g)) return true;
+        if (eventId) {
+          return !guestMatchesEventScope(g, GUEST_PUBLIC_SCOPE, eventId);
+        }
+        return g.ownerId !== ownerId;
+      });
       saveGuests(guests);
     }
-    broadcastWebSocket({ type: 'guests:update', ownerId: dbId || ownerId || GUEST_PUBLIC_SCOPE, cleared: true });
+    broadcastWebSocket({
+      type: 'guests:update',
+      ownerId: dbId || ownerId || GUEST_PUBLIC_SCOPE,
+      ...(eventId ? { eventId } : {}),
+      cleared: true,
+    });
     return res.json({ success: true, cleared: true });
   }
 
@@ -1102,17 +1241,28 @@ app.delete('/api/guests', (req, res) => {
 
   if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
     const dbGuests = readUserDbJson<any[]>(dbId, 'guests.json', []);
-    writeUserDbJson(dbId, 'guests.json', dbGuests.filter((g: any) => g.id !== id));
+    const nextGuests = dbGuests.filter((g: any) => {
+      if (g.id !== id) return true;
+      if (eventId && g.eventId && !guestMatchesEventScope(g, dbId, eventId)) return true;
+      return false;
+    });
+    writeUserDbJson(dbId, 'guests.json', nextGuests);
   } else {
     const guests = getSavedGuests().filter((g: any) => {
       if (g.id !== id) return true;
       if (!shouldIncludePublicRecord(g)) return true;
+      if (eventId && g.eventId && !guestMatchesEventScope(g, GUEST_PUBLIC_SCOPE, eventId)) return true;
       return false;
     });
     saveGuests(guests);
   }
 
-  broadcastWebSocket({ type: 'guests:update', ownerId: dbId || ownerId || GUEST_PUBLIC_SCOPE, deletedId: id });
+  broadcastWebSocket({
+    type: 'guests:update',
+    ownerId: dbId || ownerId || GUEST_PUBLIC_SCOPE,
+    ...(eventId ? { eventId } : {}),
+    deletedId: id,
+  });
   res.json({ success: true });
 });
 

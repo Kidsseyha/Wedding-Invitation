@@ -35,11 +35,17 @@ import {
   fetchGuestsFromFirebase,
   subscribeToGuests,
   saveGuestToFirebase,
+  saveGuestsBatchToFirebase,
   deleteGuestFromFirebase,
   seedDefaultGuestsToFirebase,
   clearAllGuestsFromFirebase,
 } from '../lib/firebaseGuests';
-import { resolveUserScope } from '../lib/userScope';
+import {
+  GUEST_PUBLIC_SCOPE,
+  normalizeGuestEventId,
+  resolveUserScope,
+  stripScopedEventId,
+} from '../lib/userScope';
 
 interface AddGuestModalProps {
   isOpen: boolean;
@@ -75,13 +81,45 @@ export default function AddGuestModal({
   onChangeTheme,
 }: AddGuestModalProps) {
   const isLight = theme === 'light';
-  const effectiveOwnerId = (ownerId && ownerId.trim()) || resolveUserScope().scopeId;
+  const resolvedScope = resolveUserScope();
+  const effectiveOwnerId = (ownerId && ownerId.trim()) || resolvedScope.scopeId;
+  const effectiveEventId = normalizeGuestEventId(eventId, effectiveOwnerId);
+  const effectiveEventType = (eventType || '').trim() || undefined;
+  const activeUserLabel =
+    resolvedScope.ownerEmail ||
+    resolvedScope.identifier ||
+    (effectiveOwnerId !== GUEST_PUBLIC_SCOPE
+      ? effectiveOwnerId
+      : language === 'kh'
+      ? 'ភ្ញៀវសាធារណៈ'
+      : 'Public');
+  const activeEventTypeLabel = (() => {
+    const baseId = stripScopedEventId(effectiveEventId);
+    switch (effectiveEventType) {
+      case 'engagement':
+        return language === 'kh' ? 'ពិធីភ្ជាប់ពាក្យ' : 'Engagement';
+      case 'housewarming':
+        return language === 'kh' ? 'ពិធីឡើងគេហដ្ឋាន' : 'Housewarming';
+      case 'birthday':
+        return language === 'kh' ? 'ពិធីខួបកំណើត' : 'Birthday';
+      case 'anniversary':
+        return language === 'kh' ? 'ពិធីខួបអាពាហ៍ពិពាហ៍' : 'Anniversary';
+      default:
+        if (baseId === 'modern-wedding-001') {
+          return language === 'kh' ? 'អាពាហ៍ពិពាហ៍ទំនើប' : 'Modern Wedding';
+        }
+        return language === 'kh' ? 'ពិធីអាពាហ៍ពិពាហ៍' : 'Wedding';
+    }
+  })();
+
   const [guestInput, setGuestInput] = useState(currentGuestName || '');
   const [copied, setCopied] = useState(false);
   const [prefix, setPrefix] = useState('');
   const [category, setCategory] = useState<'family' | 'vip' | 'friends' | 'colleagues' | 'general'>('general');
   const [note, setNote] = useState('');
-  const [savedGuests, setSavedGuests] = useState<GuestPreset[]>(() => getSavedGuests(effectiveOwnerId));
+  const [savedGuests, setSavedGuests] = useState<GuestPreset[]>(() =>
+    getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType)
+  );
   const [isManagingList, setIsManagingList] = useState(false);
   const [editingGuestId, setEditingGuestId] = useState<string | null>(null);
   const [editingGuestName, setEditingGuestName] = useState('');
@@ -92,14 +130,20 @@ export default function AddGuestModal({
   const [isPlayingMusic, setIsPlayingMusic] = useState(false);
   const [isSyncingWithCloud, setIsSyncingWithCloud] = useState(false);
 
-  // Sync with Firestore in real-time scoped to effectiveOwnerId
+  // Sync with Firestore & server DB in real-time scoped to BOTH effectiveOwnerId and effectiveEventId
   useEffect(() => {
-    setSavedGuests(getSavedGuests(effectiveOwnerId));
-    const unsubscribe = subscribeToGuests((guests) => {
-      setSavedGuests(guests);
-    }, effectiveOwnerId);
+    setSavedGuests(getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType));
+    setEditingGuestId(null);
+    const unsubscribe = subscribeToGuests(
+      (guests) => {
+        setSavedGuests(guests);
+      },
+      effectiveOwnerId,
+      effectiveEventId,
+      effectiveEventType
+    );
     const handleDbRefresh = () => {
-      fetchGuestsFromFirebase(effectiveOwnerId)
+      fetchGuestsFromFirebase(effectiveOwnerId, effectiveEventId, effectiveEventType)
         .then((guests) => {
           if (Array.isArray(guests)) {
             setSavedGuests(guests);
@@ -107,12 +151,15 @@ export default function AddGuestModal({
         })
         .catch(() => {});
     };
+    if (isOpen) {
+      handleDbRefresh();
+    }
     window.addEventListener('wedding:db-refresh', handleDbRefresh);
     return () => {
       unsubscribe();
       window.removeEventListener('wedding:db-refresh', handleDbRefresh);
     };
-  }, [effectiveOwnerId]);
+  }, [effectiveOwnerId, effectiveEventId, effectiveEventType, isOpen]);
 
   useEffect(() => {
     const audio = document.getElementById('wedding-audio') as HTMLAudioElement | null;
@@ -266,19 +313,26 @@ export default function AddGuestModal({
     }
   };
 
-  // Add guest to dropbox list (Syncs to Firebase & server)
+  // Add guest to dropbox list (Syncs to Firebase & server scoped by user + invitation)
   const handleAddNewGuestToDropbox = async (e?: FormEvent) => {
     if (e) e.preventDefault();
     if (!newGuestQuickName.trim()) return;
     const catLabels = getCategoryLabel(newGuestQuickCategory);
     setIsSyncingWithCloud(true);
     try {
-      const saved = await saveGuestToFirebase({
-        name: newGuestQuickName.trim(),
-        category: newGuestQuickCategory,
-        categoryLabelKh: catLabels.kh,
-        categoryLabelEn: catLabels.en,
-      }, effectiveOwnerId);
+      const saved = await saveGuestToFirebase(
+        {
+          name: newGuestQuickName.trim(),
+          category: newGuestQuickCategory,
+          categoryLabelKh: catLabels.kh,
+          categoryLabelEn: catLabels.en,
+          eventId: effectiveEventId,
+          eventType: effectiveEventType,
+        },
+        effectiveOwnerId,
+        effectiveEventId,
+        effectiveEventType
+      );
       setSavedGuests(prev => [...prev.filter(g => g.id !== saved.id), saved]);
       setGuestInput(newGuestQuickName.trim());
       setCategory(newGuestQuickCategory);
@@ -291,7 +345,7 @@ export default function AddGuestModal({
     }
   };
 
-  // Save/Update selected guest directly in dropbox list (Syncs to Firebase & server)
+  // Save/Update selected guest directly in dropbox list (Syncs to Firebase & server scoped by user + invitation)
   const handleUpdateCurrentInDropbox = async () => {
     const nameToSave = fullName;
     if (!nameToSave.trim()) return;
@@ -299,14 +353,21 @@ export default function AddGuestModal({
     setIsSyncingWithCloud(true);
     try {
       const existing = savedGuests.find(g => g.name.toLowerCase() === nameToSave.toLowerCase());
-      const saved = await saveGuestToFirebase({
-        id: existing?.id,
-        name: nameToSave,
-        category,
-        categoryLabelKh: catLabels.kh,
-        categoryLabelEn: catLabels.en,
-        note: note.trim() || undefined,
-      }, effectiveOwnerId);
+      const saved = await saveGuestToFirebase(
+        {
+          id: existing?.id,
+          name: nameToSave,
+          category,
+          categoryLabelKh: catLabels.kh,
+          categoryLabelEn: catLabels.en,
+          note: note.trim() || undefined,
+          eventId: effectiveEventId,
+          eventType: effectiveEventType,
+        },
+        effectiveOwnerId,
+        effectiveEventId,
+        effectiveEventType
+      );
       setSavedGuests(prev => [...prev.filter(g => g.id !== saved.id), saved]);
       showFeedback(language === 'kh' ? 'បានរក្សាទុកឈ្មោះក្នុង Database!' : 'Saved to Database!');
     } catch (err) {
@@ -323,19 +384,26 @@ export default function AddGuestModal({
     setEditingGuestCategory(g.category);
   };
 
-  // Save inline edit (Syncs to Firebase & server)
+  // Save inline edit (Syncs to Firebase & server scoped by user + invitation)
   const handleSaveInlineEdit = async (id: string) => {
     if (!editingGuestName.trim()) return;
     const catLabels = getCategoryLabel(editingGuestCategory);
     setIsSyncingWithCloud(true);
     try {
-      const updated = await saveGuestToFirebase({
-        id,
-        name: editingGuestName.trim(),
-        category: editingGuestCategory,
-        categoryLabelKh: catLabels.kh,
-        categoryLabelEn: catLabels.en,
-      }, effectiveOwnerId);
+      const updated = await saveGuestToFirebase(
+        {
+          id,
+          name: editingGuestName.trim(),
+          category: editingGuestCategory,
+          categoryLabelKh: catLabels.kh,
+          categoryLabelEn: catLabels.en,
+          eventId: effectiveEventId,
+          eventType: effectiveEventType,
+        },
+        effectiveOwnerId,
+        effectiveEventId,
+        effectiveEventType
+      );
       setSavedGuests(prev => prev.map(g => (g.id === id ? updated : g)));
       setEditingGuestId(null);
       showFeedback(language === 'kh' ? 'បានកែប្រែឈ្មោះដោយជោគជ័យ!' : 'Updated successfully!');
@@ -346,11 +414,11 @@ export default function AddGuestModal({
     }
   };
 
-  // Delete guest from list (Syncs to Firebase & server)
+  // Delete guest from list (Syncs to Firebase & server scoped by user + invitation)
   const handleDeleteGuest = async (id: string, name: string) => {
     setIsSyncingWithCloud(true);
     try {
-      await deleteGuestFromFirebase(id, effectiveOwnerId);
+      await deleteGuestFromFirebase(id, effectiveOwnerId, effectiveEventId);
       setSavedGuests(prev => prev.filter(g => g.id !== id));
       showFeedback(language === 'kh' ? `បានលុប "${name}"` : `Deleted "${name}"`);
     } catch (err) {
@@ -360,13 +428,13 @@ export default function AddGuestModal({
     }
   };
 
-  // Delete all guests for current user only
+  // Delete all guests for current user AND current invitation only
   const handleClearAllGuests = async () => {
     setIsSyncingWithCloud(true);
     try {
-      await clearAllGuestsFromFirebase(effectiveOwnerId);
+      await clearAllGuestsFromFirebase(effectiveOwnerId, effectiveEventId);
       setSavedGuests([]);
-      showFeedback(language === 'kh' ? 'បានសម្អាតបញ្ជីភ្ញៀវទាំងអស់' : 'Cleared all guests');
+      showFeedback(language === 'kh' ? 'បានសម្អាតបញ្ជីភ្ញៀវសម្រាប់លិខិតនេះ' : 'Cleared guests for this invitation');
     } catch (err) {
       showFeedback(language === 'kh' ? 'មានបញ្ហាក្នុងការសម្អាតបញ្ជី' : 'Error clearing list');
     } finally {
@@ -494,21 +562,26 @@ export default function AddGuestModal({
         return;
       }
 
-      let count = 0;
-      for (const guest of importedGuests) {
-        await saveGuestToFirebase({
+      const savedBatch = await saveGuestsBatchToFirebase(
+        importedGuests.map(guest => ({
           name: guest.name,
           category: guest.category as any,
           categoryLabelKh: guest.categoryLabelKh,
           categoryLabelEn: guest.categoryLabelEn,
-        }, effectiveOwnerId);
-        count++;
-      }
+          eventId: effectiveEventId,
+          eventType: effectiveEventType,
+        })),
+        effectiveOwnerId,
+        effectiveEventId,
+        effectiveEventType
+      );
+      setSavedGuests(getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType));
+      const count = savedBatch.length;
 
       showFeedback(
         language === 'kh'
-          ? `បានបញ្ចូលភ្ញៀវ ${count} នាក់ (រួមទាំងប្រភេទ) ពីឯកសារជោគជ័យ!`
-          : `Successfully imported ${count} guests with categories from file!`
+          ? `បានបញ្ចូលភ្ញៀវ ${count} នាក់ (រួមទាំងប្រភេទ) ចូល Database ជោគជ័យ!`
+          : `Successfully saved ${count} guests to Database!`
       );
     } catch (err) {
       console.error(err);
@@ -611,21 +684,26 @@ export default function AddGuestModal({
         return;
       }
 
-      let count = 0;
-      for (const name of importedNames) {
-        await saveGuestToFirebase({
+      const savedBatch = await saveGuestsBatchToFirebase(
+        importedNames.map(name => ({
           name,
-          category: 'general',
+          category: 'general' as const,
           categoryLabelKh: 'ភ្ញៀវទូទៅ',
           categoryLabelEn: 'General',
-        }, effectiveOwnerId);
-        count++;
-      }
+          eventId: effectiveEventId,
+          eventType: effectiveEventType,
+        })),
+        effectiveOwnerId,
+        effectiveEventId,
+        effectiveEventType
+      );
+      setSavedGuests(getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType));
+      const count = savedBatch.length;
 
       showFeedback(
         language === 'kh'
-          ? `បានទាញយកភ្ញៀវ ${count} នាក់ពី Google Drive ជោគជ័យ!`
-          : `Successfully imported ${count} guests from Google Drive!`
+          ? `បានទាញយកភ្ញៀវ ${count} នាក់ពី Google Drive ចូល Database ជោគជ័យ!`
+          : `Successfully saved ${count} guests from Google Drive to Database!`
       );
     } catch (err) {
       console.error(err);
@@ -639,12 +717,36 @@ export default function AddGuestModal({
     }
   };
 
-  // Restore default preset guests in Firebase for this owner
+  // Sync all currently displayed guests into Firestore & Server DB scoped to user + invitation
+  const handleSaveAllGuestsToDatabase = async () => {
+    if (savedGuests.length === 0) return;
+    setIsSyncingWithCloud(true);
+    try {
+      await saveGuestsBatchToFirebase(
+        savedGuests,
+        effectiveOwnerId,
+        effectiveEventId,
+        effectiveEventType
+      );
+      setSavedGuests(getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType));
+      showFeedback(
+        language === 'kh'
+          ? `បានរក្សាទុកឈ្មោះភ្ញៀវ ${savedGuests.length} នាក់ចូល Database តាមគណនី និងប្រភេទលិខិត!`
+          : `Saved all ${savedGuests.length} guests to Database for this user & invitation!`
+      );
+    } catch {
+      showFeedback(language === 'kh' ? 'មានបញ្ហាក្នុងការរក្សាទុក' : 'Error saving guests');
+    } finally {
+      setIsSyncingWithCloud(false);
+    }
+  };
+
+  // Restore default preset guests in Firebase for this owner + invitation
   const handleResetList = async () => {
     setIsSyncingWithCloud(true);
     try {
-      await seedDefaultGuestsToFirebase(effectiveOwnerId);
-      setSavedGuests(getSavedGuests(effectiveOwnerId));
+      await seedDefaultGuestsToFirebase(effectiveOwnerId, effectiveEventId, effectiveEventType);
+      setSavedGuests(getSavedGuests(effectiveOwnerId, effectiveEventId, effectiveEventType));
       showFeedback(language === 'kh' ? 'បានស្ដារបញ្ជីដើមឡើងវិញដោយជោគជ័យ' : 'Restored default guests successfully');
     } catch (err) {
       showFeedback(language === 'kh' ? 'មានបញ្ហាក្នុងការស្ដារបញ្ជីដើម' : 'Error restoring default guests');
@@ -692,15 +794,22 @@ export default function AddGuestModal({
     const finalName = fullName || (language === 'kh' ? 'ភ្ញៀវកិត្តិយស' : 'Honored Guest');
     onSaveGuestName(finalName);
 
-    // Save to Firebase asynchronously scoped to owner
+    // Save to Firebase asynchronously scoped to owner AND invitation
     const catLabels = getCategoryLabel(category);
-    saveGuestToFirebase({
-      name: finalName,
-      category,
-      categoryLabelKh: catLabels.kh,
-      categoryLabelEn: catLabels.en,
-      note: note.trim() || undefined,
-    }, effectiveOwnerId).catch(() => {
+    saveGuestToFirebase(
+      {
+        name: finalName,
+        category,
+        categoryLabelKh: catLabels.kh,
+        categoryLabelEn: catLabels.en,
+        note: note.trim() || undefined,
+        eventId: effectiveEventId,
+        eventType: effectiveEventType,
+      },
+      effectiveOwnerId,
+      effectiveEventId,
+      effectiveEventType
+    ).catch(() => {
       // offline fallback handled by cache
     });
 
@@ -716,16 +825,23 @@ export default function AddGuestModal({
   const handlePreviewEnvelope = () => {
     const finalName = fullName || (language === 'kh' ? 'ភ្ញៀវកិត្តិយស' : 'Honored Guest');
     onSaveGuestName(finalName);
-    
-    // Save to Firebase scoped to owner
+
+    // Save to Firebase scoped to owner AND invitation
     const catLabels = getCategoryLabel(category);
-    saveGuestToFirebase({
-      name: finalName,
-      category,
-      categoryLabelKh: catLabels.kh,
-      categoryLabelEn: catLabels.en,
-      note: note.trim() || undefined,
-    }, effectiveOwnerId).catch(() => {
+    saveGuestToFirebase(
+      {
+        name: finalName,
+        category,
+        categoryLabelKh: catLabels.kh,
+        categoryLabelEn: catLabels.en,
+        note: note.trim() || undefined,
+        eventId: effectiveEventId,
+        eventType: effectiveEventType,
+      },
+      effectiveOwnerId,
+      effectiveEventId,
+      effectiveEventType
+    ).catch(() => {
       // offline fallback
     });
 
@@ -800,8 +916,8 @@ export default function AddGuestModal({
                   </h3>
                   <p className={`text-[11px] ${isLight ? 'text-neutral-600' : 'text-neutral-400'} font-khmer`}>
                     {language === 'kh'
-                      ? 'ជ្រើសរើស ឬ បញ្ចូលឈ្មោះភ្ញៀវ ដើម្បីបង្ហាញលើលិខិត និងស្រោមសំបុត្រ (រក្សាទុកក្នុង Cloud)'
-                      : 'Select or enter guest name to customize envelope & digital card (Synced to Firebase)'}
+                      ? `រក្សាទុកតាមគណនី៖ ${activeUserLabel} • ប្រភេទលិខិត៖ ${activeEventTypeLabel}`
+                      : `Database Scope: ${activeUserLabel} • Invitation: ${activeEventTypeLabel}`}
                   </p>
                 </div>
               </div>
@@ -1098,6 +1214,21 @@ export default function AddGuestModal({
                           className="hidden"
                         />
                       </label>
+
+                      <button
+                        type="button"
+                        onClick={handleSaveAllGuestsToDatabase}
+                        disabled={isSyncingWithCloud || savedGuests.length === 0}
+                        className={`cursor-pointer px-2.5 py-1.5 rounded-lg border text-[10px] sm:text-[11px] font-khmer font-bold flex items-center gap-1.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                          isLight
+                            ? 'bg-sky-100 hover:bg-sky-200 border-sky-300 text-sky-900'
+                            : 'bg-sky-500/20 hover:bg-sky-500/30 border-sky-400/40 text-sky-200'
+                        }`}
+                        title={language === 'kh' ? 'រក្សាទុកឈ្មោះភ្ញៀវទាំងអស់ចូល Database តាមគណនី និងប្រភេទលិខិតនេះ' : 'Save all guest names to database'}
+                      >
+                        <HardDrive className="w-3.5 h-3.5 text-sky-500" />
+                        <span>{language === 'kh' ? 'រក្សាទុកទាំងអស់' : 'Save All to DB'}</span>
+                      </button>
 
                       <button
                         type="button"

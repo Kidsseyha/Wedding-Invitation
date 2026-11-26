@@ -12,7 +12,8 @@
         "categoryLabelEn": { "type": "string", "description": "English category label", "maxLength": 100 },
         "note": { "type": "string", "description": "Optional note or table assignment", "maxLength": 500 },
         "ownerId": { "type": "string", "description": "Owner user scope ID for per-user guest list isolation", "maxLength": 128 },
-        "eventId": { "type": "string", "description": "Optional associated event ID", "maxLength": 128 },
+        "eventId": { "type": "string", "description": "Associated invitation event ID for per-invitation isolation", "maxLength": 128 },
+        "eventType": { "type": "string", "description": "Invitation category (wedding, engagement, housewarming, birthday, anniversary)", "maxLength": 50 },
         "updatedAt": { "type": "string", "description": "ISO timestamp of last update", "maxLength": 64 }
       },
       "required": ["name", "category"]
@@ -190,6 +191,10 @@
     "/user_databases/{dbId}/events/{eventId}": {
       "schema": { "$ref": "#/entities/WeddingEvent" },
       "description": "Personal database wedding/event invitations owned by dbId"
+    },
+    "/user_databases/{dbId}/events/{eventId}/guests/{guestId}": {
+      "schema": { "$ref": "#/entities/Guest" },
+      "description": "Per-user and per-invitation isolated guest list owned by dbId and scoped to eventId"
     },
     "/user_databases/{dbId}/guests/{guestId}": {
       "schema": { "$ref": "#/entities/Guest" },

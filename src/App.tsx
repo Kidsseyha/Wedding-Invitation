@@ -2654,6 +2654,7 @@ export default function App() {
         onUpdateGuestName={newName => setGuestName(newName)}
         onOpenAddGuestModal={handleOpenAddGuest}
         id={event.id}
+        ownerId={activeUserScope.isAuthenticated ? activeUserScope.scopeId : (event.ownerId || extractScopeFromEventId(event.id) || GUEST_PUBLIC_SCOPE)}
         templateId={event.templateId}
         eventType={event.eventType}
         name={event.name}

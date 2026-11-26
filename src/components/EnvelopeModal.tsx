@@ -33,6 +33,8 @@ import {
 } from 'lucide-react';
 import { Language, WeddingEvent } from '../types';
 import { getSavedGuests, GuestPreset } from '../data/guests';
+import { subscribeToGuests } from '../lib/firebaseGuests';
+import { extractScopeFromEventId, normalizeGuestEventId, resolveUserScope } from '../lib/userScope';
 import { decodeKhmerQueryValue, resolveKhmerFontFamily } from '../lib/shareUrl';
 import RoyalGoldRibbonBanner from './RoyalGoldRibbonBanner';
 import IntertwinedRibbonHearts from './IntertwinedRibbonHearts';
@@ -91,6 +93,7 @@ interface EnvelopeModalProps {
   brideEn?: string;
   singlePerson?: boolean;
   id?: string;
+  ownerId?: string;
   templateId?: string;
   eventType?: string;
   name?: string;
@@ -164,6 +167,7 @@ export default function EnvelopeModal({
   brideEn,
   singlePerson,
   id,
+  ownerId: propOwnerId,
   templateId,
   eventType,
   name,
@@ -379,13 +383,33 @@ export default function EnvelopeModal({
     }
   };
 
+  const effectiveOwnerId =
+    (propOwnerId && propOwnerId.trim()) ||
+    eventData?.ownerId ||
+    extractScopeFromEventId(id || eventData?.id) ||
+    resolveUserScope().scopeId;
+  const effectiveEventId = normalizeGuestEventId(id || eventData?.id, effectiveOwnerId);
+
   useEffect(() => {
     setTempGuestName(guestName);
-    const guests = getSavedGuests();
+    const guests = getSavedGuests(effectiveOwnerId, effectiveEventId, eventType);
     setSavedGuestsList(guests);
     const match = guests.find(g => g.name.toLowerCase() === (guestName || '').toLowerCase());
     setCurrentGuestInfo(match || null);
-  }, [guestName, isOpen]);
+
+    if (!isOpen) return;
+    const unsubscribe = subscribeToGuests(
+      (liveGuests) => {
+        setSavedGuestsList(liveGuests);
+        const liveMatch = liveGuests.find(g => g.name.toLowerCase() === (guestName || '').toLowerCase());
+        setCurrentGuestInfo(liveMatch || null);
+      },
+      effectiveOwnerId,
+      effectiveEventId,
+      eventType
+    );
+    return () => unsubscribe();
+  }, [guestName, isOpen, effectiveOwnerId, effectiveEventId, eventType]);
 
   useEffect(() => {
     if (isOpen) {

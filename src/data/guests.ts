@@ -1,4 +1,10 @@
-import { getScopedGuestId, getUserStorageKey, resolveUserScope } from '../lib/userScope';
+import {
+  getGuestEventToken,
+  getScopedGuestId,
+  getUserStorageKey,
+  normalizeGuestEventId,
+  resolveUserScope,
+} from '../lib/userScope';
 
 export interface GuestPreset {
   id: string;
@@ -9,6 +15,8 @@ export interface GuestPreset {
   note?: string;
   ownerId?: string;
   eventId?: string;
+  eventType?: string;
+  updatedAt?: string;
 }
 
 export const DEFAULT_GUEST_PRESETS: GuestPreset[] = [
@@ -60,25 +68,36 @@ function resolveOwnerId(ownerId?: string): string {
   return (ownerId && ownerId.trim()) || resolveUserScope().scopeId;
 }
 
-function getGuestStorageKey(ownerId?: string): string {
-  return getUserStorageKey(GUEST_STORAGE_KEY, resolveOwnerId(ownerId));
+export function getGuestStorageKey(ownerId?: string, eventId?: string): string {
+  const effectiveOwner = resolveOwnerId(ownerId);
+  const eventToken = getGuestEventToken(eventId);
+  return eventToken
+    ? getUserStorageKey(`${GUEST_STORAGE_KEY}__${eventToken}`, effectiveOwner)
+    : getUserStorageKey(GUEST_STORAGE_KEY, effectiveOwner);
 }
 
-export function getScopedDefaultGuests(ownerId?: string): GuestPreset[] {
+export function getScopedDefaultGuests(
+  ownerId?: string,
+  eventId?: string,
+  eventType?: string
+): GuestPreset[] {
   const effectiveOwner = resolveOwnerId(ownerId);
+  const normalizedEventId = eventId ? normalizeGuestEventId(eventId, effectiveOwner) : undefined;
   return DEFAULT_GUEST_PRESETS.map((p) => ({
     ...p,
-    id: getScopedGuestId(p.id, effectiveOwner),
+    id: getScopedGuestId(p.id, effectiveOwner, normalizedEventId),
     ownerId: effectiveOwner,
+    ...(normalizedEventId ? { eventId: normalizedEventId } : {}),
+    ...(eventType ? { eventType } : {}),
   }));
 }
 
-export function getSavedGuests(ownerId?: string): GuestPreset[] {
+export function getSavedGuests(ownerId?: string, eventId?: string, eventType?: string): GuestPreset[] {
   const effectiveOwner = resolveOwnerId(ownerId);
-  if (typeof window === 'undefined') return getScopedDefaultGuests(effectiveOwner);
+  if (typeof window === 'undefined') return getScopedDefaultGuests(effectiveOwner, eventId, eventType);
   try {
-    const raw = localStorage.getItem(getGuestStorageKey(effectiveOwner));
-    if (raw === null) return getScopedDefaultGuests(effectiveOwner);
+    const raw = localStorage.getItem(getGuestStorageKey(effectiveOwner, eventId));
+    if (raw === null) return getScopedDefaultGuests(effectiveOwner, eventId, eventType);
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
       return parsed;
@@ -86,63 +105,101 @@ export function getSavedGuests(ownerId?: string): GuestPreset[] {
   } catch (e) {
     console.error('Failed to load saved guests:', e);
   }
-  return getScopedDefaultGuests(effectiveOwner);
+  return getScopedDefaultGuests(effectiveOwner, eventId, eventType);
 }
 
-export function updateGuestInList(id: string, updatedGuest: Partial<GuestPreset>, ownerId?: string): GuestPreset[] {
+export function updateGuestInList(
+  id: string,
+  updatedGuest: Partial<GuestPreset>,
+  ownerId?: string,
+  eventId?: string
+): GuestPreset[] {
   const effectiveOwner = resolveOwnerId(ownerId);
-  const current = getSavedGuests(effectiveOwner);
-  const updated = current.map(g => (g.id === id ? { ...g, ...updatedGuest, ownerId: effectiveOwner } : g));
+  const targetEventId = eventId || updatedGuest.eventId;
+  const normalizedEventId = targetEventId ? normalizeGuestEventId(targetEventId, effectiveOwner) : undefined;
+  const current = getSavedGuests(effectiveOwner, normalizedEventId);
+  const updated = current.map(g =>
+    g.id === id
+      ? {
+          ...g,
+          ...updatedGuest,
+          ownerId: effectiveOwner,
+          ...(normalizedEventId ? { eventId: normalizedEventId } : {}),
+        }
+      : g
+  );
   try {
-    localStorage.setItem(getGuestStorageKey(effectiveOwner), JSON.stringify(updated));
+    localStorage.setItem(getGuestStorageKey(effectiveOwner, normalizedEventId), JSON.stringify(updated));
   } catch (e) {
     console.error('Failed to update guest:', e);
   }
   return updated;
 }
 
-export function deleteGuestFromList(id: string, ownerId?: string): GuestPreset[] {
+export function deleteGuestFromList(id: string, ownerId?: string, eventId?: string): GuestPreset[] {
   const effectiveOwner = resolveOwnerId(ownerId);
-  const current = getSavedGuests(effectiveOwner);
+  const normalizedEventId = eventId ? normalizeGuestEventId(eventId, effectiveOwner) : undefined;
+  const current = getSavedGuests(effectiveOwner, normalizedEventId);
   const updated = current.filter(g => g.id !== id);
   try {
-    localStorage.setItem(getGuestStorageKey(effectiveOwner), JSON.stringify(updated));
+    localStorage.setItem(getGuestStorageKey(effectiveOwner, normalizedEventId), JSON.stringify(updated));
   } catch (e) {
     console.error('Failed to delete guest:', e);
   }
   return updated;
 }
 
-export function resetGuestsToDefault(ownerId?: string): GuestPreset[] {
+export function resetGuestsToDefault(
+  ownerId?: string,
+  eventId?: string,
+  eventType?: string
+): GuestPreset[] {
   const effectiveOwner = resolveOwnerId(ownerId);
-  const defaults = getScopedDefaultGuests(effectiveOwner);
+  const normalizedEventId = eventId ? normalizeGuestEventId(eventId, effectiveOwner) : undefined;
+  const defaults = getScopedDefaultGuests(effectiveOwner, normalizedEventId, eventType);
   try {
-    localStorage.setItem(getGuestStorageKey(effectiveOwner), JSON.stringify(defaults));
+    localStorage.setItem(getGuestStorageKey(effectiveOwner, normalizedEventId), JSON.stringify(defaults));
   } catch (e) {
     console.error('Failed to reset guests:', e);
   }
   return defaults;
 }
 
-export function saveGuestToList(newGuest: Omit<GuestPreset, 'id'>, ownerId?: string): GuestPreset[] {
+export function saveGuestToList(
+  newGuest: Omit<GuestPreset, 'id'>,
+  ownerId?: string,
+  eventId?: string
+): GuestPreset[] {
   const effectiveOwner = resolveOwnerId(ownerId || newGuest.ownerId);
-  const current = getSavedGuests(effectiveOwner);
+  const targetEventId = eventId || newGuest.eventId;
+  const normalizedEventId = targetEventId ? normalizeGuestEventId(targetEventId, effectiveOwner) : undefined;
+  const current = getSavedGuests(effectiveOwner, normalizedEventId, newGuest.eventType);
   const exists = current.find(g => g.name.toLowerCase() === newGuest.name.trim().toLowerCase());
-  
+
   let updated: GuestPreset[];
   if (exists) {
-    updated = current.map(g => (g.id === exists.id ? { ...g, ...newGuest, ownerId: effectiveOwner } : g));
+    updated = current.map(g =>
+      g.id === exists.id
+        ? {
+            ...g,
+            ...newGuest,
+            ownerId: effectiveOwner,
+            ...(normalizedEventId ? { eventId: normalizedEventId } : {}),
+          }
+        : g
+    );
   } else {
     const newItem: GuestPreset = {
       ...newGuest,
-      id: getScopedGuestId(`guest-${Date.now()}`, effectiveOwner),
+      id: getScopedGuestId(`guest-${Date.now()}`, effectiveOwner, normalizedEventId),
       ownerId: effectiveOwner,
+      ...(normalizedEventId ? { eventId: normalizedEventId } : {}),
     };
     updated = [newItem, ...current];
   }
-  
+
   try {
-    localStorage.setItem(getGuestStorageKey(effectiveOwner), JSON.stringify(updated));
+    localStorage.setItem(getGuestStorageKey(effectiveOwner, normalizedEventId), JSON.stringify(updated));
   } catch (e) {
     console.error('Failed to persist guest list:', e);
   }

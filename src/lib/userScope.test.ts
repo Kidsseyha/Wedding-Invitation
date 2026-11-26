@@ -7,7 +7,9 @@ import {
   getScopedEventId,
   getScopedGuestId,
   getUserStorageKey,
+  guestMatchesEventScope,
   isGlobalSharedPresetId,
+  normalizeGuestEventId,
   resolveUserScope,
   stripScopedEventId,
 } from './userScope';
@@ -171,4 +173,83 @@ test('getEmailDatabaseId and resolveRecordDatabaseId deterministically map each 
   assert.equal(resolveRecordDatabaseId({ eventId: scopedEventId }), dbOwnerLower);
   assert.equal(resolveRecordDatabaseId({ ownerEmail: 'yoeurn.seyha@diu.edu.kh' }), dbAdmin);
   assert.equal(resolveRecordDatabaseId({ ownerId: GUEST_PUBLIC_SCOPE, eventId: DEFAULT_PRESET_EVENT_ID }), '');
+});
+
+test('guests are isolated across BOTH different users AND different invitations owned by the same user', () => {
+  installMockLocalStorage();
+  const userA = resolveUserScope(null, 'alice@example.com').scopeId;
+  const userB = resolveUserScope(null, 'bob@example.com').scopeId;
+
+  const weddingEventA = getScopedEventId(DEFAULT_PRESET_EVENT_ID, userA);
+  const birthdayEventA = getScopedEventId('birthday-event-001', userA);
+  const weddingEventB = getScopedEventId(DEFAULT_PRESET_EVENT_ID, userB);
+
+  const idWedA = getScopedGuestId('guest-1', userA, weddingEventA);
+  const idBdayA = getScopedGuestId('guest-1', userA, birthdayEventA);
+  const idWedB = getScopedGuestId('guest-1', userB, weddingEventB);
+
+  assert.notEqual(idWedA, idBdayA);
+  assert.notEqual(idWedA, idWedB);
+  assert.notEqual(idBdayA, idWedB);
+
+  saveGuestToList(
+    {
+      name: 'Wedding Only Guest',
+      category: 'vip',
+      categoryLabelKh: 'ភ្ញៀវ VIP',
+      categoryLabelEn: 'VIP',
+      ownerId: userA,
+      eventId: weddingEventA,
+      eventType: 'wedding',
+    },
+    userA,
+    weddingEventA
+  );
+
+  saveGuestToList(
+    {
+      name: 'Birthday Only Guest',
+      category: 'friends',
+      categoryLabelKh: 'មិត្តភក្តិ',
+      categoryLabelEn: 'Friends',
+      ownerId: userA,
+      eventId: birthdayEventA,
+      eventType: 'birthday',
+    },
+    userA,
+    birthdayEventA
+  );
+
+  const wedGuestsA = getSavedGuests(userA, weddingEventA, 'wedding');
+  const bdayGuestsA = getSavedGuests(userA, birthdayEventA, 'birthday');
+  const wedGuestsB = getSavedGuests(userB, weddingEventB, 'wedding');
+
+  assert.ok(wedGuestsA.some(g => g.name === 'Wedding Only Guest'));
+  assert.equal(wedGuestsA.some(g => g.name === 'Birthday Only Guest'), false);
+  assert.ok(bdayGuestsA.some(g => g.name === 'Birthday Only Guest'));
+  assert.equal(bdayGuestsA.some(g => g.name === 'Wedding Only Guest'), false);
+  assert.equal(wedGuestsB.some(g => g.name === 'Wedding Only Guest'), false);
+
+  assert.equal(
+    guestMatchesEventScope({ ownerId: userA, eventId: weddingEventA }, userA, weddingEventA),
+    true
+  );
+  assert.equal(
+    guestMatchesEventScope({ ownerId: userA, eventId: weddingEventA }, userA, birthdayEventA),
+    false
+  );
+  assert.equal(
+    guestMatchesEventScope({ ownerId: userA, eventId: weddingEventA }, userB, weddingEventB),
+    false
+  );
+  // Legacy guest without eventId only matches default wedding preset
+  assert.equal(
+    guestMatchesEventScope({ ownerId: userA }, userA, weddingEventA),
+    true
+  );
+  assert.equal(
+    guestMatchesEventScope({ ownerId: userA }, userA, birthdayEventA),
+    false
+  );
+  assert.equal(normalizeGuestEventId('', userA), weddingEventA);
 });

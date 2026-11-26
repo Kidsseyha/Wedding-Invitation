@@ -140,20 +140,91 @@ export function getScopedEventId(baseEventId: string, scopeId?: string | null): 
 }
 
 /**
- * Converts a guest record ID into a user-scoped Firestore-safe guest document ID.
+ * Converts an event ID into a short, deterministic Firestore-safe event scope token
+ * (`ev_<hash>`) so guests from different invitations owned by the same user never
+ * share or overwrite the same document ID.
  */
-export function getScopedGuestId(rawGuestId: string, scopeId?: string | null): string {
-  const effectiveScope = (scopeId && scopeId.trim()) || resolveUserScope().scopeId;
-  const cleanBase = (rawGuestId || `guest-${Date.now()}`)
-    .replace(/^g_u_[a-z0-9_]+__/, '')
+export function getGuestEventToken(eventId?: string | null): string {
+  const raw = (eventId || '').trim();
+  if (!raw) return '';
+  const cleanBase = stripScopedEventId(raw)
     .replace(/[^a-zA-Z0-9_-]/g, '_')
     .slice(0, 64);
+  if (!cleanBase) return '';
+  return `ev_${shortHash(cleanBase)}`;
+}
 
-  if (!effectiveScope || effectiveScope === GUEST_PUBLIC_SCOPE) {
-    return cleanBase;
+/**
+ * Normalizes an invitation eventId for guest storage within the given owner scope.
+ */
+export function normalizeGuestEventId(eventId?: string | null, ownerId?: string | null): string {
+  const effectiveOwner = (ownerId && ownerId.trim()) || resolveUserScope().scopeId;
+  const raw = (eventId || '').trim();
+  if (!raw) {
+    return effectiveOwner && effectiveOwner !== GUEST_PUBLIC_SCOPE
+      ? getScopedEventId(DEFAULT_PRESET_EVENT_ID, effectiveOwner)
+      : DEFAULT_PRESET_EVENT_ID;
+  }
+  return effectiveOwner && effectiveOwner !== GUEST_PUBLIC_SCOPE
+    ? getScopedEventId(raw, effectiveOwner)
+    : stripScopedEventId(raw);
+}
+
+/**
+ * Checks whether a guest record belongs to both the target ownerId and target eventId.
+ */
+export function guestMatchesEventScope(
+  guest: { ownerId?: string; eventId?: string } | null | undefined,
+  ownerId?: string | null,
+  eventId?: string | null
+): boolean {
+  if (!guest) return false;
+  const effectiveOwner = (ownerId && ownerId.trim()) || GUEST_PUBLIC_SCOPE;
+  if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
+    if (guest.ownerId && guest.ownerId !== effectiveOwner) return false;
+  } else {
+    if (guest.ownerId && guest.ownerId !== GUEST_PUBLIC_SCOPE) return false;
   }
 
-  return `g_${effectiveScope}__${cleanBase}`.slice(0, 128);
+  const rawEventId = (eventId || '').trim();
+  if (!rawEventId) return true;
+
+  const targetScoped = normalizeGuestEventId(rawEventId, effectiveOwner);
+  const targetBase = stripScopedEventId(rawEventId);
+  const guestEventId = (guest.eventId || '').trim();
+
+  if (!guestEventId) {
+    // Legacy guests created before per-invitation scoping stay attached only to the default wedding preset
+    return targetBase === DEFAULT_PRESET_EVENT_ID;
+  }
+
+  return guestEventId === targetScoped || guestEventId === rawEventId || stripScopedEventId(guestEventId) === targetBase;
+}
+
+/**
+ * Converts a guest record ID into a user- and invitation-scoped Firestore-safe guest document ID.
+ */
+export function getScopedGuestId(
+  rawGuestId: string,
+  scopeId?: string | null,
+  eventId?: string | null
+): string {
+  const effectiveScope = (scopeId && scopeId.trim()) || resolveUserScope().scopeId;
+  const cleanBase = (rawGuestId || `guest-${Date.now()}`)
+    .replace(/^g_(?:u_[a-z0-9_]+|guest_public)__(?:ev_[a-z0-9]+__)?/, '')
+    .replace(/^g_ev_[a-z0-9]+__/, '')
+    .replace(/[^a-zA-Z0-9_-]/g, '_')
+    .slice(0, 56);
+
+  const eventToken = getGuestEventToken(eventId);
+  const scopePrefix =
+    !effectiveScope || effectiveScope === GUEST_PUBLIC_SCOPE
+      ? eventToken
+        ? `g_${eventToken}__`
+        : ''
+      : `g_${effectiveScope}__${eventToken ? `${eventToken}__` : ''}`;
+
+  return `${scopePrefix}${cleanBase}`.slice(0, 128);
 }
 
 /**
