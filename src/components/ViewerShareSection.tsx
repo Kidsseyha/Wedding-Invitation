@@ -14,7 +14,12 @@ import {
 } from 'lucide-react';
 import { Language, WeddingEvent } from '../types';
 import { ThemeMode } from './ThemeToggle';
-import { getPublicShareUrl, getPreferredVercelOrigin, shortenUrl } from '../lib/shareUrl';
+import {
+  decodeKhmerQueryValue,
+  getPublicShareUrl,
+  getPreferredVercelOrigin,
+  shortenUrl,
+} from '../lib/shareUrl';
 import { getCategoryCoverImage } from '../data/eventTemplates';
 import { normalizeCategoryString, resolveEventCoverImage } from '../utils/shareMeta';
 
@@ -42,12 +47,14 @@ export default function ViewerShareSection({
   const [copiedShort, setCopiedShort] = useState(false);
   const [shortUrlState, setShortUrlState] = useState<{ targetUrl: string; shortUrl: string } | null>(null);
 
-  const currentGuest = guestName && guestName !== 'Your Name' ? guestName.trim() : '';
+  const decodedGuest = decodeKhmerQueryValue(guestName);
+  const currentGuest = decodedGuest && decodedGuest !== 'Your Name' ? decodedGuest : '';
   const vercelOrigin = getPreferredVercelOrigin();
   const fullUrl = getPublicShareUrl(currentGuest, event.id, event.eventType, {
     customOrigin: vercelOrigin,
     ownerId: event.ownerId,
     lang: 'kh',
+    khFont: event.config?.guest_name_font_family,
   });
   const shortUrl = shortUrlState && shortUrlState.targetUrl === fullUrl ? shortUrlState.shortUrl : '';
 
@@ -232,7 +239,7 @@ export default function ViewerShareSection({
             {/* Direct URL Row with Copy and Test Open */}
             <div className="flex items-center gap-2">
               <div
-                className={`flex-1 px-3 py-2.5 rounded-xl border text-xs font-mono truncate select-all flex items-center gap-1.5 shadow-inner ${
+                className={`flex-1 px-3 py-2.5 rounded-xl border text-xs font-khmer truncate select-all flex items-center gap-1.5 shadow-inner ${
                   isLight
                     ? 'bg-amber-50/50 border-amber-200 text-amber-950'
                     : 'bg-black/70 border-amber-500/30 text-amber-200'
@@ -378,7 +385,7 @@ export default function ViewerShareSection({
               {/* Bottom URL Bar in Card */}
               <div className={`p-2.5 ${isLight ? 'bg-amber-50/90 border-amber-200' : 'bg-[#121110] border-amber-500/20'} border-t flex items-center justify-between gap-2`}>
                 <div className="min-w-0 flex-1">
-                  <p className={`text-[11px] font-mono ${isLight ? 'text-amber-950 font-medium' : 'text-amber-300'} truncate select-all`}>
+                  <p className={`text-[11px] font-khmer ${isLight ? 'text-amber-950 font-medium' : 'text-amber-300'} truncate select-all`}>
                     {activeShareLink}
                   </p>
                 </div>

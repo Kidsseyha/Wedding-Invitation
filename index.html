@@ -109,7 +109,18 @@
           var params = new URLSearchParams(window.location.search || '');
           var id = params.get('id') || '';
           var rawType = (params.get('type') || params.get('category') || '').toLowerCase().trim();
-          var guest = (params.get('name') || params.get('i') || params.get('guest') || params.get('to') || '').trim();
+          var rawGuest = (params.get('name') || params.get('i') || params.get('guest') || params.get('to') || '').replace(/\+/g, ' ');
+          for (var dp = 0; dp < 3; dp++) {
+            if (!/%[0-9A-Fa-f]{2}/.test(rawGuest)) break;
+            try {
+              var nextGuest = decodeURIComponent(rawGuest);
+              if (nextGuest === rawGuest) break;
+              rawGuest = nextGuest;
+            } catch (eDec) {
+              break;
+            }
+          }
+          var guest = rawGuest.replace(/\s+/g, ' ').trim();
           if (guest === 'Your Name') guest = '';
 
           var CATEGORY_PRESETS = {

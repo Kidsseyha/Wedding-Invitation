@@ -34,6 +34,7 @@ import {
 import { Language, WeddingEvent } from '../types';
 import { ThemeMode } from './ThemeToggle';
 import {
+  decodeKhmerQueryValue,
   getPublicShareUrl,
   shortenUrl,
   getPreferredVercelOrigin,
@@ -108,7 +109,10 @@ export default function ShareInvitationModal({
   const isLight = theme === 'light';
   const effectiveScope = (userScope && userScope.trim()) || currentEvent?.ownerId || resolveUserScope().scopeId;
   const [activeTab, setActiveTab] = useState<'single' | 'batch' | 'qrcode'>('single');
-  const [targetGuest, setTargetGuest] = useState(guestName || '');
+  const [targetGuest, setTargetGuest] = useState(() => {
+    const decoded = decodeKhmerQueryValue(guestName);
+    return decoded && decoded !== 'Your Name' ? decoded : '';
+  });
   const [copiedMessage, setCopiedMessage] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [shortUrlState, setShortUrlState] = useState<{ targetUrl: string; shortUrl: string } | null>(null);
@@ -223,7 +227,8 @@ export default function ShareInvitationModal({
       wasOpenRef.current = true;
       hasUserSelectedTemplateRef.current = false;
       setSelectedTemplateId(initialTemplateId);
-      setTargetGuest(guestName && guestName !== 'Your Name' ? guestName : '');
+      const decoded = decodeKhmerQueryValue(guestName);
+      setTargetGuest(decoded && decoded !== 'Your Name' ? decoded : '');
     } else if (!hasUserSelectedTemplateRef.current && !pendingTemplateSaveRef.current) {
       setSelectedTemplateId(initialTemplateId);
     }
@@ -358,7 +363,8 @@ export default function ShareInvitationModal({
     }
   }, [isOpen, effectiveScope]);
 
-  const currentShareGuest = targetGuest.trim() || 'Your Name';
+  const normalizedTargetGuest = decodeKhmerQueryValue(targetGuest);
+  const currentShareGuest = normalizedTargetGuest || 'Your Name';
   const displayShareGuest =
     currentShareGuest !== 'Your Name'
       ? currentShareGuest
@@ -1056,7 +1062,10 @@ Your presence will make our day truly special! 🙏✨`;
                         type="text"
                         value={targetGuest}
                         onChange={(e) => {
-                          const nextVal = e.target.value;
+                          const rawVal = e.target.value;
+                          const nextVal = /%E1%(?:9E|9F)|%25E1/i.test(rawVal)
+                            ? decodeKhmerQueryValue(rawVal)
+                            : rawVal;
                           setTargetGuest(nextVal);
                           if (onUpdateGuestName) {
                             onUpdateGuestName(nextVal.trim() ? nextVal : 'Your Name');
@@ -1392,6 +1401,38 @@ Your presence will make our day truly special! 🙏✨`;
                       </div>
                     )}
 
+                    {/* Direct Readable Khmer Share Link Preview Row */}
+                    <div
+                      className={`p-2 rounded-xl border flex items-center gap-2 ${
+                        isLight
+                          ? 'bg-white border-amber-300 text-amber-950'
+                          : 'bg-black/75 border-amber-500/35 text-amber-200'
+                      }`}
+                    >
+                      <Link2 className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                      <span
+                        className="flex-1 text-[11px] font-khmer truncate select-all"
+                        title={activeShareLink}
+                      >
+                        {activeShareLink}
+                      </span>
+                      <a
+                        href={activeShareLink}
+                        onClick={(e) => openPendingAwareLink(e, activeShareLink)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`px-2 py-1 rounded-lg border text-[10.5px] font-khmer font-semibold flex items-center gap-1 shrink-0 transition-colors ${
+                          isLight
+                            ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 text-amber-900'
+                            : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-400/40 text-amber-200'
+                        }`}
+                        title={language === 'kh' ? 'បើកលីងភ្ញៀវសាកល្បង' : 'Test viewer link'}
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>{language === 'kh' ? 'បើក' : 'Open'}</span>
+                      </a>
+                    </div>
+
                     {/* Header and Actions */}
                     <div className="flex items-center justify-between flex-wrap gap-1.5">
                       <span className={`text-xs font-semibold ${isLight ? 'text-amber-900' : 'text-amber-300'} font-khmer flex items-center gap-1.5`}>
@@ -1513,7 +1554,7 @@ Your presence will make our day truly special! 🙏✨`;
                     <h4 className={`text-sm font-bold font-khmer ${isLight ? 'text-amber-900' : 'text-amber-200'}`}>
                       {language === 'kh' ? `សំបុត្រសម្រាប់៖ ${displayShareGuest}` : `Invitation for: ${displayShareGuest}`}
                     </h4>
-                    <p className={`text-[11px] ${isLight ? 'text-amber-800' : 'text-amber-400/80'} font-mono truncate max-w-sm mx-auto px-2`}>
+                    <p className={`text-[11px] ${isLight ? 'text-amber-800' : 'text-amber-400/80'} font-khmer truncate max-w-sm mx-auto px-2 select-all`}>
                       {activeQrData}
                     </p>
                   </div>

@@ -25,7 +25,7 @@ import { Language } from '../types';
 import ThemeToggle, { ThemeMode } from './ThemeToggle';
 import LanguageToggle from './LanguageToggle';
 import * as XLSX from 'xlsx';
-import { getPublicShareUrl, getPreferredVercelOrigin, shortenUrl } from '../lib/shareUrl';
+import { getPublicShareUrl, getPreferredVercelOrigin, shortenUrl, normalizeShareUrlEncoding } from '../lib/shareUrl';
 import {
   getSavedGuests,
   DEFAULT_GUEST_PRESETS,
@@ -708,7 +708,7 @@ export default function AddGuestModal({
       const url = new URL(window.location.href);
       url.searchParams.set('name', finalName);
       if (eventId) url.searchParams.set('id', eventId);
-      window.history.replaceState({}, '', url.toString());
+      window.history.replaceState({}, '', normalizeShareUrlEncoding(url.toString()));
     }
     onClose();
   };
@@ -733,7 +733,7 @@ export default function AddGuestModal({
       const url = new URL(window.location.href);
       url.searchParams.set('name', finalName);
       if (eventId) url.searchParams.set('id', eventId);
-      window.history.replaceState({}, '', url.toString());
+      window.history.replaceState({}, '', normalizeShareUrlEncoding(url.toString()));
     }
     onOpenEnvelopeWithName(finalName);
     onClose();
@@ -1310,7 +1310,7 @@ export default function AddGuestModal({
                   target="_blank"
                   rel="noopener noreferrer"
                   title={language === 'kh' ? 'ចុចដើម្បីបើកមើលតំណភ្ជាប់ផ្ទាល់' : 'Click to open live invitation'}
-                  className={`flex-1 px-3 py-1.5 rounded-lg border text-xs font-mono truncate select-all flex items-center justify-between gap-1 group ${
+                  className={`flex-1 px-3 py-1.5 rounded-lg border text-xs font-khmer truncate select-all flex items-center justify-between gap-1 group ${
                     isLight
                       ? 'bg-white border-amber-300 hover:border-amber-500 text-amber-950'
                       : 'bg-black/70 border-white/10 hover:border-amber-400/60 text-amber-200/90'

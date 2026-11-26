@@ -260,16 +260,23 @@ export function generateDeterministicShortCode(targetUrl: string): string {
 }
 
 /**
- * Safely decodes Khmer/UTF-8 query parameter values (handles %XX, + spaces, and raw Unicode).
+ * Safely decodes Khmer/UTF-8 query parameter values (handles raw Unicode, + spaces,
+ * single-encoded %E1%9E..., and double/triple-encoded %25E1%259E... from chat apps).
  */
 export function decodeKhmerQueryValue(raw?: string | null): string {
   if (!raw || typeof raw !== 'string') return '';
-  const withSpaces = raw.replace(/\+/g, ' ');
-  try {
-    return withSpaces.includes('%') ? decodeURIComponent(withSpaces).trim() : withSpaces.trim();
-  } catch {
-    return withSpaces.trim();
+  let current = raw.replace(/\+/g, ' ');
+  for (let pass = 0; pass < 3; pass++) {
+    if (!/%[0-9A-Fa-f]{2}/.test(current)) break;
+    try {
+      const decoded = decodeURIComponent(current);
+      if (decoded === current) break;
+      current = decoded;
+    } catch {
+      break;
+    }
   }
+  return current.replace(/\s+/g, ' ').trim();
 }
 
 /**
@@ -287,7 +294,31 @@ export function detectLanguageFromUrl(search?: string | null, pathname?: string 
 }
 
 /**
- * Normalizes URL query spaces from '+' to '%20' so Khmer guest names never show '+' in chat apps.
+ * Restores percent-encoded UTF-8 Khmer characters (U+1780-U+17FF, U+19E0-U+19FF, U+200B-U+200D)
+ * inside a URL query value into readable Khmer script while keeping spaces as %20 and all
+ * URL-reserved ASCII characters (&, =, ?, #, +, %, quotes, etc.) safely percent-encoded.
+ */
+function restoreReadableKhmerPercentEncoding(encodedQuery: string): string {
+  // Khmer UTF-8 3-byte sequences:
+  //   U+1780..U+17FF => %E1%9E%80 .. %E1%9F%BF
+  //   U+19E0..U+19FF => %E1%A7%A0 .. %E1%A7%BF
+  //   U+200B..U+200D => %E2%80%8B .. %E2%80%8D (zero-width space/joiner used in Khmer typography)
+  return encodedQuery.replace(
+    /(?:%E1%(?:9E|9F)%[89AB][0-9A-F]|%E1%A7%[AB][0-9A-F]|%E2%80%8[BCD])+/gi,
+    (seq) => {
+      try {
+        return decodeURIComponent(seq);
+      } catch {
+        return seq;
+      }
+    }
+  );
+}
+
+/**
+ * Normalizes URL query encoding so Khmer guest names display in clean, readable Khmer script
+ * with %20 spaces (never '+' and never unreadable %E1%9E%9B... gibberish) while remaining
+ * 100% valid across browsers, Vercel, Telegram, Messenger, WhatsApp, and QR scanners.
  */
 export function normalizeShareUrlEncoding(urlStr: string): string {
   if (!urlStr) return '';
@@ -297,7 +328,9 @@ export function normalizeShareUrlEncoding(urlStr: string): string {
   const queryIdx = baseAndQuery.indexOf('?');
   if (queryIdx < 0) return urlStr;
   const basePart = baseAndQuery.slice(0, queryIdx);
-  const queryPart = baseAndQuery.slice(queryIdx + 1).replace(/\+/g, '%20');
+  const queryPart = restoreReadableKhmerPercentEncoding(
+    baseAndQuery.slice(queryIdx + 1).replace(/\+/g, '%20')
+  );
   return `${basePart}?${queryPart}${hashPart}`;
 }
 
@@ -319,7 +352,8 @@ export function extractGuestNameFromSearch(search: string): string {
 /**
  * Generates the live working share URL for wedding guests.
  * Automatically converts internal dev URLs (ais-dev-) and localhost to publicly accessible URLs
- * or honors customOrigin (such as Vercel domain) and guarantees Khmer language (?lang=kh) and Khmer font (?font=...) support.
+ * or honors customOrigin (such as Vercel domain) and guarantees Khmer language (?lang=kh),
+ * Khmer font (?font=...), and readable Khmer guest name support.
  */
 export function getPublicShareUrl(
   guestName?: string,
@@ -379,8 +413,9 @@ export function getPublicShareUrl(
 
   url.searchParams.set('share', '1');
 
-  if (guestName && guestName.trim() && guestName.trim() !== 'Your Name') {
-    url.searchParams.set('name', guestName.trim());
+  const decodedGuest = decodeKhmerQueryValue(guestName);
+  if (decodedGuest && decodedGuest !== 'Your Name') {
+    url.searchParams.set('name', decodedGuest);
   }
 
   return normalizeShareUrlEncoding(url.toString());

@@ -1815,7 +1815,13 @@ app.get('/api/short-link/:code', async (req, res) => {
     const parsed = new URL(cleanTarget);
     if (!parsed.searchParams.get('share')) parsed.searchParams.set('share', '1');
     if (!parsed.searchParams.get('lang')) parsed.searchParams.set('lang', 'kh');
-    guestName = (parsed.searchParams.get('i') || parsed.searchParams.get('guest') || parsed.searchParams.get('name') || parsed.searchParams.get('to') || '').trim();
+    guestName = decodeKhmerQueryValue(
+      parsed.searchParams.get('i') ||
+      parsed.searchParams.get('guest') ||
+      parsed.searchParams.get('name') ||
+      parsed.searchParams.get('to') ||
+      ''
+    );
     eventId = (parsed.searchParams.get('id') || '').trim();
     eventType = (parsed.searchParams.get('type') || parsed.searchParams.get('category') || '').trim();
     ownerId = (parsed.searchParams.get('ownerId') || '').trim();
@@ -1823,7 +1829,7 @@ app.get('/api/short-link/:code', async (req, res) => {
     if (parsed.origin && !parsed.origin.includes('localhost') && !parsed.origin.includes('127.0.0.1')) {
       metaOrigin = parsed.origin;
     }
-    cleanTarget = parsed.toString();
+    cleanTarget = normalizeShareUrlEncoding(parsed.toString());
   } catch {}
 
   const targetEvent = await resolveTargetEvent({
@@ -2027,6 +2033,13 @@ app.post('/api/shorten', async (req, res) => {
       parsedTarget.searchParams.set('lang', targetLang);
       if (!parsedTarget.searchParams.get('share')) {
         parsedTarget.searchParams.set('share', '1');
+      }
+      const rawNameParam = parsedTarget.searchParams.get('name');
+      if (rawNameParam) {
+        const cleanNameParam = decodeKhmerQueryValue(rawNameParam);
+        if (cleanNameParam && cleanNameParam !== 'Your Name') {
+          parsedTarget.searchParams.set('name', cleanNameParam);
+        }
       }
       cleanUrl = normalizeShareUrlEncoding(parsedTarget.toString());
     } catch {

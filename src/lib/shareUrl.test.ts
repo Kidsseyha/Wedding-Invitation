@@ -264,3 +264,40 @@ test('Vercel Khmer font support encodes &font= slug and resolves web-safe Google
     "'Moul', 'Moulpali', 'AKbalthom Kbach', serif"
   );
 });
+
+test('Khmer guest name share links render readable Khmer script without %E1%9E gibberish and decode multi-encoded values', () => {
+  const encodedSample = '%E1%9E%9B%E1%9F%84%E1%9E%80%20%E1%9E%9C%E1%9F%89%E1%9E%B6%E1%9E%93%E1%9F%8B%20%E1%9E%9F%E1%9E%BB%E1%9E%81%E1%9E%B6';
+  const doubleEncodedSample = encodeURIComponent(encodedSample);
+
+  assert.equal(decodeKhmerQueryValue(encodedSample), 'លោក វ៉ាន់ សុខា');
+  assert.equal(decodeKhmerQueryValue(doubleEncodedSample), 'លោក វ៉ាន់ សុខា');
+  assert.equal(extractGuestNameFromSearch(`?name=${encodedSample}`), 'លោក វ៉ាន់ សុខា');
+  assert.equal(extractGuestNameFromSearch(`?name=${doubleEncodedSample}`), 'លោក វ៉ាន់ សុខា');
+
+  const urlFromKhmer = getPublicShareUrl('លោក វ៉ាន់ សុខា', 'cmgrawhnk0003le0434762j7n', 'wedding', {
+    customOrigin: VERCEL_APP_URL,
+    lang: 'kh',
+    khFont: 'moul',
+  });
+  assert.ok(urlFromKhmer.includes('name=លោក%20វ៉ាន់%20សុខា'), `Expected readable Khmer name in URL, got: ${urlFromKhmer}`);
+  assert.equal(urlFromKhmer.includes('%E1%9E'), false, 'Share URL should not show raw %E1%9E percent-encoding for Khmer');
+  assert.equal(urlFromKhmer.includes(' '), false, 'Share URL must not contain raw spaces that break hyperlinks in chat apps');
+  assert.equal(new URL(urlFromKhmer).searchParams.get('name'), 'លោក វ៉ាន់ សុខា');
+
+  // Passing an already percent-encoded Khmer guest name must never double-encode
+  const urlFromEncoded = getPublicShareUrl(encodedSample, 'cmgrawhnk0003le0434762j7n', 'wedding', {
+    customOrigin: VERCEL_APP_URL,
+    lang: 'kh',
+    khFont: 'moul',
+  });
+  assert.equal(urlFromEncoded, urlFromKhmer);
+
+  // Reserved URL characters like & inside a Khmer guest name remain safely encoded
+  const urlWithAmp = getPublicShareUrl('លោក វ៉ាន់ សុខា & ភរិយា', 'cmgrawhnk0003le0434762j7n', 'wedding', {
+    customOrigin: VERCEL_APP_URL,
+    lang: 'kh',
+  });
+  assert.ok(urlWithAmp.includes('name=លោក%20វ៉ាន់%20សុខា%20%26%20ភរិយា'));
+  assert.equal(new URL(urlWithAmp).searchParams.get('name'), 'លោក វ៉ាន់ សុខា & ភរិយា');
+});
+

@@ -1,6 +1,7 @@
 import { EVENT_PRESETS, EventTypePreset, findTemplatePreset, getCategoryCoverImage } from '../data/eventTemplates.js';
 import { GUEST_PUBLIC_SCOPE, getUserStorageKey, resolveUserScope, stripScopedEventId } from '../lib/userScope.js';
 import { resolveRecordDatabaseId } from '../lib/userDatabase.js';
+import { decodeKhmerQueryValue } from '../lib/shareUrl.js';
 import { pickNewestDatabaseEvent } from './saveHelpers.js';
 
 export type InvitationCategory = 'wedding' | 'engagement' | 'housewarming' | 'birthday' | 'anniversary';
@@ -585,7 +586,8 @@ export function buildInvitationMeta(params: {
       ? `អាពាហ៍ពិពាហ៍ ${hostKhmerName} & ${brideKhmerName}`
       : 'លិខិតអញ្ជើញឌីជីថល');
 
-  const cleanGuest = guestName && guestName.trim() && guestName.trim() !== 'Your Name' ? guestName.trim() : '';
+  const decodedGuestName = decodeKhmerQueryValue(guestName);
+  const cleanGuest = decodedGuestName && decodedGuestName !== 'Your Name' ? decodedGuestName : '';
   const title = cleanGuest ? `${eventName} - សូមគោរពអញ្ជើញ ${cleanGuest}` : eventName;
 
   let description = `សូមគោរពអញ្ជើញ ${cleanGuest || 'ភ្ញៀវកិត្តិយស'} ចូលរួមជាអធិបតី និងប្រសិទ្ធពរជ័យ`;

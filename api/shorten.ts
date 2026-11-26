@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { decodeKhmerQueryValue, normalizeShareUrlEncoding } from '../src/lib/shareUrl.js';
 import { saveShortLinkToFirestoreRest } from '../src/utils/shareMeta.js';
 
 interface FirebaseRuntimeConfig {
@@ -124,7 +125,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       cleanUrl = cleanUrl.replace('ais-dev-', 'ais-pre-');
     }
 
-    // Ensure Khmer language & share flag are preserved in target URL with clean UTF-8 %20 encoding
+    // Ensure Khmer language, clean Khmer guest name & share flag are preserved in target URL
     let targetLang = 'kh';
     try {
       const parsed = new URL(cleanUrl);
@@ -134,10 +135,14 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       if (!parsed.searchParams.get('share')) {
         parsed.searchParams.set('share', '1');
       }
-      const qIdx = parsed.toString().indexOf('?');
-      cleanUrl = qIdx >= 0
-        ? `${parsed.toString().slice(0, qIdx)}?${parsed.toString().slice(qIdx + 1).replace(/\+/g, '%20')}`
-        : parsed.toString();
+      const rawGuest = parsed.searchParams.get('name');
+      if (rawGuest) {
+        const cleanGuest = decodeKhmerQueryValue(rawGuest);
+        if (cleanGuest && cleanGuest !== 'Your Name') {
+          parsed.searchParams.set('name', cleanGuest);
+        }
+      }
+      cleanUrl = normalizeShareUrlEncoding(parsed.toString());
     } catch {
       // keep cleanUrl as-is
     }

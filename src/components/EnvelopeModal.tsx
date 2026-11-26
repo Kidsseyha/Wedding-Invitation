@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { Language, WeddingEvent } from '../types';
 import { getSavedGuests, GuestPreset } from '../data/guests';
-import { resolveKhmerFontFamily } from '../lib/shareUrl';
+import { decodeKhmerQueryValue, resolveKhmerFontFamily } from '../lib/shareUrl';
 import RoyalGoldRibbonBanner from './RoyalGoldRibbonBanner';
 import IntertwinedRibbonHearts from './IntertwinedRibbonHearts';
 import RingIcon from './RingIcon';
@@ -155,7 +155,7 @@ function compressImage(file: File, maxWidth = 800, maxHeight = 800, quality = 0.
 export default function EnvelopeModal({
   isOpen,
   onOpen,
-  guestName,
+  guestName: rawGuestName,
   onUpdateGuestName,
   onOpenAddGuestModal,
   groom,
@@ -217,6 +217,7 @@ export default function EnvelopeModal({
   onToggleLanguage,
   theme = 'dark',
 }: EnvelopeModalProps) {
+  const guestName = decodeKhmerQueryValue(rawGuestName) || rawGuestName;
   const activeEnvelopeColor = envelopeThemeColor || '#6c2925';
   const plaqueStyle = guestFrameStyle || 'rose-gold';
   const GuestPlaqueWrapper = (plaqueStyle === 'royal-gold' || plaqueStyle === 'vintage-leaf')
