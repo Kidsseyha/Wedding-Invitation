@@ -311,7 +311,7 @@ export default function TheapKhmerTemplate15Cover({
               }
             }}
             title={isAdmin ? (language === 'kh' ? 'ចុចដើម្បីបន្ថែម ឬកែឈ្មោះភ្ញៀវ' : 'Click to add or edit guest') : undefined}
-            className={`text-lg sm:text-xl font-bold tracking-wide px-4 ${
+            className={`text-[14px] font-bold tracking-wide px-4 ${
               isAdmin ? 'cursor-pointer hover:opacity-80 transition-opacity' : ''
             }`}
             style={{
@@ -320,7 +320,7 @@ export default function TheapKhmerTemplate15Cover({
                 guestNameColor && guestNameColor !== '#364153'
                   ? guestNameColor
                   : '#9c732d',
-              fontSize: guestNameFontSize ? `${guestNameFontSize}px` : undefined,
+              fontSize: '14px',
               textShadow: '0 1px 2px rgba(255,255,255,0.95)',
               lineHeight: 1.7,
             }}

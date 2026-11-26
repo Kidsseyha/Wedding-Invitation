@@ -3364,10 +3364,10 @@ export default function App() {
                         : (textContent.subtitle && textContent.subtitle.trim() ? textContent.subtitle : 'Cordially Invites')}
                     </span>
                     <span
-                      className="font-bold tracking-wide truncate max-w-[280px] mt-0.5 drop-shadow-md"
+                      className="text-[14px] font-bold tracking-wide truncate max-w-[280px] mt-0.5 drop-shadow-md"
                       style={{
                         fontFamily: config.guest_name_font_family || "'Moul', serif",
-                        fontSize: config.guest_name_font_size ? `${config.guest_name_font_size}px` : '20px',
+                        fontSize: '14px',
                         lineHeight: '35px',
                         color: config.guestNameColor || '#172554',
                       }}
@@ -3388,13 +3388,14 @@ export default function App() {
                       : (textContent.subtitle && textContent.subtitle.trim() ? textContent.subtitle : 'Cordially Invites')}
                   </span>
                   <div
-                    className="text-xl sm:text-2xl font-moul tracking-wide text-[#582607] flex items-center justify-center gap-2 drop-shadow-sm"
+                    className="text-[14px] font-moul tracking-wide text-[#582607] flex items-center justify-center gap-2 drop-shadow-sm"
                     style={{
                       fontFamily: config.guest_name_font_family || "'Moul', serif",
                       color: config.guestNameColor || '#172554',
+                      fontSize: '14px',
                     }}
                   >
-                    <span style={{ fontSize: config.guest_name_font_size ? `${config.guest_name_font_size}px` : undefined }}>
+                    <span className="text-[14px]" style={{ fontSize: '14px' }}>
                       {guestName && guestName !== 'Your Name'
                         ? guestName
                         : language === 'kh'

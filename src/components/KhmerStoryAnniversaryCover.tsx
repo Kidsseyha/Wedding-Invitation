@@ -749,10 +749,10 @@ export default function KhmerStoryAnniversaryCover({
                 className="w-full mt-0.5 text-center hover:opacity-80 transition-opacity cursor-pointer"
               >
                 <span
-                  className={`block truncate leading-relaxed ${
+                  className={`block truncate leading-relaxed text-[14px] ${
                     containsKhmerScript(displayGuest)
-                      ? 'font-moul text-base sm:text-lg tracking-normal'
-                      : 'font-bold text-lg sm:text-xl tracking-wide'
+                      ? 'font-moul tracking-normal'
+                      : 'font-bold tracking-wide'
                   }`}
                   style={{
                     fontFamily:
@@ -761,7 +761,7 @@ export default function KhmerStoryAnniversaryCover({
                         : containsKhmerScript(displayGuest)
                         ? "'Moul', serif"
                         : "'Playfair Display', serif",
-                    fontSize: guestNameFontSize ? `${guestNameFontSize}px` : undefined,
+                    fontSize: '14px',
                     color: crimsonInk,
                   }}
                 >
@@ -770,10 +770,10 @@ export default function KhmerStoryAnniversaryCover({
               </button>
             ) : (
               <span
-                className={`block truncate leading-relaxed mt-0.5 ${
+                className={`block truncate leading-relaxed mt-0.5 text-[14px] ${
                   containsKhmerScript(displayGuest)
-                    ? 'font-moul text-base sm:text-lg tracking-normal'
-                    : 'font-bold text-lg sm:text-xl tracking-wide'
+                    ? 'font-moul tracking-normal'
+                    : 'font-bold tracking-wide'
                 }`}
                 style={{
                   fontFamily:
@@ -782,7 +782,7 @@ export default function KhmerStoryAnniversaryCover({
                       : containsKhmerScript(displayGuest)
                       ? "'Moul', serif"
                       : "'Playfair Display', serif",
-                  fontSize: guestNameFontSize ? `${guestNameFontSize}px` : undefined,
+                  fontSize: '14px',
                   color: crimsonInk,
                 }}
               >

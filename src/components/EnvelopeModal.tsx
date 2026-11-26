@@ -1251,10 +1251,10 @@ export default function EnvelopeModal({
                           {ribbonLabel || (language === 'kh' ? 'សូមគោរពអញ្ជើញ' : 'Cordially Invited')}
                         </span>
                         <span
-                          className="font-bold tracking-wide truncate max-w-[230px] sm:max-w-[260px] mt-0.5 text-center text-white drop-shadow-[0_2px_8px_rgba(45,212,191,0.5)]"
+                          className="text-[14px] font-bold tracking-wide truncate max-w-[230px] sm:max-w-[260px] mt-0.5 text-center text-white drop-shadow-[0_2px_8px_rgba(45,212,191,0.5)]"
                           style={{
                             fontFamily: resolvedGuestFontFamily || "'Moul', serif",
-                            fontSize: guestNameFontSize ? `${guestNameFontSize}px` : '16px',
+                            fontSize: '14px',
                             lineHeight: '28px',
                           }}
                         >
@@ -1502,12 +1502,12 @@ export default function EnvelopeModal({
                         <span className="block text-[11px] sm:text-xs md:text-sm font-khmer font-semibold text-[#854d0e] mb-1 tracking-wide">
                           {ribbonLabel}
                         </span>
-                        <div className="text-lg sm:text-xl md:text-2xl font-moul text-[#172554] tracking-wide flex items-center justify-center">
+                        <div className="text-[14px] font-moul text-[#172554] tracking-wide flex items-center justify-center">
                           <span
-                            className="truncate max-w-[230px] sm:max-w-[280px]"
+                            className="truncate max-w-[230px] sm:max-w-[280px] text-[14px]"
                             style={{
                               fontFamily: resolvedGuestFontFamily || "'Moul', serif",
-                              fontSize: guestNameFontSize ? `${guestNameFontSize}px` : 'clamp(1rem, 4.4vw, 1.25rem)',
+                              fontSize: '14px',
                               lineHeight: '1.7',
                             }}
                           >

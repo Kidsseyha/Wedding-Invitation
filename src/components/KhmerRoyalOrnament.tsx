@@ -3033,7 +3033,10 @@ export function ModernWeddingFloralCalendarCover({
             </svg>
           </div>
 
-          <span className="font-akbalthom-kbach text-xs sm:text-sm font-bold text-amber-950 text-center tracking-wide my-0.5 px-2">
+          <span
+            className="font-akbalthom-kbach text-[14px] font-bold text-amber-950 text-center tracking-wide my-0.5 px-2"
+            style={{ fontSize: '14px' }}
+          >
             {guestName || 'មិត្តសម្លាញ់រស់សាយទាង 2 ឧត្តមស្វាមី'}
           </span>
 
@@ -3809,11 +3812,11 @@ export function ScallopedParchmentGuestPlaque({
         style={{
           fontFamily: guestNameFontFamily || "'Moul', 'Moulpali', 'Khmer OS Muol Light', serif",
           color: guestNameColor && guestNameColor !== '#364153' ? guestNameColor : '#701a2b',
-          fontSize: guestNameFontSize || 'clamp(0.95rem, 4.2vw, 1.0625rem)',
+          fontSize: '14px',
           textShadow: '0 1px 1px rgba(255,255,255,0.9)',
           lineHeight: '1.9',
         }}
-        className="relative z-10 px-6 sm:px-8 text-center truncate max-w-[calc(100%-2.5rem)] sm:max-w-[360px] font-bold tracking-wide"
+        className="relative z-10 px-6 sm:px-8 text-center truncate max-w-[calc(100%-2.5rem)] sm:max-w-[360px] text-[14px] font-bold tracking-wide"
       >
         {guestName}
       </span>
