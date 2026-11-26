@@ -2905,23 +2905,28 @@ export default function App() {
           </motion.button>
         )}
 
-        {/* Reload / Check Database Button */}
+        {/* Reload Page Button */}
         <motion.button
           id="reload-refresh-btn"
           type="button"
           disabled={isRefreshingFromDb}
-          onClick={handleRefreshFromDatabase}
+          onClick={() => {
+            setIsRefreshingFromDb(true);
+            if (typeof window !== 'undefined') {
+              window.location.reload();
+            }
+          }}
           whileHover={{ scale: 1.05, y: -2 }}
           whileTap={{ scale: 0.94 }}
           className="group relative flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 min-h-[38px] sm:min-h-[40px] rounded-full border border-amber-500/60 bg-gradient-to-br from-black/95 via-neutral-900 to-black text-amber-200 shadow-[0_4px_18px_rgba(0,0,0,0.5)] backdrop-blur-md hover:border-amber-400 hover:text-amber-100 hover:shadow-[0_4px_22px_rgba(245,158,11,0.4)] transition-all ring-1 ring-amber-500/30 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-black cursor-pointer disabled:opacity-70"
-          title={language === 'kh' ? 'ត្រួតពិនិត្យ និងទាញយកទិន្នន័យពី Database / Check Database' : 'Check & Reload from Database'}
+          title={language === 'kh' ? 'ផ្ទុកទំព័រឡើងវិញ / Reload Page' : 'Reload Page'}
         >
           <div className="p-1 rounded-full bg-amber-500/20 group-hover:bg-amber-400/30 transition-colors">
             <RotateCcw className={`w-3.5 h-3.5 text-amber-400 group-hover:text-amber-200 transition-all duration-300 ${isRefreshingFromDb ? 'animate-spin' : 'group-hover:rotate-[-45deg]'}`} />
           </div>
           <span className="text-xs sm:text-[14px] font-khmer font-medium text-neutral-200 group-hover:text-amber-100 transition-colors whitespace-nowrap">
             {isRefreshingFromDb
-              ? (language === 'kh' ? 'កំពុងពិនិត្យ DB...' : 'Checking DB...')
+              ? (language === 'kh' ? 'កំពុងផ្ទុកឡើងវិញ...' : 'Reloading...')
               : (language === 'kh' ? 'ផ្ទុកឡើងវិញ' : 'Reload')}
           </span>
         </motion.button>
