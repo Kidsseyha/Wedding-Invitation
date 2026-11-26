@@ -25,10 +25,6 @@ import {
   Home,
   Cake,
   Crown,
-  Globe,
-  HelpCircle,
-  ChevronDown,
-  ChevronUp,
   Type,
 } from 'lucide-react';
 import { Language, WeddingEvent } from '../types';
@@ -38,7 +34,6 @@ import {
   getPublicShareUrl,
   shortenUrl,
   getPreferredVercelOrigin,
-  getDefaultShareDomain,
   PUBLIC_APP_URL,
   VERCEL_APP_URL,
   KHMER_SHARE_FONTS,
@@ -119,9 +114,6 @@ export default function ShareInvitationModal({
   const [loadingShort, setLoadingShort] = useState<boolean>(false);
   const [qrMode, setQrMode] = useState<'short' | 'direct'>('short');
   const [copyToast, setCopyToast] = useState<string | null>(null);
-  const [shareDomain, setShareDomain] = useState<'vercel' | 'preview'>(getDefaultShareDomain);
-  const [forceKhmerLang, setForceKhmerLang] = useState<boolean>(true);
-  const [showVercelGuide, setShowVercelGuide] = useState<boolean>(false);
   const [cloudSyncVersion, setCloudSyncVersion] = useState<number>(0);
   const pendingTemplateSaveRef = useRef<Promise<unknown> | null>(null);
 
@@ -388,8 +380,8 @@ export default function ShareInvitationModal({
       : rawActiveEventId;
 
   const runtimeVercelOrigin = getPreferredVercelOrigin();
-  const selectedDomainOrigin = shareDomain === 'vercel' ? runtimeVercelOrigin : undefined;
-  const targetShareLang = forceKhmerLang ? 'kh' : (language === 'kh' ? 'kh' : 'en');
+  const selectedDomainOrigin = runtimeVercelOrigin;
+  const targetShareLang = 'kh';
 
   const fullUrl = getPublicShareUrl(currentShareGuest, activeEventId, selectedCategory, {
     customOrigin: selectedDomainOrigin,
@@ -1193,94 +1185,8 @@ Your presence will make our day truly special! 🙏✨`;
                     </div>
                   </div>
 
-                  {/* Pre-written Khmer Wedding Message Preview & Vercel Support */}
+                  {/* Pre-written Khmer Wedding Message Preview */}
                   <div className={`p-3.5 rounded-2xl ${isLight ? 'bg-amber-50/50 border-amber-300' : 'bg-black/50 border-amber-500/25'} border space-y-2.5`}>
-                    {/* Domain Selector for Vercel vs AI Studio Preview */}
-                    <div className={`p-2 rounded-xl border flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 ${
-                      isLight ? 'bg-amber-100/60 border-amber-300' : 'bg-black/60 border-amber-500/30'
-                    }`}>
-                      <div className="flex items-center gap-1.5 px-0.5">
-                        <Globe className="w-3.5 h-3.5 text-amber-500 shrink-0" />
-                        <span className={`text-[11px] font-semibold font-khmer ${isLight ? 'text-amber-950' : 'text-amber-200'}`}>
-                          {language === 'kh' ? 'ដែនចែករំលែក (Share Domain):' : 'Share Domain:'}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setShareDomain('vercel')}
-                          title={runtimeVercelOrigin}
-                          className={`flex-1 sm:flex-none px-2.5 py-1 rounded-lg text-[10px] font-khmer font-bold transition-all border cursor-pointer ${
-                            shareDomain === 'vercel'
-                              ? isLight
-                                ? 'bg-amber-500 text-neutral-950 border-amber-500 shadow-sm'
-                                : 'bg-amber-500/30 text-amber-200 border-amber-400 shadow-sm'
-                              : isLight
-                              ? 'bg-white border-amber-200 text-neutral-600 hover:bg-amber-50'
-                              : 'bg-black/40 border-white/10 text-neutral-400 hover:text-neutral-200'
-                          }`}
-                        >
-                          ▲ Vercel (KH)
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShareDomain('preview')}
-                          className={`flex-1 sm:flex-none px-2.5 py-1 rounded-lg text-[10px] font-khmer font-medium transition-all border cursor-pointer ${
-                            shareDomain === 'preview'
-                              ? isLight
-                                ? 'bg-amber-500 text-neutral-950 border-amber-500 shadow-sm'
-                                : 'bg-amber-500/30 text-amber-200 border-amber-400 shadow-sm'
-                              : isLight
-                              ? 'bg-white border-amber-200 text-neutral-600 hover:bg-amber-50'
-                              : 'bg-black/40 border-white/10 text-neutral-400 hover:text-neutral-200'
-                          }`}
-                        >
-                          AI Studio Preview
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Khmer Support Badge, Language Link Switch & Vercel Helper Trigger */}
-                    <div className={`flex items-center justify-between flex-wrap gap-1.5 text-[11px] font-khmer px-2.5 py-1.5 rounded-xl border ${
-                      isLight ? 'bg-amber-50 border-amber-200/90 text-amber-900' : 'bg-amber-500/10 border-amber-500/25 text-amber-300'
-                    }`}>
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span className="text-sm">{forceKhmerLang ? '🇰🇭' : '🌐'}</span>
-                        <span className="font-semibold truncate">
-                          {forceKhmerLang
-                            ? (language === 'kh' ? 'លីង Vercel ភាសាខ្មែរស្អាត (បង្ហាញឈ្មោះភ្ញៀវជាភាសាខ្មែរ)' : 'Clean Vercel Khmer Link (Khmer Guest Name)')
-                            : (language === 'kh' ? 'លីងភាសាតាមកម្មវិធី (&lang=en)' : 'English Share Link (&lang=en)')}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => setForceKhmerLang((prev) => !prev)}
-                          className={`px-2 py-0.5 rounded-md text-[10px] font-bold border transition-all cursor-pointer ${
-                            forceKhmerLang
-                              ? isLight
-                                ? 'bg-emerald-600 text-white border-emerald-600'
-                                : 'bg-emerald-500/25 text-emerald-300 border-emerald-400/50'
-                              : isLight
-                              ? 'bg-white text-neutral-700 border-amber-300'
-                              : 'bg-black/40 text-neutral-300 border-white/15'
-                          }`}
-                          title={language === 'kh' ? 'បើក/បិទ លីងភាសាខ្មែរ (&lang=kh)' : 'Toggle Khmer Language Link (&lang=kh)'}
-                        >
-                          {forceKhmerLang ? '🇰🇭 KH ON' : 'EN'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setShowVercelGuide(!showVercelGuide)}
-                          className={`flex items-center gap-1 text-[10px] ${isLight ? 'text-amber-800' : 'text-amber-400'} hover:underline cursor-pointer font-bold`}
-                        >
-                          <HelpCircle className="w-3 h-3" />
-                          <span>{language === 'kh' ? (showVercelGuide ? 'លាក់' : 'របៀបដំណើរការ?') : (showVercelGuide ? 'Hide' : 'How it works?')}</span>
-                          {showVercelGuide ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                        </button>
-                      </div>
-                    </div>
-
                     {/* Khmer Font Selector for Vercel Viewer Sharing */}
                     <div
                       className={`p-2.5 rounded-xl border space-y-2 ${
@@ -1381,103 +1287,25 @@ Your presence will make our day truly special! 🙏✨`;
                       </div>
                     </div>
 
-                    {/* Expandable Vercel Guide */}
-                    {showVercelGuide && (
-                      <div className={`p-2.5 rounded-xl border text-[11px] font-khmer space-y-1.5 leading-relaxed ${
-                        isLight ? 'bg-amber-50/90 border-amber-300 text-neutral-800' : 'bg-black/80 border-amber-500/30 text-neutral-300'
-                      }`}>
-                        <p className="font-bold text-amber-500 flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                          <span>{language === 'kh' ? 'របៀបដែល Vercel បង្ហាញភាសាខ្មែរ ហ្វុតខ្មែរ និងរូបភាពក្របត្រឹមត្រូវ៖' : 'How Vercel renders Khmer fonts, language & cover images correctly:'}</span>
-                        </p>
-                        <ul className="list-disc pl-4 space-y-1 text-[10.5px]">
-                          <li>
-                            <strong>{language === 'kh' ? `ប៉ារ៉ាម៉ែត្រ &lang=kh&font=${selectedKhmerFontSlug}` : `&lang=kh&font=${selectedKhmerFontSlug}`}</strong>: {language === 'kh' ? 'ធានាថាភ្ញៀវពេលចុចលើលីង នឹងបើកឃើញផ្ទៃកម្មវិធីជាភាសាខ្មែរ និងម៉ូតអក្សរខ្មែរដែលបានជ្រើសរើសភ្លាមៗនៅលើទូរស័ព្ទគ្រប់ប្រព័ន្ធ (iOS/Android)។' : 'Guarantees the invitation opens immediately in Khmer with the exact selected Khmer webfont on all devices.'}
-                          </li>
-                          <li>
-                            <strong>{language === 'kh' ? 'Google Khmer Webfonts Preloaded' : 'Google Khmer Webfonts Preloaded'}</strong>: {language === 'kh' ? 'ហ្វុតខ្មែរទាំងអស់ (Moul, Moulpali, Bokor, Angkor, Kantumruy Pro, Battambang, Siemreap, Freehand, Taprom...) ត្រូវបានផ្ទុកដោយស្វ័យប្រវត្តិលើ Vercel។' : 'All Khmer Google Fonts are preloaded automatically on Vercel so viewers never need local fonts installed.'}
-                          </li>
-                          <li>
-                            <strong>{language === 'kh' ? 'Vercel Serverless Function (/api/og.ts)' : 'Vercel Serverless Function'}</strong>: {language === 'kh' ? 'Telegram & Facebook crawlers នឹងទទួលបានចំណងជើងខ្មែរ រូបភាពក្រប និងព័ត៌មានជាក់ស្តែងពី Firestore ដោយស្វ័យប្រវត្តិ។' : 'Automatically generates dynamic Khmer Open Graph tags for Telegram, Facebook, and Messenger bots.'}
-                          </li>
-                        </ul>
-                      </div>
-                    )}
-
-                    {/* Direct Readable Khmer Share Link Preview Row */}
-                    <div
-                      className={`p-2.5 rounded-xl border space-y-1.5 ${
-                        isLight
-                          ? 'bg-white border-amber-300 text-amber-950'
-                          : 'bg-black/75 border-amber-500/35 text-amber-200'
-                      }`}
-                    >
-                      <div className="flex items-start gap-2">
-                        <Link2 className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
-                        <span
-                          className="flex-1 text-[11px] font-khmer break-all leading-relaxed select-all"
-                          title={activeShareLink}
-                        >
-                          {activeShareLink}
-                        </span>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            type="button"
-                            onClick={handleCopyOnlyShortLink}
-                            disabled={copyingAction === 'link'}
-                            className={`px-2 py-1 rounded-lg border text-[10.5px] font-khmer font-semibold flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-70 ${
-                              isLight
-                                ? 'bg-amber-500 hover:bg-amber-600 border-amber-500 text-neutral-950'
-                                : 'bg-amber-500/25 hover:bg-amber-500/35 border-amber-400/60 text-amber-100'
-                            }`}
-                            title={language === 'kh' ? 'ចម្លងលីងភាសាខ្មែរស្អាត' : 'Copy clean Khmer link'}
-                          >
-                            {copiedLink ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
-                            <span>{copiedLink ? (language === 'kh' ? 'រួចរាល់' : 'Copied') : (language === 'kh' ? 'ចម្លង' : 'Copy')}</span>
-                          </button>
-                          <a
-                            href={activeShareLink}
-                            onClick={(e) => openPendingAwareLink(e, activeShareLink)}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className={`px-2 py-1 rounded-lg border text-[10.5px] font-khmer font-semibold flex items-center gap-1 transition-colors ${
-                              isLight
-                                ? 'bg-amber-50 hover:bg-amber-100 border-amber-300 text-amber-900'
-                                : 'bg-amber-500/15 hover:bg-amber-500/25 border-amber-400/40 text-amber-200'
-                            }`}
-                            title={language === 'kh' ? 'បើកលីងភ្ញៀវសាកល្បង' : 'Test viewer link'}
-                          >
-                            <ExternalLink className="w-3 h-3" />
-                            <span>{language === 'kh' ? 'បើក' : 'Open'}</span>
-                          </a>
-                        </div>
-                      </div>
-                      <p className={`text-[10px] font-khmer leading-snug ${isLight ? 'text-amber-800/80' : 'text-amber-300/75'}`}>
-                        {language === 'kh'
-                          ? 'គន្លឹះ៖ ចុចប៊ូតុង «ចម្លង» ដើម្បីរក្សាឈ្មោះភ្ញៀវជាអក្សរខ្មែរស្អាត (ជៀសវាងចម្លងពីរបារអាសយដ្ឋាន Browser ដែលប្តូរជា %E1%9E...)។'
-                          : 'Tip: Use the Copy button to keep the clean Khmer guest name (copying from the browser bar turns Khmer into %E1%9E...).'}
-                      </p>
-                    </div>
-
                     {/* Header and Actions */}
-                    <div className="flex items-center justify-between flex-wrap gap-1.5">
+                    <div className="space-y-2">
                       <span className={`text-xs font-semibold ${isLight ? 'text-amber-900' : 'text-amber-300'} font-khmer flex items-center gap-1.5`}>
                         <MailOpen className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                         <span>{language === 'kh' ? 'សារអញ្ជើញភ្ជាប់ជាមួយលីង (Ready Message):' : 'Invitation Message with Link:'}</span>
                       </span>
-                      <div className="flex items-center gap-2">
+                      <div className="grid grid-cols-2 gap-2 w-full">
                         <button
                           type="button"
                           onClick={handleCopyOnlyShortLink}
                           disabled={copyingAction === 'link'}
-                          className={`text-[11px] ${isLight ? 'text-amber-800 hover:text-amber-950' : 'text-amber-400 hover:text-amber-200'} font-khmer font-semibold flex items-center gap-1 border border-amber-400/30 px-2 py-0.5 rounded-lg cursor-pointer disabled:opacity-70`}
+                          className={`w-full text-xs ${isLight ? 'text-amber-800 hover:text-amber-950 bg-white hover:bg-amber-50' : 'text-amber-300 hover:text-amber-100 bg-black/40 hover:bg-amber-500/15'} font-khmer font-semibold flex items-center justify-center gap-1.5 border border-amber-400/40 px-3 py-2 rounded-xl transition-colors cursor-pointer disabled:opacity-70`}
                         >
                           {copyingAction === 'link' || (loadingShort && !shortUrl) ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
+                            <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
                           ) : copiedLink ? (
-                            <Check className="w-3 h-3 text-emerald-500" />
+                            <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                           ) : (
-                            <Link2 className="w-3 h-3" />
+                            <Link2 className="w-3.5 h-3.5 shrink-0" />
                           )}
                           <span>{copiedLink ? (language === 'kh' ? 'បានចម្លងលីង!' : 'Copied Link!') : (language === 'kh' ? 'ចម្លងតែលីង' : 'Copy Link')}</span>
                         </button>
@@ -1485,14 +1313,14 @@ Your presence will make our day truly special! 🙏✨`;
                           type="button"
                           onClick={handleCopyMessage}
                           disabled={copyingAction === 'message'}
-                          className={`text-[11px] ${isLight ? 'text-amber-900 hover:text-amber-950' : 'text-amber-300 hover:text-amber-100'} font-khmer font-bold flex items-center gap-1 bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 rounded-lg cursor-pointer disabled:opacity-70`}
+                          className={`w-full text-xs ${isLight ? 'text-amber-950 hover:text-amber-950 bg-amber-400/35 hover:bg-amber-400/50' : 'text-amber-200 hover:text-amber-100 bg-amber-500/20 hover:bg-amber-500/30'} font-khmer font-bold flex items-center justify-center gap-1.5 border border-amber-500/50 px-3 py-2 rounded-xl transition-colors cursor-pointer disabled:opacity-70`}
                         >
                           {copyingAction === 'message' || (loadingShort && !shortUrl) ? (
-                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
                           ) : copiedMessage ? (
-                            <Check className="w-3.5 h-3.5 text-emerald-500" />
+                            <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                           ) : (
-                            <Copy className="w-3.5 h-3.5" />
+                            <Copy className="w-3.5 h-3.5 shrink-0" />
                           )}
                           <span>{copiedMessage ? (language === 'kh' ? 'បានចម្លងសារ!' : 'Copied!') : (language === 'kh' ? 'ចម្លងសារទាំងមូល' : 'Copy All')}</span>
                         </button>
