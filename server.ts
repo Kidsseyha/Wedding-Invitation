@@ -1235,24 +1235,40 @@ app.delete('/api/guests', (req, res) => {
     return res.json({ success: true, cleared: true });
   }
 
-  if (!id) {
+  const baseId = (id || '')
+    .replace(/^g_(?:u_[a-z0-9_]+|guest_public)__(?:ev_[a-z0-9]+__)?/, '')
+    .replace(/^g_ev_[a-z0-9]+__/, '')
+    .trim();
+  const nameLower = ((req.query.name as string | undefined) || '').trim().toLowerCase();
+
+  if (!id && !nameLower) {
     return res.status(400).json({ error: 'Missing guest id' });
   }
 
+  const matchesTargetGuest = (g: any, targetOwner: string): boolean => {
+    if (!g) return false;
+    if (eventId && g.eventId && !guestMatchesEventScope(g, targetOwner, eventId)) {
+      return false;
+    }
+    const gId = String(g.id || '').trim();
+    const gBaseId = gId
+      .replace(/^g_(?:u_[a-z0-9_]+|guest_public)__(?:ev_[a-z0-9]+__)?/, '')
+      .replace(/^g_ev_[a-z0-9]+__/, '')
+      .trim();
+    const gNameLower = String(g.name || '').trim().toLowerCase();
+    if (id && (gId === id || (baseId && gBaseId === baseId))) return true;
+    if (nameLower && gNameLower === nameLower) return true;
+    return false;
+  };
+
   if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
     const dbGuests = readUserDbJson<any[]>(dbId, 'guests.json', []);
-    const nextGuests = dbGuests.filter((g: any) => {
-      if (g.id !== id) return true;
-      if (eventId && g.eventId && !guestMatchesEventScope(g, dbId, eventId)) return true;
-      return false;
-    });
+    const nextGuests = dbGuests.filter((g: any) => !matchesTargetGuest(g, dbId));
     writeUserDbJson(dbId, 'guests.json', nextGuests);
   } else {
     const guests = getSavedGuests().filter((g: any) => {
-      if (g.id !== id) return true;
       if (!shouldIncludePublicRecord(g)) return true;
-      if (eventId && g.eventId && !guestMatchesEventScope(g, GUEST_PUBLIC_SCOPE, eventId)) return true;
-      return false;
+      return !matchesTargetGuest(g, GUEST_PUBLIC_SCOPE);
     });
     saveGuests(guests);
   }

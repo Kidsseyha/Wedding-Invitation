@@ -1689,7 +1689,13 @@ Your presence will make our day truly special! 🙏✨`;
                                               setAllDbGuests(allDbGuests.filter((g) => (g.name || '').trim() !== name));
                                               if (dbMatch && dbMatch.id) {
                                                 try {
-                                                  await deleteGuestFromFirebase(dbMatch.id, effectiveScope, activeEventId);
+                                                  await deleteGuestFromFirebase(
+                                                    dbMatch.id,
+                                                    effectiveScope,
+                                                    activeEventId,
+                                                    name,
+                                                    selectedCategory
+                                                  );
                                                   const reloadedGuests = await fetchGuestsFromFirebase(
                                                     effectiveScope,
                                                     activeEventId,
