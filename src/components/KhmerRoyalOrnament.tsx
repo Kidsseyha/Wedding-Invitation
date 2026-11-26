@@ -3735,10 +3735,16 @@ export function RococoYinYangMonogramSeal({
 // Scalloped / Bracketed Horizontal White Parchment Plaque for Guest Name
 export function ScallopedParchmentGuestPlaque({
   guestName = 'ឈ្មោះភ្ញៀវកិត្តិយស',
+  guestNameFontFamily,
+  guestNameColor,
+  guestNameFontSize,
   onClick,
   isAdmin = false,
 }: {
   guestName?: string;
+  guestNameFontFamily?: string;
+  guestNameColor?: string;
+  guestNameFontSize?: string;
   onClick?: () => void;
   isAdmin?: boolean;
 }) {
@@ -3801,9 +3807,9 @@ export function ScallopedParchmentGuestPlaque({
 
       <span
         style={{
-          fontFamily: "'Moul', 'Khmer OS Muol Light', serif",
-          color: '#701a2b',
-          fontSize: 'clamp(0.95rem, 4.2vw, 1.0625rem)',
+          fontFamily: guestNameFontFamily || "'Moul', 'Moulpali', 'Khmer OS Muol Light', serif",
+          color: guestNameColor && guestNameColor !== '#364153' ? guestNameColor : '#701a2b',
+          fontSize: guestNameFontSize || 'clamp(0.95rem, 4.2vw, 1.0625rem)',
           textShadow: '0 1px 1px rgba(255,255,255,0.9)',
           lineHeight: '1.9',
         }}
@@ -3858,7 +3864,7 @@ export function ColonnadePlayOpenButton({
         disabled={isOpening}
         className="text-[#701a2b] text-base sm:text-lg font-bold tracking-wider hover:opacity-80 transition-opacity cursor-pointer drop-shadow-[0_1px_1px_rgba(255,255,255,0.9)] mt-1"
         style={{
-          fontFamily: "'Khmer OS Muol Light', 'Moul', 'Noto Sans Khmer', sans-serif",
+          fontFamily: "'Moul', 'Khmer OS Muol Light', 'Noto Sans Khmer', sans-serif",
         }}
       >
         {isOpening ? (language === 'kh' ? 'កំពុងបើក...' : 'Opening...') : (language === 'kh' ? 'បើកសំបុត្រ' : 'Open Invitation')}
@@ -3875,6 +3881,9 @@ export function KhmerRoyalModernWeddingCover({
   brideEn = 'Sok Bopha',
   subtitleKh = 'សិរីមង្គលអាពាហ៍ពិពាហ៍',
   guestName = 'ភ្ញៀវកិត្តិយស',
+  guestNameFontFamily,
+  guestNameColor,
+  guestNameFontSize,
   titleShape = 'straight',
   language = 'kh',
   coverMonogramFontFamily,
@@ -3893,6 +3902,9 @@ export function KhmerRoyalModernWeddingCover({
   brideEn?: string;
   subtitleKh?: string;
   guestName?: string;
+  guestNameFontFamily?: string;
+  guestNameColor?: string;
+  guestNameFontSize?: string;
   titleShape?: 'straight' | 'arch-up' | 'arch-down' | 'wave';
   language?: string;
   coverMonogramFontFamily?: string;
@@ -4071,6 +4083,9 @@ export function KhmerRoyalModernWeddingCover({
         ) : (
           <ScallopedParchmentGuestPlaque
             guestName={rawGuest}
+            guestNameFontFamily={guestNameFontFamily}
+            guestNameColor={guestNameColor}
+            guestNameFontSize={guestNameFontSize}
             isAdmin={isAdmin}
             onClick={() => {
               if (!isAdmin) return;

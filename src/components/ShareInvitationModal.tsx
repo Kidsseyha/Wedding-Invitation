@@ -29,10 +29,21 @@ import {
   HelpCircle,
   ChevronDown,
   ChevronUp,
+  Type,
 } from 'lucide-react';
 import { Language, WeddingEvent } from '../types';
 import { ThemeMode } from './ThemeToggle';
-import { getPublicShareUrl, shortenUrl, getPreferredVercelOrigin, getDefaultShareDomain, PUBLIC_APP_URL, VERCEL_APP_URL } from '../lib/shareUrl';
+import {
+  getPublicShareUrl,
+  shortenUrl,
+  getPreferredVercelOrigin,
+  getDefaultShareDomain,
+  PUBLIC_APP_URL,
+  VERCEL_APP_URL,
+  KHMER_SHARE_FONTS,
+  resolveKhmerFontSlug,
+  resolveKhmerFontFamily,
+} from '../lib/shareUrl';
 import { fetchGuestsFromFirebase, deleteGuestFromFirebase } from '../lib/firebaseGuests';
 import { fetchUserTemplatesFromFirebase } from '../lib/firebaseServices';
 import { GuestPreset } from '../data/guests';
@@ -242,9 +253,64 @@ export default function ShareInvitationModal({
   const selectedCategory: InvitationCategory = selectedTemplate.category;
   const selectedEventData = selectedTemplate.event;
 
+  const [selectedKhmerFontSlug, setSelectedKhmerFontSlug] = useState<string>(() =>
+    resolveKhmerFontSlug(selectedEventData?.config?.guest_name_font_family)
+  );
+
+  useEffect(() => {
+    const nextSlug = resolveKhmerFontSlug(selectedEventData?.config?.guest_name_font_family);
+    setSelectedKhmerFontSlug(nextSlug);
+  }, [selectedTemplate.templateId, selectedEventData?.config?.guest_name_font_family]);
+
+  const activeKhmerFontOption = useMemo(
+    () => KHMER_SHARE_FONTS.find((f) => f.slug === selectedKhmerFontSlug) || KHMER_SHARE_FONTS[0],
+    [selectedKhmerFontSlug]
+  );
+  const activeKhmerFontFamily =
+    resolveKhmerFontFamily(selectedKhmerFontSlug) || activeKhmerFontOption.fontFamily;
+
+  const handleSelectKhmerFont = (slug: string) => {
+    const fontOpt = KHMER_SHARE_FONTS.find((f) => f.slug === slug) || KHMER_SHARE_FONTS[0];
+    setSelectedKhmerFontSlug(fontOpt.slug);
+    const scopedId = getScopedEventId(selectedTemplate.eventId, effectiveScope);
+    const updatedEventData: WeddingEvent = {
+      ...(selectedEventData as WeddingEvent),
+      id: scopedId,
+      templateId: (selectedEventData as WeddingEvent)?.templateId || selectedTemplate.templateId,
+      eventType: selectedCategory,
+      ...(effectiveScope !== 'guest_public' ? { ownerId: effectiveScope } : {}),
+      config: {
+        ...(selectedEventData?.config || {}),
+        guest_name_font_family: fontOpt.fontFamily,
+      } as WeddingEvent['config'],
+      updatedAt: new Date().toISOString(),
+    };
+    try {
+      const serialized = JSON.stringify(updatedEventData);
+      localStorage.setItem(getUserStorageKey(`wedding_template_saved_${scopedId}`, effectiveScope), serialized);
+      localStorage.setItem(
+        getUserStorageKey(`wedding_template_saved_${stripScopedEventId(scopedId)}`, effectiveScope),
+        serialized
+      );
+      localStorage.setItem(getUserStorageKey('wedding_custom_event_data', effectiveScope), serialized);
+    } catch {}
+    if (onSelectTemplate) {
+      const saveResult = onSelectTemplate(updatedEventData, selectedCategory);
+      if (saveResult && typeof (saveResult as Promise<unknown>).then === 'function') {
+        const trackedPromise = Promise.resolve(saveResult).finally(() => {
+          if (pendingTemplateSaveRef.current === trackedPromise) {
+            pendingTemplateSaveRef.current = null;
+          }
+        });
+        pendingTemplateSaveRef.current = trackedPromise;
+      }
+    }
+  };
+
   const handleTemplateSelect = (opt: ShareTemplateOption) => {
     hasUserSelectedTemplateRef.current = true;
     setSelectedTemplateId(opt.templateId);
+    setSelectedKhmerFontSlug(resolveKhmerFontSlug(opt.event?.config?.guest_name_font_family));
     const scopedId = getScopedEventId(opt.eventId, effectiveScope);
     try {
       localStorage.setItem(getUserStorageKey('wedding_last_active_preset_id', effectiveScope), opt.templateId);
@@ -323,6 +389,7 @@ export default function ShareInvitationModal({
     customOrigin: selectedDomainOrigin,
     lang: targetShareLang,
     ownerId: effectiveScope,
+    khFont: selectedKhmerFontSlug,
   });
 
   const shortUrl = shortUrlState && shortUrlState.targetUrl === fullUrl ? shortUrlState.shortUrl : '';
@@ -768,6 +835,7 @@ Your presence will make our day truly special! 🙏✨`;
         customOrigin: selectedDomainOrigin,
         lang: targetShareLang,
         ownerId: effectiveScope,
+        khFont: selectedKhmerFontSlug,
       });
       const resolvedUrl = await shortenUrl(url, selectedDomainOrigin).catch(() => url);
       const finalUrl = resolvedUrl || url;
@@ -1090,11 +1158,23 @@ Your presence will make our day truly special! 🙏✨`;
                               ? 'Digital Modern Wedding Invitation'
                               : 'Digital Wedding Invitation'}
                           </span>
-                          <h4 className="text-sm sm:text-base font-moul text-amber-100 drop-shadow-md leading-tight mt-1">
+                          <h4
+                            className="text-sm sm:text-base font-moul text-amber-100 drop-shadow-md leading-tight mt-1"
+                            style={{ fontFamily: "'Moul', 'Moulpali', serif" }}
+                          >
                             {displayHeaderKh}
                           </h4>
-                          <p className="text-[11px] sm:text-xs font-khmer text-amber-200 drop-shadow mt-0.5">
-                            សូមគោរពអញ្ជើញ <span className="font-bold text-amber-300 underline underline-offset-2">{displayShareGuest}</span>
+                          <p className="text-[11px] sm:text-xs font-khmer text-amber-200 drop-shadow mt-1 flex items-center flex-wrap gap-1.5">
+                            <span>សូមគោរពអញ្ជើញ</span>
+                            <span
+                              className="font-bold text-amber-300 underline underline-offset-4 px-1.5 py-0.5 rounded bg-black/35 border border-amber-400/30"
+                              style={{ fontFamily: activeKhmerFontFamily, lineHeight: 1.7 }}
+                            >
+                              {displayShareGuest}
+                            </span>
+                            <span className="text-[9.5px] px-1.5 py-0.5 rounded-full bg-emerald-500/25 border border-emerald-400/40 text-emerald-200 font-mono">
+                              KH Font: {activeKhmerFontOption.slug}
+                            </span>
                           </p>
                         </div>
                       </div>
@@ -1156,8 +1236,8 @@ Your presence will make our day truly special! 🙏✨`;
                         <span className="text-sm">{forceKhmerLang ? '🇰🇭' : '🌐'}</span>
                         <span className="font-semibold truncate">
                           {forceKhmerLang
-                            ? (language === 'kh' ? 'លីង Vercel ភាសាខ្មែរ ១០០% (&lang=kh)' : 'Vercel Khmer Link Enabled (&lang=kh)')
-                            : (language === 'kh' ? 'លីងភាសាតាមកម្មវិធី (&lang=en)' : 'Match App Language (&lang=en)')}
+                            ? (language === 'kh' ? `លីង Vercel ភាសាខ្មែរ & ហ្វុតខ្មែរ (&lang=kh&font=${selectedKhmerFontSlug})` : `Vercel Khmer Lang & Font (&lang=kh&font=${selectedKhmerFontSlug})`)
+                            : (language === 'kh' ? `លីងភាសាតាមកម្មវិធី (&lang=en&font=${selectedKhmerFontSlug})` : `Match App Language (&lang=en&font=${selectedKhmerFontSlug})`)}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -1189,6 +1269,106 @@ Your presence will make our day truly special! 🙏✨`;
                       </div>
                     </div>
 
+                    {/* Khmer Font Selector for Vercel Viewer Sharing */}
+                    <div
+                      className={`p-2.5 rounded-xl border space-y-2 ${
+                        isLight
+                          ? 'bg-white/90 border-amber-300 text-neutral-900'
+                          : 'bg-black/65 border-amber-500/30 text-amber-100'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between flex-wrap gap-1.5">
+                        <label
+                          htmlFor="vercel-khmer-font-select"
+                          className={`text-[11px] font-bold font-khmer flex items-center gap-1.5 ${
+                            isLight ? 'text-amber-950' : 'text-amber-300'
+                          }`}
+                        >
+                          <Type className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                          <span>
+                            {language === 'kh'
+                              ? 'ម៉ូតអក្សរខ្មែរសម្រាប់ភ្ញៀវមើលលើ Vercel (Khmer Font Support):'
+                              : 'Khmer Font Support for Vercel Viewer:'}
+                          </span>
+                        </label>
+                        <span
+                          className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                            isLight
+                              ? 'bg-emerald-50 border-emerald-300 text-emerald-800 font-semibold'
+                              : 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
+                          }`}
+                        >
+                          ✓ Webfont Preloaded (&amp;font={selectedKhmerFontSlug})
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        <select
+                          id="vercel-khmer-font-select"
+                          value={selectedKhmerFontSlug}
+                          onChange={(e) => handleSelectKhmerFont(e.target.value)}
+                          className={`flex-1 px-2.5 py-1.5 rounded-lg border text-xs font-khmer cursor-pointer focus:outline-none ${
+                            isLight
+                              ? 'bg-amber-50/70 border-amber-300 text-neutral-900 focus:border-amber-500'
+                              : 'bg-neutral-900 border-amber-500/40 text-amber-100 focus:border-amber-400'
+                          }`}
+                        >
+                          {KHMER_SHARE_FONTS.map((f) => (
+                            <option
+                              key={f.slug}
+                              value={f.slug}
+                              className={isLight ? 'bg-white text-neutral-900' : 'bg-neutral-900 text-amber-100'}
+                            >
+                              {language === 'kh' ? `${f.labelKh} — ${f.sampleKh}` : `${f.labelEn} (${f.labelKh})`}
+                            </option>
+                          ))}
+                        </select>
+
+                        {/* Live Guest Name Khmer Font Preview Pill */}
+                        <div
+                          className={`px-3 py-1.5 rounded-lg border text-center shrink-0 min-w-[140px] ${
+                            isLight
+                              ? 'bg-amber-100/70 border-amber-300 text-amber-950'
+                              : 'bg-amber-500/15 border-amber-400/40 text-amber-200'
+                          }`}
+                          style={{
+                            fontFamily: activeKhmerFontFamily,
+                            fontSize: '13px',
+                            lineHeight: 1.7,
+                          }}
+                          title={activeKhmerFontFamily}
+                        >
+                          {displayShareGuest}
+                        </div>
+                      </div>
+
+                      {/* Quick Khmer Font Preset Chips */}
+                      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+                        {KHMER_SHARE_FONTS.slice(0, 8).map((f) => {
+                          const isSelectedFont = f.slug === selectedKhmerFontSlug;
+                          return (
+                            <button
+                              key={f.slug}
+                              type="button"
+                              onClick={() => handleSelectKhmerFont(f.slug)}
+                              style={{ fontFamily: f.fontFamily }}
+                              className={`px-2.5 py-1 rounded-lg text-[11px] border whitespace-nowrap transition-all cursor-pointer shrink-0 ${
+                                isSelectedFont
+                                  ? isLight
+                                    ? 'bg-amber-500 text-neutral-950 border-amber-600 font-bold shadow-xs'
+                                    : 'bg-amber-500/30 text-amber-200 border-amber-400 font-bold shadow-xs'
+                                  : isLight
+                                  ? 'bg-white hover:bg-amber-50 text-neutral-700 border-amber-200'
+                                  : 'bg-black/50 hover:bg-white/10 text-neutral-300 border-white/10'
+                              }`}
+                            >
+                              {f.labelKh}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
                     {/* Expandable Vercel Guide */}
                     {showVercelGuide && (
                       <div className={`p-2.5 rounded-xl border text-[11px] font-khmer space-y-1.5 leading-relaxed ${
@@ -1196,17 +1376,17 @@ Your presence will make our day truly special! 🙏✨`;
                       }`}>
                         <p className="font-bold text-amber-500 flex items-center gap-1">
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                          <span>{language === 'kh' ? 'របៀបដែល Vercel បង្ហាញភាសាខ្មែរ និងរូបភាពក្របត្រឹមត្រូវ៖' : 'How Vercel renders Khmer language & cover images correctly:'}</span>
+                          <span>{language === 'kh' ? 'របៀបដែល Vercel បង្ហាញភាសាខ្មែរ ហ្វុតខ្មែរ និងរូបភាពក្របត្រឹមត្រូវ៖' : 'How Vercel renders Khmer fonts, language & cover images correctly:'}</span>
                         </p>
                         <ul className="list-disc pl-4 space-y-1 text-[10.5px]">
                           <li>
-                            <strong>{language === 'kh' ? 'ប៉ារ៉ាម៉ែត្រ &lang=kh' : '&lang=kh Parameter'}</strong>: {language === 'kh' ? 'ធានាថាភ្ញៀវពេលចុចលើលីង នឹងបើកឃើញផ្ទៃកម្មវិធីជាភាសាខ្មែរភ្លាមៗ។' : 'Guarantees the invitation opens immediately in Khmer.'}
+                            <strong>{language === 'kh' ? `ប៉ារ៉ាម៉ែត្រ &lang=kh&font=${selectedKhmerFontSlug}` : `&lang=kh&font=${selectedKhmerFontSlug}`}</strong>: {language === 'kh' ? 'ធានាថាភ្ញៀវពេលចុចលើលីង នឹងបើកឃើញផ្ទៃកម្មវិធីជាភាសាខ្មែរ និងម៉ូតអក្សរខ្មែរដែលបានជ្រើសរើសភ្លាមៗនៅលើទូរស័ព្ទគ្រប់ប្រព័ន្ធ (iOS/Android)។' : 'Guarantees the invitation opens immediately in Khmer with the exact selected Khmer webfont on all devices.'}
+                          </li>
+                          <li>
+                            <strong>{language === 'kh' ? 'Google Khmer Webfonts Preloaded' : 'Google Khmer Webfonts Preloaded'}</strong>: {language === 'kh' ? 'ហ្វុតខ្មែរទាំងអស់ (Moul, Moulpali, Bokor, Angkor, Kantumruy Pro, Battambang, Siemreap, Freehand, Taprom...) ត្រូវបានផ្ទុកដោយស្វ័យប្រវត្តិលើ Vercel។' : 'All Khmer Google Fonts are preloaded automatically on Vercel so viewers never need local fonts installed.'}
                           </li>
                           <li>
                             <strong>{language === 'kh' ? 'Vercel Serverless Function (/api/og.ts)' : 'Vercel Serverless Function'}</strong>: {language === 'kh' ? 'Telegram & Facebook crawlers នឹងទទួលបានចំណងជើងខ្មែរ រូបភាពក្រប និងព័ត៌មានជាក់ស្តែងពី Firestore ដោយស្វ័យប្រវត្តិ។' : 'Automatically generates dynamic Khmer Open Graph tags for Telegram, Facebook, and Messenger bots.'}
-                          </li>
-                          <li>
-                            <strong>{language === 'kh' ? 'UTF-8 Charset' : 'UTF-8 Encoding'}</strong>: {language === 'kh' ? 'អក្សរខ្មែរទាំងអស់ត្រូវបញ្ជូនជាមួយ Content-Type: text/html; charset=utf-8 មិនបែកអក្សរឡើយ។' : 'Serves text/html; charset=utf-8 to preserve all Khmer unicode characters.'}
                           </li>
                         </ul>
                       </div>
@@ -1521,6 +1701,7 @@ Your presence will make our day truly special! 🙏✨`;
                                     customOrigin: selectedDomainOrigin,
                                     lang: targetShareLang,
                                     ownerId: effectiveScope,
+                                    khFont: selectedKhmerFontSlug,
                                   });
                                   const isRowCopied = copiedGuestKey === name;
                                   return (
@@ -1532,7 +1713,10 @@ Your presence will make our day truly special! 🙏✨`;
                                         {idx + 1}
                                       </td>
                                       <td className="py-2.5 px-3">
-                                        <div className={`font-semibold ${isLight ? 'text-neutral-900' : 'text-amber-100'} flex items-center gap-1.5`}>
+                                        <div
+                                          className={`font-semibold ${isLight ? 'text-neutral-900' : 'text-amber-100'} flex items-center gap-1.5`}
+                                          style={{ fontFamily: activeKhmerFontFamily, lineHeight: 1.7 }}
+                                        >
                                           <span>{name}</span>
                                         </div>
                                       </td>

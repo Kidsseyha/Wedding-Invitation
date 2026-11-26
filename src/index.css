@@ -1,114 +1,21 @@
-@import url('https://fonts.googleapis.com/css2?family=Battambang:wght@400;700;900&family=Bokor&family=Content:wght@400;700&family=Fasthand&family=Freehand&family=Khmer&family=Moul&family=Moulpali&family=Dangrek&family=Siemreap&family=Taprom&family=Kantumruy+Pro:ital,wght@0,300..700;1,300..700&family=Noto+Sans+Khmer:wght@300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Alex+Brush&family=Angkor&family=Battambang:wght@400;700;900&family=Bokor&family=Cinzel:wght@500;600;700;800&family=Content:wght@400;700&family=Dancing+Script:wght@600;700&family=Dangrek&family=Fasthand&family=Freehand&family=Great+Vibes&family=Kantumruy+Pro:ital,wght@0,300..700;1,300..700&family=Khmer&family=Konkhmer+Sleokchher&family=Moul&family=Moulpali&family=Norican&family=Noto+Sans+Khmer:wght@300;400;500;600;700;800;900&family=Noto+Serif+Khmer:wght@400;500;600;700;800;900&family=Parisienne&family=Playfair+Display:ital,wght@0,500..800;1,500..800&family=Satisfy&family=Siemreap&family=Taprom&display=swap');
 @import "tailwindcss";
-
-/* Local Khmer OS Font Family Fallbacks (Google Fonts loaded via @import above) */
-@font-face {
-  font-family: 'Khmer OS';
-  src: local('Khmer OS'), local('KhmerOS');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Khmer OS System';
-  src: local('Khmer OS System'), local('KhmerOS_sys');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Khmer OS Moul';
-  src: local('Khmer OS Moul'), local('KhmerOS_moul');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Khmer OS Muol Light';
-  src: local('Khmer OS Muol Light'), local('KhmerOS_muol_light');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Khmer OS Battambang';
-  src: local('Khmer OS Battambang'), local('KhmerOS_battambang');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Khmer OS Content';
-  src: local('Khmer OS Content'), local('KhmerOS_content');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Khmer OS Siemreap';
-  src: local('Khmer OS Siemreap'), local('KhmerOS_siemreap');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Khmer OS Freehand';
-  src: local('Khmer OS Freehand'), local('KhmerOS_freehand');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Khmer OS Fasthand';
-  src: local('Khmer OS Fasthand'), local('KhmerOS_fasthand');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Khmer OS Bokor';
-  src: local('Khmer OS Bokor'), local('KhmerOS_bokor');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'AKbalthom Kbach';
-  src: local('AKbalthom Kbach'), local('AKbalthom-Kbach');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'AKbalthom-Kbach';
-  src: local('AKbalthom Kbach'), local('AKbalthom-Kbach');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
-}
 
 @layer base {
   html {
     -webkit-overflow-scrolling: touch;
     touch-action: manipulation;
     overflow-x: hidden;
+    font-synthesis: weight style;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
   }
   body {
     -webkit-overflow-scrolling: touch;
     touch-action: manipulation;
     overflow-x: hidden;
     min-height: 100%;
+    font-family: 'Noto Sans Khmer', 'Kantumruy Pro', 'Battambang', sans-serif;
   }
 }
 
@@ -180,46 +87,46 @@
 
 @layer utilities {
   .font-khmer-os {
-    font-family: 'Khmer OS', 'Khmer OS System', 'Khmer', 'Noto Sans Khmer', sans-serif;
+    font-family: 'Khmer', 'Noto Sans Khmer', 'Kantumruy Pro', 'Khmer OS', 'Khmer OS System', sans-serif;
   }
   .font-khmer-os-moul {
-    font-family: 'Khmer OS Moul', 'Khmer OS Muol Light', 'Moul', serif;
+    font-family: 'Moul', 'Moulpali', 'Khmer OS Moul', 'Khmer OS Muol Light', serif;
   }
   .font-khmer-os-battambang {
-    font-family: 'Khmer OS Battambang', 'Battambang', serif;
+    font-family: 'Battambang', 'Khmer OS Battambang', serif;
   }
   .font-khmer-os-content {
-    font-family: 'Khmer OS Content', 'Content', sans-serif;
+    font-family: 'Content', 'Khmer OS Content', sans-serif;
   }
   .font-khmer-os-siemreap {
-    font-family: 'Khmer OS Siemreap', 'Siemreap', sans-serif;
+    font-family: 'Siemreap', 'Khmer OS Siemreap', sans-serif;
   }
   .font-khmer-os-freehand {
-    font-family: 'Khmer OS Freehand', 'Freehand', cursive;
+    font-family: 'Freehand', 'Khmer OS Freehand', cursive;
   }
   .font-khmer-os-fasthand {
-    font-family: 'Khmer OS Fasthand', 'Fasthand', cursive;
+    font-family: 'Fasthand', 'Khmer OS Fasthand', cursive;
   }
   .font-khmer-os-bokor {
-    font-family: 'Khmer OS Bokor', 'Bokor', display;
+    font-family: 'Bokor', 'Khmer OS Bokor', serif;
   }
   .font-battambang {
     font-family: 'Battambang', 'Khmer OS Battambang', serif;
   }
   .font-moul {
-    font-family: 'AKbalthom Kbach', 'AKbalthom-Kbach', 'Moul', serif;
+    font-family: 'Moul', 'Moulpali', 'AKbalthom Kbach', serif;
   }
   .font-moulpali {
-    font-family: 'Moulpali', 'AKbalthom Kbach', serif;
+    font-family: 'Moulpali', 'Moul', 'AKbalthom Kbach', serif;
   }
   .font-akbalthom-kbach {
-    font-family: 'AKbalthom Kbach', 'AKbalthom-Kbach', 'Moul', serif;
+    font-family: 'Moul', 'Moulpali', 'AKbalthom Kbach', serif;
   }
   .font-khmer {
-    font-family: 'Noto Sans Khmer', 'Kantumruy Pro', sans-serif;
+    font-family: 'Noto Sans Khmer', 'Kantumruy Pro', 'Battambang', sans-serif;
   }
   .font-kantumruy {
-    font-family: 'Kantumruy Pro', sans-serif;
+    font-family: 'Kantumruy Pro', 'Noto Sans Khmer', sans-serif;
   }
   .font-cursive {
     font-family: 'Great Vibes', 'Norican', cursive;

@@ -673,6 +673,9 @@ export function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;');
 }
 
+export const KHMER_GOOGLE_FONTS_HREF =
+  'https://fonts.googleapis.com/css2?family=Alex+Brush&family=Angkor&family=Battambang:wght@400;700;900&family=Bokor&family=Cinzel:wght@500;600;700;800&family=Content:wght@400;700&family=Dancing+Script:wght@600;700&family=Dangrek&family=Fasthand&family=Freehand&family=Great+Vibes&family=Kantumruy+Pro:ital,wght@0,300..700;1,300..700&family=Khmer&family=Konkhmer+Sleokchher&family=Moul&family=Moulpali&family=Norican&family=Noto+Sans+Khmer:wght@300;400;500;600;700;800;900&family=Noto+Serif+Khmer:wght@400;500;600;700;800;900&family=Parisienne&family=Playfair+Display:ital,wght@0,500..800;1,500..800&family=Satisfy&family=Siemreap&family=Taprom&display=swap';
+
 export function injectMetaIntoHtml(
   html: string,
   meta: InvitationMetaResult,
@@ -690,6 +693,16 @@ export function injectMetaIntoHtml(
     result = result.replace(/(<html\b[^>]*\blang=["'])[^"']*(["'][^>]*>)/i, `$1${htmlLang}$2`);
   } else if (/<html\b[^>]*>/i.test(result)) {
     result = result.replace(/<html\b([^>]*)>/i, `<html lang="${htmlLang}"$1>`);
+  }
+
+  // Ensure Google Khmer Fonts stylesheet is always loaded in <head> for Vercel shared links
+  if (!result.includes('fonts.googleapis.com/css2') && /<\/head>/i.test(result)) {
+    const fontLinks = [
+      `    <link rel="preconnect" href="https://fonts.googleapis.com">`,
+      `    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>`,
+      `    <link href="${KHMER_GOOGLE_FONTS_HREF}" rel="stylesheet">`,
+    ].join('\n');
+    result = result.replace(/<\/head>/i, `${fontLinks}\n  </head>`);
   }
 
   if (replaceStatePath && /<head[^>]*>/i.test(result)) {

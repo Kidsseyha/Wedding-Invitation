@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { Language, WeddingEvent } from '../types';
 import { getSavedGuests, GuestPreset } from '../data/guests';
+import { resolveKhmerFontFamily } from '../lib/shareUrl';
 import RoyalGoldRibbonBanner from './RoyalGoldRibbonBanner';
 import IntertwinedRibbonHearts from './IntertwinedRibbonHearts';
 import RingIcon from './RingIcon';
@@ -252,6 +253,8 @@ export default function EnvelopeModal({
   const idLower = (id || '').toLowerCase();
   const templateIdLower = (templateId || eventData?.templateId || '').toLowerCase();
   const nameLower = (name || '').toLowerCase();
+  const resolvedGuestFontFamily = resolveKhmerFontFamily(guestNameFontFamily) || guestNameFontFamily;
+  const resolvedMonogramFontFamily = resolveKhmerFontFamily(coverMonogramFontFamily) || coverMonogramFontFamily;
 
   const isAnniversary = eventTypeLower === 'anniversary' || idLower.includes('anniversary') || templateIdLower.includes('anniversary') || nameLower.includes('ខួបអាពាហ៍ពិពាហ៍') || nameLower.includes('anniversary');
   const isBirthday = !isAnniversary && (eventTypeLower === 'birthday' || idLower.includes('birthday') || templateIdLower.includes('birthday') || nameLower.includes('ខួបកំណើត') || nameLower.includes('birthday'));
@@ -684,7 +687,7 @@ export default function EnvelopeModal({
                     envelopeHeaderImage={envelopeHeaderImage}
                     coverEnNameColor={coverEnNameColor}
                     coverEnFontFamily={coverEnFontFamily}
-                    guestNameFontFamily={guestNameFontFamily}
+                    guestNameFontFamily={resolvedGuestFontFamily}
                     guestNameFontSize={guestNameFontSize}
                     activeEnvelopeColor={activeEnvelopeColor}
                     isPlayingMusic={isPlayingMusic}
@@ -771,9 +774,12 @@ export default function EnvelopeModal({
                         brideEn={brideEn}
                         subtitleKh={subtitleKh}
                         guestName={guestName && guestName !== 'Your Name' ? guestName : (language === 'kh' ? 'លោក រ៉ូហ្សា\nនិងភរិយាព្រមទាំងបុត្រ' : 'Honored Guest')}
+                        guestNameFontFamily={resolvedGuestFontFamily}
+                        guestNameColor={guestNameColor}
+                        guestNameFontSize={guestNameFontSize}
                         titleShape={titleTextShape}
                         language={language}
-                        coverMonogramFontFamily={coverMonogramFontFamily}
+                        coverMonogramFontFamily={resolvedMonogramFontFamily}
                         coverMonogramFontFamilyEn={coverMonogramFontFamilyEn}
                         onOpenInvitation={handleOpenInvitation}
                         isOpening={isOpening}
@@ -849,7 +855,7 @@ export default function EnvelopeModal({
                         subtitleKh={subtitleKh}
                         coverMonogramGroom={coverMonogramGroom}
                         coverMonogramBride={coverMonogramBride}
-                        coverMonogramFontFamily={coverMonogramFontFamily}
+                        coverMonogramFontFamily={resolvedMonogramFontFamily}
                         coverMonogramFontFamilyEn={coverMonogramFontFamilyEn}
                         coverMonogramColor={coverMonogramColor}
                         coverMonogramFontSize={coverMonogramFontSize}
@@ -862,7 +868,7 @@ export default function EnvelopeModal({
                         onSelectFromDropbox={handleSelectFromDropbox}
                         onOpenAddGuestModal={onOpenAddGuestModal}
                         onUpdateGuestName={onUpdateGuestName}
-                        guestNameFontFamily={guestNameFontFamily}
+                        guestNameFontFamily={resolvedGuestFontFamily}
                         guestNameColor={guestNameColor}
                         guestNameFontSize={guestNameFontSize}
                       />
@@ -1246,7 +1252,7 @@ export default function EnvelopeModal({
                         <span
                           className="font-bold tracking-wide truncate max-w-[230px] sm:max-w-[260px] mt-0.5 text-center text-white drop-shadow-[0_2px_8px_rgba(45,212,191,0.5)]"
                           style={{
-                            fontFamily: guestNameFontFamily || "'Moul', serif",
+                            fontFamily: resolvedGuestFontFamily || "'Moul', serif",
                             fontSize: guestNameFontSize ? `${guestNameFontSize}px` : '16px',
                             lineHeight: '28px',
                           }}
@@ -1307,7 +1313,7 @@ export default function EnvelopeModal({
                     primaryColor={primaryColor}
                     coverEnNameColor={coverEnNameColor}
                     coverEnFontFamily={coverEnFontFamily}
-                    guestNameFontFamily={guestNameFontFamily}
+                    guestNameFontFamily={resolvedGuestFontFamily}
                     guestNameFontSize={guestNameFontSize}
                     activeEnvelopeColor={activeEnvelopeColor}
                     isPlayingMusic={isPlayingMusic}
@@ -1499,8 +1505,8 @@ export default function EnvelopeModal({
                           <span
                             className="truncate max-w-[230px] sm:max-w-[280px]"
                             style={{
-                              fontFamily: "'Moul', serif",
-                              fontSize: 'clamp(1rem, 4.4vw, 1.25rem)',
+                              fontFamily: resolvedGuestFontFamily || "'Moul', serif",
+                              fontSize: guestNameFontSize ? `${guestNameFontSize}px` : 'clamp(1rem, 4.4vw, 1.25rem)',
                               lineHeight: '1.7',
                             }}
                           >

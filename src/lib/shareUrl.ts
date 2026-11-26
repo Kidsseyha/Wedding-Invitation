@@ -3,10 +3,216 @@ import { GUEST_PUBLIC_SCOPE, extractScopeFromEventId } from './userScope.js';
 export const PUBLIC_APP_URL = 'https://ais-pre-hjj7vuznhhxkva5mjjwpax-816970112678.asia-southeast1.run.app';
 export const VERCEL_APP_URL = 'https://wedding-invitation-inky-kappa.vercel.app';
 
+export interface KhmerShareFontOption {
+  slug: string;
+  labelKh: string;
+  labelEn: string;
+  fontFamily: string;
+  sampleKh: string;
+}
+
+/**
+ * Web-safe Khmer fonts backed by Google Fonts + Khmer OS local fallbacks.
+ * Every font listed here is preloaded in index.html, src/index.css, and api/og.ts
+ * so viewers opening a Vercel share link on iOS, Android, Windows, or macOS
+ * always render authentic Khmer typography without missing glyphs.
+ */
+export const KHMER_SHARE_FONTS: KhmerShareFontOption[] = [
+  {
+    slug: 'moul',
+    labelKh: 'អក្សរមូល (Moul)',
+    labelEn: 'Khmer Moul (Royal)',
+    fontFamily: "'Moul', 'Moulpali', 'Khmer OS Moul', 'Khmer OS Muol Light', serif",
+    sampleKh: 'ភ្ញៀវកិត្តិយស',
+  },
+  {
+    slug: 'moulpali',
+    labelKh: 'មូលបាលី (Moulpali)',
+    labelEn: 'Khmer Moulpali',
+    fontFamily: "'Moulpali', 'Moul', 'Khmer OS Muol Light', serif",
+    sampleKh: 'ភ្ញៀវកិត្តិយស',
+  },
+  {
+    slug: 'kbach',
+    labelKh: 'ក្បាច់បុរាណ (Kbach / Moul)',
+    labelEn: 'Khmer Royal Kbach',
+    fontFamily: "'Moul', 'Moulpali', 'AKbalthom Kbach', serif",
+    sampleKh: 'ភ្ញៀវកិត្តិយស',
+  },
+  {
+    slug: 'bokor',
+    labelKh: 'បូកគោ (Bokor)',
+    labelEn: 'Khmer Bokor',
+    fontFamily: "'Bokor', 'Khmer OS Bokor', serif",
+    sampleKh: 'ភ្ញៀវកិត្តិយស',
+  },
+  {
+    slug: 'angkor',
+    labelKh: 'អង្គរ (Angkor)',
+    labelEn: 'Khmer Angkor',
+    fontFamily: "'Angkor', 'Moul', serif",
+    sampleKh: 'ភ្ញៀវកិត្តិយស',
+  },
+  {
+    slug: 'kantumruy',
+    labelKh: 'កន្ទុមរុយ (Kantumruy Pro)',
+    labelEn: 'Kantumruy Pro',
+    fontFamily: "'Kantumruy Pro', 'Noto Sans Khmer', sans-serif",
+    sampleKh: 'ភ្ញៀវកិត្តិយស',
+  },
+  {
+    slug: 'battambang',
+    labelKh: 'បាត់ដំបង (Battambang)',
+    labelEn: 'Khmer Battambang',
+    fontFamily: "'Battambang', 'Khmer OS Battambang', serif",
+    sampleKh: 'ភ្ញៀវកិត្តិយស',
+  },
+  {
+    slug: 'siemreap',
+    labelKh: 'សៀមរាប (Siemreap)',
+    labelEn: 'Khmer Siemreap',
+    fontFamily: "'Siemreap', 'Khmer OS Siemreap', sans-serif",
+    sampleKh: 'ភ្ញៀវកិត្តិយស',
+  },
+  {
+    slug: 'freehand',
+    labelKh: 'សរសេរដៃ (Freehand)',
+    labelEn: 'Khmer Freehand',
+    fontFamily: "'Freehand', 'Khmer OS Freehand', cursive",
+    sampleKh: 'ភ្ញៀវកិត្តិយស',
+  },
+  {
+    slug: 'fasthand',
+    labelKh: 'សរសេរដៃរហ័ស (Fasthand)',
+    labelEn: 'Khmer Fasthand',
+    fontFamily: "'Fasthand', 'Khmer OS Fasthand', cursive",
+    sampleKh: 'ភ្ញៀវកិត្តិយស',
+  },
+  {
+    slug: 'taprom',
+    labelKh: 'តាព្រហ្ម (Taprom)',
+    labelEn: 'Khmer Taprom',
+    fontFamily: "'Taprom', 'Freehand', cursive",
+    sampleKh: 'ភ្ញៀវកិត្តិយស',
+  },
+  {
+    slug: 'dangrek',
+    labelKh: 'ដងរែក (Dangrek)',
+    labelEn: 'Khmer Dangrek',
+    fontFamily: "'Dangrek', 'Kantumruy Pro', sans-serif",
+    sampleKh: 'ភ្ញៀវកិត្តិយស',
+  },
+  {
+    slug: 'noto-serif',
+    labelKh: 'ណូតូ សេរីហ្វ (Noto Serif)',
+    labelEn: 'Noto Serif Khmer',
+    fontFamily: "'Noto Serif Khmer', 'Battambang', serif",
+    sampleKh: 'ភ្ញៀវកិត្តិយស',
+  },
+  {
+    slug: 'noto-sans',
+    labelKh: 'ណូតូ សាន់ (Noto Sans)',
+    labelEn: 'Noto Sans Khmer',
+    fontFamily: "'Noto Sans Khmer', 'Kantumruy Pro', sans-serif",
+    sampleKh: 'ភ្ញៀវកិត្តិយស',
+  },
+  {
+    slug: 'konkhmer',
+    labelKh: 'កូនខ្មែរស្លឹកឈើ (Sleokchher)',
+    labelEn: 'Konkhmer Sleokchher',
+    fontFamily: "'Konkhmer Sleokchher', 'Moul', cursive",
+    sampleKh: 'ភ្ញៀវកិត្តិយស',
+  },
+  {
+    slug: 'content',
+    labelKh: 'ខន់ថេន (Content)',
+    labelEn: 'Khmer Content',
+    fontFamily: "'Content', 'Khmer OS Content', sans-serif",
+    sampleKh: 'ភ្ញៀវកិត្តិយស',
+  },
+];
+
+/**
+ * Resolves any CSS font-family string or font slug into a canonical short slug
+ * for embedding in Vercel share URLs (`?font=<slug>`).
+ */
+export function resolveKhmerFontSlug(fontFamilyOrSlug?: string | null): string {
+  if (!fontFamilyOrSlug || typeof fontFamilyOrSlug !== 'string') return 'moul';
+  const raw = fontFamilyOrSlug.trim().toLowerCase();
+  if (!raw) return 'moul';
+
+  const exactBySlug = KHMER_SHARE_FONTS.find((f) => f.slug === raw);
+  if (exactBySlug) return exactBySlug.slug;
+
+  if (raw.includes('moulpali')) return 'moulpali';
+  if (raw.includes('akbalthom') || raw.includes('kbach')) return 'kbach';
+  if (raw.includes('bokor')) return 'bokor';
+  if (raw.includes('angkor')) return 'angkor';
+  if (raw.includes('kantumruy')) return 'kantumruy';
+  if (raw.includes('battambang')) return 'battambang';
+  if (raw.includes('siemreap')) return 'siemreap';
+  if (raw.includes('freehand')) return 'freehand';
+  if (raw.includes('fasthand')) return 'fasthand';
+  if (raw.includes('taprom')) return 'taprom';
+  if (raw.includes('dangrek')) return 'dangrek';
+  if (raw.includes('noto serif')) return 'noto-serif';
+  if (raw.includes('noto sans')) return 'noto-sans';
+  if (raw.includes('konkhmer') || raw.includes('sleokchher')) return 'konkhmer';
+  if (raw.includes('content')) return 'content';
+  if (raw.includes('moul') || raw.includes('muol')) return 'moul';
+
+  return 'moul';
+}
+
+/**
+ * Resolves a font slug or partial font-family string into a web-safe CSS font-family stack
+ * backed by Google Fonts so it renders on Vercel across all viewer devices.
+ */
+export function resolveKhmerFontFamily(fontFamilyOrSlug?: string | null): string | null {
+  if (!fontFamilyOrSlug || typeof fontFamilyOrSlug !== 'string') return null;
+  const trimmed = fontFamilyOrSlug.trim();
+  if (!trimmed) return null;
+
+  const slug = resolveKhmerFontSlug(trimmed);
+  const matched = KHMER_SHARE_FONTS.find((f) => f.slug === slug);
+  if (matched) {
+    const lower = trimmed.toLowerCase();
+    const isKnownKhmerOrSlug =
+      KHMER_SHARE_FONTS.some((f) => f.slug === lower) ||
+      /(moul|muol|moulpali|kbach|akbalthom|bokor|angkor|kantumruy|battambang|siemreap|freehand|fasthand|taprom|dangrek|noto|konkhmer|sleokchher|content|khmer)/i.test(
+        trimmed
+      );
+    if (isKnownKhmerOrSlug) {
+      return matched.fontFamily;
+    }
+  }
+  return trimmed;
+}
+
+/**
+ * Extracts the shared Khmer font family from URL search parameters (`?font=...` or `?khFont=...`).
+ */
+export function extractKhmerFontFromSearch(search?: string | null): string | null {
+  if (!search || typeof search !== 'string') return null;
+  const normalized = search.startsWith('?') ? search.slice(1) : search;
+  if (!normalized) return null;
+
+  try {
+    const params = new URLSearchParams(normalized);
+    const rawFont = (params.get('font') || params.get('khFont') || params.get('gf') || '').trim();
+    if (!rawFont) return null;
+    return resolveKhmerFontFamily(rawFont);
+  } catch {
+    return null;
+  }
+}
+
 export interface ShareUrlOptions {
   customOrigin?: string;
   lang?: string;
   ownerId?: string;
+  /** Optional Khmer font slug or CSS font-family for viewer guest name & Khmer typography on Vercel */
+  khFont?: string | null;
 }
 
 /**
@@ -113,7 +319,7 @@ export function extractGuestNameFromSearch(search: string): string {
 /**
  * Generates the live working share URL for wedding guests.
  * Automatically converts internal dev URLs (ais-dev-) and localhost to publicly accessible URLs
- * or honors customOrigin (such as Vercel domain) and guarantees Khmer language (?lang=kh) support.
+ * or honors customOrigin (such as Vercel domain) and guarantees Khmer language (?lang=kh) and Khmer font (?font=...) support.
  */
 export function getPublicShareUrl(
   guestName?: string,
@@ -164,6 +370,12 @@ export function getPublicShareUrl(
   const rawLang = (options?.lang || 'kh').toLowerCase().trim();
   const targetLang = rawLang === 'en' ? 'en' : 'kh';
   url.searchParams.set('lang', targetLang);
+
+  // Khmer font parameter so Vercel viewers render the exact chosen Khmer font on any device
+  if (options?.khFont && options.khFont.trim()) {
+    const fontSlug = resolveKhmerFontSlug(options.khFont);
+    url.searchParams.set('font', fontSlug);
+  }
 
   url.searchParams.set('share', '1');
 

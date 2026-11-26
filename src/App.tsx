@@ -54,7 +54,14 @@ import { WEDDING_EVENT } from './data/weddingData';
 import { sanitizeWeddingEvent, VERIFIED_WEDDING_COVER } from './utils/sanitizeEvent';
 import { findTemplatePreset, getCategoryCoverImage, VERIFIED_CATEGORY_COVERS, EVENT_PRESETS } from './data/eventTemplates';
 import { buildInvitationMeta, normalizeCategoryString, resolveEventCoverImage } from './utils/shareMeta';
-import { PUBLIC_APP_URL, detectLanguageFromUrl, extractGuestNameFromSearch, isSharedInvitationSearch } from './lib/shareUrl';
+import {
+  PUBLIC_APP_URL,
+  detectLanguageFromUrl,
+  extractGuestNameFromSearch,
+  extractKhmerFontFromSearch,
+  isSharedInvitationSearch,
+  resolveKhmerFontFamily,
+} from './lib/shareUrl';
 import { Language, WeddingEvent } from './types';
 import { formatKhmerDate, formatEnDate } from './utils/khmerHelpers';
 import { getEventTimestampMs } from './utils/saveHelpers';
@@ -1642,12 +1649,18 @@ export default function App() {
     }
   };
 
-  // Read guest name and event ID from URL query parameters, and fetch latest user-isolated event from server/Firestore
+  // Read guest name and Khmer font from URL query parameters, and fetch latest user-isolated event from server/Firestore
   const [guestName, setGuestName] = useState(() => {
     if (typeof window !== 'undefined') {
       return extractGuestNameFromSearch(window.location.search) || 'Your Name';
     }
     return 'Your Name';
+  });
+  const [urlKhmerFont, setUrlKhmerFont] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return extractKhmerFontFromSearch(window.location.search);
+    }
+    return null;
   });
   const hasSavedLocallyRef = useRef(false);
   const lastSavedAtRef = useRef<number>(0);
@@ -1732,12 +1745,21 @@ export default function App() {
             urlTypeParam = params.get('type') || params.get('category');
             urlOwnerParam = params.get('ownerId')?.trim() || '';
             foundGuest = extractGuestNameFromSearch(currentSearch);
+            const resolvedFont = extractKhmerFontFromSearch(currentSearch);
+            if (resolvedFont) {
+              setUrlKhmerFont(resolvedFont);
+            }
             setLanguage(detectLanguageFromUrl(currentSearch, resolvedUrlObj.pathname));
             setIsFromShareLink(true);
           } catch {
             // ignore malformed resolved URL
           }
         }
+      }
+
+      const initialUrlFont = extractKhmerFontFromSearch(currentSearch);
+      if (initialUrlFont) {
+        setUrlKhmerFont(initialUrlFont);
       }
 
       if (cancelled) return;
@@ -2691,7 +2713,7 @@ export default function App() {
         mapUrl={config.map_url}
         titleTextShape={config.title_text_shape}
         guestNameColor={config.guestNameColor || '#364153'}
-        guestNameFontFamily={config.guest_name_font_family}
+        guestNameFontFamily={urlKhmerFont || resolveKhmerFontFamily(config.guest_name_font_family) || config.guest_name_font_family}
         guestNameFontSize={config.guest_name_font_size}
         envelopeThemeColor={config.envelope_theme_color}
         guestFrameStyle={config.guest_frame_style}

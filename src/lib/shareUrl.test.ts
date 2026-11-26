@@ -5,6 +5,10 @@ import {
   isSharedInvitationSearch,
   generateDeterministicShortCode,
   extractGuestNameFromSearch,
+  extractKhmerFontFromSearch,
+  resolveKhmerFontSlug,
+  resolveKhmerFontFamily,
+  KHMER_SHARE_FONTS,
   decodeKhmerQueryValue,
   detectLanguageFromUrl,
   shortenUrl,
@@ -236,4 +240,27 @@ test('shortenUrl falls back to self-contained full share URL when short-link per
   }
 });
 
+test('Vercel Khmer font support encodes &font= slug and resolves web-safe Google Font stacks for viewers', () => {
+  assert.ok(KHMER_SHARE_FONTS.length >= 12);
+  assert.equal(resolveKhmerFontSlug("'Moulpali', serif"), 'moulpali');
+  assert.equal(resolveKhmerFontSlug("'AKbalthom Kbach', 'Moul', serif"), 'kbach');
+  assert.equal(resolveKhmerFontSlug("'Khmer OS Bokor', 'Bokor', display"), 'bokor');
+  assert.equal(resolveKhmerFontSlug('kantumruy'), 'kantumruy');
 
+  const urlStr = getPublicShareUrl('លោក សុខ វិបុល', 'u_owner__wedding', 'wedding', {
+    customOrigin: VERCEL_APP_URL,
+    lang: 'kh',
+    khFont: "'Moulpali', 'Moul', serif",
+  });
+  const parsed = new URL(urlStr);
+  assert.equal(parsed.origin, VERCEL_APP_URL);
+  assert.equal(parsed.searchParams.get('lang'), 'kh');
+  assert.equal(parsed.searchParams.get('font'), 'moulpali');
+
+  const extractedFont = extractKhmerFontFromSearch(parsed.search);
+  assert.ok(extractedFont?.includes("'Moulpali'"));
+  assert.equal(
+    resolveKhmerFontFamily("'AKbalthom Kbach', 'AKbalthom-Kbach', 'Moul', serif"),
+    "'Moul', 'Moulpali', 'AKbalthom Kbach', serif"
+  );
+});
