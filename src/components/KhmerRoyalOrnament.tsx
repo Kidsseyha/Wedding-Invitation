@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { ChevronDown, Check, X } from 'lucide-react';
+import { getFirstNameInitial, resolveMonogramFontFamily } from '../utils/monogramHelpers';
 
 // Ornate Khmer Royal Corner Flourish
 export function KhmerCornerKbach({
@@ -3882,6 +3883,7 @@ export function KhmerRoyalModernWeddingCover({
   bride = 'សុខ បុប្ផា',
   groomEn = 'Chea Dara',
   brideEn = 'Sok Bopha',
+  singlePerson = false,
   subtitleKh = 'សិរីមង្គលអាពាហ៍ពិពាហ៍',
   guestName = 'ភ្ញៀវកិត្តិយស',
   guestNameFontFamily,
@@ -3889,8 +3891,12 @@ export function KhmerRoyalModernWeddingCover({
   guestNameFontSize,
   titleShape = 'straight',
   language = 'kh',
+  coverMonogramGroom,
+  coverMonogramBride,
   coverMonogramFontFamily,
   coverMonogramFontFamilyEn,
+  coverMonogramColor,
+  coverMonogramFontSize,
   onOpenInvitation,
   isOpening = false,
   isAdmin = false,
@@ -3903,6 +3909,7 @@ export function KhmerRoyalModernWeddingCover({
   bride?: string;
   groomEn?: string;
   brideEn?: string;
+  singlePerson?: boolean;
   subtitleKh?: string;
   guestName?: string;
   guestNameFontFamily?: string;
@@ -3910,8 +3917,12 @@ export function KhmerRoyalModernWeddingCover({
   guestNameFontSize?: string;
   titleShape?: 'straight' | 'arch-up' | 'arch-down' | 'wave';
   language?: string;
+  coverMonogramGroom?: string;
+  coverMonogramBride?: string;
   coverMonogramFontFamily?: string;
   coverMonogramFontFamilyEn?: string;
+  coverMonogramColor?: string;
+  coverMonogramFontSize?: string;
   onOpenInvitation?: () => void;
   isOpening?: boolean;
   isAdmin?: boolean;
@@ -3924,12 +3935,23 @@ export function KhmerRoyalModernWeddingCover({
   const [tempGuestInput, setTempGuestInput] = useState(guestName || '');
 
   const isKhmer = language === 'kh';
-  const groomInitial = isKhmer
-    ? getKhmerInitial(groom, 'ដ')
-    : extractNameInitial(groomEn || 'Chea Dara', groom, 'D');
-  const brideInitial = isKhmer
-    ? getKhmerInitial(bride, 'ប')
-    : extractNameInitial(brideEn || 'Sok Bopha', bride, 'B');
+  const groomInit = isKhmer
+    ? getFirstNameInitial(groom, groomEn, 'ម')
+    : getFirstNameInitial(groomEn || 'Ro Malay', groom, 'M');
+  const brideInit = isKhmer
+    ? getFirstNameInitial(bride, brideEn, 'វ')
+    : getFirstNameInitial(brideEn || 'Uom Volak', bride, 'V');
+  const isLatinMonogram =
+    /^[A-Za-z0-9.\s]+$/.test(groomInit) && (singlePerson || /^[A-Za-z0-9.\s]+$/.test(brideInit));
+  const monogramFontFamily = resolveMonogramFontFamily(
+    language,
+    coverMonogramFontFamily,
+    coverMonogramFontFamilyEn,
+    isLatinMonogram
+  );
+  const monogramColor = coverMonogramColor || '#9c732d';
+  const monogramSizePx = parseInt(coverMonogramFontSize || '34', 10) || 34;
+
   const rawGuest =
     guestName && guestName !== 'Your Name'
       ? guestName.trim()
@@ -3985,43 +4007,77 @@ export function KhmerRoyalModernWeddingCover({
         </div>
       </div>
 
-      {/* Center Rococo Yin-Yang Monogram & Couple Names */}
+      {/* Center Gold Monogram Frame & Couple Names (Styled from CoverMonogramSettingsCard) */}
       <div className="relative z-20 flex flex-col items-center w-full my-2">
         <motion.div
           animate={{ y: [0, -3, 0] }}
           transition={{ duration: 4.5, repeat: Infinity, ease: 'easeInOut' }}
         >
-          <RococoYinYangMonogramSeal
-            groomInitial={groomInitial}
-            brideInitial={brideInitial}
-            language={language}
-            fontFamily={
-              isKhmer
-                ? (coverMonogramFontFamily &&
-                  !/(Playfair Display|Cinzel|Great Vibes|Alex Brush|Norican|Dancing Script|Parisienne|Satisfy)/i.test(coverMonogramFontFamily)
-                    ? coverMonogramFontFamily
-                    : undefined)
-                : (coverMonogramFontFamilyEn ||
-                  (coverMonogramFontFamily &&
-                  !/(Moulpali|Moul|Angkor|Bokor|Battambang|Taprom|Freehand|Khmer|AKbalthom|Kantumruy|Siemreap|Dangrek|Content|Fasthand)/i.test(coverMonogramFontFamily)
-                    ? coverMonogramFontFamily
-                    : undefined))
-            }
-            className="w-32 h-32 sm:w-36 sm:h-36"
-          />
+          <div
+            aria-label={singlePerson ? `${groom} monogram (${groomInit})` : `${groom} & ${bride} monogram (${groomInit} & ${brideInit})`}
+            className="relative w-32 h-32 sm:w-40 sm:h-40 flex items-center justify-center"
+          >
+            <img
+              src="/assets/template15/monogram-frame.webp"
+              alt={`${groom} & ${bride} monogram frame`}
+              draggable={false}
+              className="w-full h-full object-contain select-none pointer-events-none drop-shadow-[0_4px_12px_rgba(148,110,44,0.25)]"
+            />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none px-5">
+              <div className="flex items-baseline justify-center gap-1 sm:gap-1.5 leading-none max-w-full truncate">
+                <span
+                  className="font-bold leading-none"
+                  style={{
+                    fontFamily: monogramFontFamily,
+                    fontSize: `${monogramSizePx}px`,
+                    color: monogramColor,
+                    textShadow: '0 1px 1px rgba(255,255,255,0.92), 0 2px 6px rgba(156,115,45,0.24)',
+                  }}
+                >
+                  {groomInit}
+                </span>
+                {!singlePerson && (
+                  <>
+                    <span
+                      className="font-semibold leading-none opacity-85"
+                      style={{
+                        fontFamily: monogramFontFamily,
+                        fontSize: `${Math.max(14, Math.round(monogramSizePx * 0.56))}px`,
+                        color: monogramColor,
+                        textShadow: '0 1px 1px rgba(255,255,255,0.9)',
+                      }}
+                    >
+                      &amp;
+                    </span>
+                    <span
+                      className="font-bold leading-none"
+                      style={{
+                        fontFamily: monogramFontFamily,
+                        fontSize: `${monogramSizePx}px`,
+                        color: monogramColor,
+                        textShadow: '0 1px 1px rgba(255,255,255,0.92), 0 2px 6px rgba(156,115,45,0.24)',
+                      }}
+                    >
+                      {brideInit}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
         </motion.div>
 
         <p
           className="mt-1 text-base sm:text-lg font-bold tracking-wide text-[#701a2b]"
           style={{ fontFamily: "'Moul', 'Moulpali', serif", lineHeight: '1.7' }}
         >
-          {groom || 'ជា ដារ៉ា'} &amp; {bride || 'សុខ បុប្ផា'}
+          {singlePerson ? (groom || 'ជា ដារ៉ា') : <>{groom || 'ជា ដារ៉ា'} &amp; {bride || 'សុខ បុប្ផា'}</>}
         </p>
         <p
           className="text-base sm:text-lg font-medium tracking-wider"
           style={{ fontFamily: "'Great Vibes', 'Norican', cursive", color: '#9d174d' }}
         >
-          {groomEn || 'Chea Dara'} &amp; {brideEn || 'Sok Bopha'}
+          {singlePerson ? (groomEn || 'Chea Dara') : <>{groomEn || 'Chea Dara'} &amp; {brideEn || 'Sok Bopha'}</>}
         </p>
       </div>
 

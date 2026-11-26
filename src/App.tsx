@@ -2657,10 +2657,10 @@ export default function App() {
         templateId={event.templateId}
         eventType={event.eventType}
         name={event.name}
-        groom={event.groom}
-        bride={event.bride}
-        groomEn={event.groomEn}
-        brideEn={event.brideEn}
+        groom={event.groom || config.groom_name_kh || (config.invitation_kh as any)?.groom}
+        bride={event.bride || config.bride_name_kh || (config.invitation_kh as any)?.bride}
+        groomEn={event.groomEn || config.groom_name_en || (config.invitation_en as any)?.groom}
+        brideEn={event.brideEn || config.bride_name_en || (config.invitation_en as any)?.bride}
         singlePerson={event.singlePerson}
         language={language}
         isAdmin={!isViewer}

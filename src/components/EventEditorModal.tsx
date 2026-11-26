@@ -555,9 +555,20 @@ export default function EventEditorModal({
       config: newConfig,
     }));
 
-    // Automatic save for image-related config changes
-    const imageKeys = ['event_location', 'qr_code', 'qr_code_riel', 'cover_photo'];
-    if (imageKeys.includes(key as string)) {
+    // Automatic save for image-related and cover monogram style config changes
+    const autoSaveKeys = [
+      'event_location',
+      'qr_code',
+      'qr_code_riel',
+      'cover_photo',
+      'cover_monogram_color',
+      'cover_monogram_font_size',
+      'cover_monogram_font_family',
+      'cover_monogram_font_family_en',
+      'cover_monogram_groom',
+      'cover_monogram_bride',
+    ];
+    if (autoSaveKeys.includes(key as string)) {
       await onSave({
         ...formData,
         config: newConfig,

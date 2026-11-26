@@ -7,9 +7,10 @@ export function getFirstNameInitial(
   if (!raw) return fallbackChar;
 
   const cleaned = raw
+    .replace(/[\u200B-\u200D\uFEFF]+/g, ' ')
     .trim()
     .replace(
-      /^(លោកស្រី|លោកជំទាវ|ឯកឧត្តម|អ្នកនាង|កញ្ញា|លោក|កូនកំលោះ|កូនក្រមុំ|Mr\.?|Mrs\.?|Ms\.?|Miss|Dr\.?)\s+/i,
+      /^(លោកស្រី|លោកជំទាវ|ឯកឧត្តម|អ្នកនាង|អ្នកស្រី|កញ្ញា|លោក|កូនកំលោះ|កូនក្រមុំ|Mr\.?|Mrs\.?|Ms\.?|Miss|Dr\.?)\s+/i,
       ''
     )
     .trim();

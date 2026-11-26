@@ -255,7 +255,7 @@ export default function EnvelopeModal({
   const templateIdLower = (templateId || eventData?.templateId || '').toLowerCase();
   const nameLower = (name || '').toLowerCase();
   const resolvedGuestFontFamily = resolveKhmerFontFamily(guestNameFontFamily) || guestNameFontFamily;
-  const resolvedMonogramFontFamily = resolveKhmerFontFamily(coverMonogramFontFamily) || coverMonogramFontFamily;
+  const resolvedMonogramFontFamily = coverMonogramFontFamily;
 
   const isAnniversary = eventTypeLower === 'anniversary' || idLower.includes('anniversary') || templateIdLower.includes('anniversary') || nameLower.includes('ខួបអាពាហ៍ពិពាហ៍') || nameLower.includes('anniversary');
   const isBirthday = !isAnniversary && (eventTypeLower === 'birthday' || idLower.includes('birthday') || templateIdLower.includes('birthday') || nameLower.includes('ខួបកំណើត') || nameLower.includes('birthday'));
@@ -773,6 +773,7 @@ export default function EnvelopeModal({
                         bride={bride}
                         groomEn={groomEn}
                         brideEn={brideEn}
+                        singlePerson={singlePerson}
                         subtitleKh={subtitleKh}
                         guestName={guestName && guestName !== 'Your Name' ? guestName : (language === 'kh' ? 'លោក រ៉ូហ្សា\nនិងភរិយាព្រមទាំងបុត្រ' : 'Honored Guest')}
                         guestNameFontFamily={resolvedGuestFontFamily}
@@ -780,8 +781,12 @@ export default function EnvelopeModal({
                         guestNameFontSize={guestNameFontSize}
                         titleShape={titleTextShape}
                         language={language}
+                        coverMonogramGroom={coverMonogramGroom}
+                        coverMonogramBride={coverMonogramBride}
                         coverMonogramFontFamily={resolvedMonogramFontFamily}
                         coverMonogramFontFamilyEn={coverMonogramFontFamilyEn}
+                        coverMonogramColor={coverMonogramColor}
+                        coverMonogramFontSize={coverMonogramFontSize}
                         onOpenInvitation={handleOpenInvitation}
                         isOpening={isOpening}
                         isAdmin={isAdmin}

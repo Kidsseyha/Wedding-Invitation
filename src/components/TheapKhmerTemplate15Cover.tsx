@@ -87,17 +87,11 @@ export default function TheapKhmerTemplate15Cover({
       : 'Honored Guest';
 
   const isKhmer = language === 'kh';
-  const customGroom = (coverMonogramGroom || '').trim();
-  const customBride = (coverMonogramBride || '').trim();
   const groomInit = isKhmer
-    ? customGroom || getFirstNameInitial(groom, groomEn, 'ម')
-    : customGroom && !/[\u1780-\u17FF]/.test(customGroom)
-    ? customGroom
+    ? getFirstNameInitial(groom, groomEn, 'ម')
     : getFirstNameInitial(groomEn, groom, 'M');
   const brideInit = isKhmer
-    ? customBride || getFirstNameInitial(bride, brideEn, 'វ')
-    : customBride && !/[\u1780-\u17FF]/.test(customBride)
-    ? customBride
+    ? getFirstNameInitial(bride, brideEn, 'វ')
     : getFirstNameInitial(brideEn, bride, 'V');
   const isLatinMonogram =
     /^[A-Za-z0-9.\s]+$/.test(groomInit) && (singlePerson || /^[A-Za-z0-9.\s]+$/.test(brideInit));
@@ -108,7 +102,7 @@ export default function TheapKhmerTemplate15Cover({
     isLatinMonogram
   );
   const monogramColor = coverMonogramColor || '#9c732d';
-  const monogramSizePx = parseInt(coverMonogramFontSize || '', 10) || (isLatinMonogram ? 34 : 28);
+  const monogramSizePx = parseInt(coverMonogramFontSize || '34', 10) || 34;
 
   const handleSaveInline = (e: React.FormEvent) => {
     e.preventDefault();

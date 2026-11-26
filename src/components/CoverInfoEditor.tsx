@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { WeddingEvent, TemplateConfig } from '../types';
 import { ThemeMode } from './ThemeToggle';
+import { getFirstNameInitial, resolveMonogramFontFamily } from '../utils/monogramHelpers';
 
 interface CoverInfoEditorProps {
   formData: WeddingEvent;
@@ -55,6 +56,21 @@ export default function CoverInfoEditor({
     formData.id?.includes('housewarming') ||
     formData.name?.includes('ឡើងផ្ទះ') ||
     formData.name?.includes('House');
+  const isWedding = !isAnniversary && !isBirthday && !isEngagement && !isHousewarming;
+
+  const groomInit = getFirstNameInitial(formData.groom, formData.groomEn, 'ម');
+  const brideInit = getFirstNameInitial(formData.bride, formData.brideEn, 'វ');
+  const isLatinMonogram =
+    /^[A-Za-z0-9.\s]+$/.test(groomInit) &&
+    (Boolean(formData.singlePerson) || /^[A-Za-z0-9.\s]+$/.test(brideInit));
+  const monogramFontFamily = resolveMonogramFontFamily(
+    'kh',
+    formData.config.cover_monogram_font_family,
+    formData.config.cover_monogram_font_family_en,
+    isLatinMonogram
+  );
+  const monogramColor = formData.config.cover_monogram_color || '#9c732d';
+  const monogramSize = parseInt(formData.config.cover_monogram_font_size || '34', 10) || 34;
 
   const defaultSubtitleKh = formData.config.invitation_kh?.main_title || (isAnniversary
     ? 'ពិធីខួបអាពាហ៍ពិពាហ៍'
@@ -65,16 +81,6 @@ export default function CoverInfoEditor({
     : isHousewarming
     ? 'ពិធីឡើងគេហដ្ឋានថ្មី'
     : 'សិរីសួស្តី អាពាហ៍ពិពាហ៍');
-
-  const defaultSubtitleEn = isAnniversary
-    ? 'WEDDING ANNIVERSARY STORY'
-    : isBirthday
-    ? 'HAPPY BIRTHDAY INVITATION'
-    : isEngagement
-    ? 'ENGAGEMENT INVITATION'
-    : isHousewarming
-    ? 'HOUSEWARMING INVITATION'
-    : 'ROYAL WEDDING INVITATION';
 
   const rawSubtitleKh = formData.config.cover_subtitle_kh || defaultSubtitleKh;
   const currentSubtitleKh = rawSubtitleKh === 'រីករាយថ្ងៃកំណើត' ? 'រីករាយពិធីខួបកំណើត' : rawSubtitleKh;
@@ -153,7 +159,7 @@ export default function CoverInfoEditor({
 
             {/* Realistic Mini Envelope Mockup - Full Width */}
             <div
-              className="relative w-full h-48 sm:h-56 rounded-xl overflow-hidden border-2 border-amber-400/60 shadow-lg flex flex-col items-center justify-center p-3 text-center"
+              className="relative w-full min-h-52 sm:min-h-60 rounded-xl overflow-hidden border-2 border-amber-400/60 shadow-lg flex flex-col items-center justify-center p-3 text-center"
               style={{
                 backgroundImage: `url(${currentCoverBg})`,
                 backgroundSize: 'cover',
@@ -164,7 +170,7 @@ export default function CoverInfoEditor({
               <div className="absolute inset-0 bg-black/45 backdrop-blur-[0.5px]" />
 
               {/* Mini Curved Title */}
-              <div className="relative z-10 w-full max-w-xs sm:max-w-md h-11 -mb-1">
+              <div className="relative z-10 w-full max-w-xs sm:max-w-md h-10 -mb-1">
                 <svg viewBox="0 0 400 90" className="w-full h-full overflow-visible">
                   <path
                     id="miniSubtitleCurve"
@@ -184,6 +190,56 @@ export default function CoverInfoEditor({
                   </text>
                 </svg>
               </div>
+
+              {/* Cover Monogram Wreath Preview for Wedding */}
+              {isWedding && (
+                <div className="relative z-10 my-1 w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-[#fcfaf5]/95 border border-amber-300/80 shadow-md flex items-center justify-center p-1">
+                  <img
+                    src="/assets/template15/monogram-frame.webp"
+                    alt="Cover monogram"
+                    draggable={false}
+                    className="w-full h-full object-contain select-none pointer-events-none"
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none px-2">
+                    <div className="flex items-baseline justify-center gap-0.5 leading-none max-w-full truncate">
+                      <span
+                        className="font-bold leading-none"
+                        style={{
+                          fontFamily: monogramFontFamily,
+                          fontSize: `${Math.max(11, Math.round(monogramSize * 0.44))}px`,
+                          color: monogramColor,
+                        }}
+                      >
+                        {groomInit}
+                      </span>
+                      {!formData.singlePerson && (
+                        <>
+                          <span
+                            className="font-semibold leading-none opacity-85"
+                            style={{
+                              fontFamily: monogramFontFamily,
+                              fontSize: `${Math.max(8, Math.round(monogramSize * 0.26))}px`,
+                              color: monogramColor,
+                            }}
+                          >
+                            &amp;
+                          </span>
+                          <span
+                            className="font-bold leading-none"
+                            style={{
+                              fontFamily: monogramFontFamily,
+                              fontSize: `${Math.max(11, Math.round(monogramSize * 0.44))}px`,
+                              color: monogramColor,
+                            }}
+                          >
+                            {brideInit}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Host / Couple Name on Cover */}
               <div className="relative z-10 space-y-0.5">

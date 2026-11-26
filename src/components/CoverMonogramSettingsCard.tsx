@@ -46,18 +46,8 @@ export default function CoverMonogramSettingsCard({
   const autoGroomKh = getFirstNameInitial(groom, groomEn, 'ម');
   const autoBrideKh = getFirstNameInitial(bride, brideEn, 'វ');
 
-  const customGroom = (config.cover_monogram_groom || '').trim();
-  const customBride = (config.cover_monogram_bride || '').trim();
-  const effectiveGroomInit = isKhmer
-    ? customGroom || autoGroomKh
-    : customGroom && !/[\u1780-\u17FF]/.test(customGroom)
-    ? customGroom
-    : autoGroomEn;
-  const effectiveBrideInit = isKhmer
-    ? customBride || autoBrideKh
-    : customBride && !/[\u1780-\u17FF]/.test(customBride)
-    ? customBride
-    : autoBrideEn;
+  const effectiveGroomInit = isKhmer ? autoGroomKh : autoGroomEn;
+  const effectiveBrideInit = isKhmer ? autoBrideKh : autoBrideEn;
   const monogramColor = config.cover_monogram_color || '#9c732d';
   const monogramSize = parseInt(config.cover_monogram_font_size || '34', 10) || 34;
   const isLatinPreview =
@@ -150,7 +140,7 @@ export default function CoverMonogramSettingsCard({
         )}
       </div>
 
-      {/* Live Preview + Short Text Inputs */}
+      {/* Live Preview + Automatic Wedding Template Couple Initials Display */}
       <div className="grid grid-cols-1 md:grid-cols-[136px_1fr] gap-4 items-center">
         <div className="mx-auto relative w-28 h-28 sm:w-32 sm:h-32 rounded-2xl bg-[#fcfaf5] border border-amber-300/70 shadow-inner flex items-center justify-center p-2">
           <img
@@ -203,57 +193,54 @@ export default function CoverMonogramSettingsCard({
 
         <div className="space-y-2.5">
           <div className={`grid grid-cols-1 ${singlePerson ? '' : 'sm:grid-cols-2'} gap-3`}>
-            <div className="space-y-1">
-              <label
-                className={`block text-[11px] font-khmer font-semibold ${
-                  theme === 'light' ? 'text-amber-950' : 'text-amber-200'
-                }`}
+            <div
+              className={`px-3 py-2.5 rounded-xl border flex items-center justify-between gap-2 ${
+                theme === 'light'
+                  ? 'bg-white border-amber-300 text-neutral-900 shadow-xs'
+                  : 'bg-black/60 border-amber-500/40 text-amber-100'
+              }`}
+            >
+              <div className="min-w-0">
+                <span className="block text-[10px] font-khmer opacity-75">
+                  {singlePerson ? 'ម្ចាស់កម្មវិធី (ពីគំរូធៀប):' : 'កូនប្រុស (ពីគំរូធៀបអាពាហ៍ពិពាហ៍):'}
+                </span>
+                <span className="block text-xs font-khmer font-bold truncate">
+                  {isKhmer ? groom || 'រ៉ូ ម៉ាឡេ' : groomEn || groom || 'Ro Malay'}
+                </span>
+              </div>
+              <span
+                className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-400/50 text-base font-bold shrink-0"
+                style={{ fontFamily: effectiveFontFamily, color: monogramColor }}
               >
-                {singlePerson
-                  ? 'អក្សរកាត់ម្ចាស់កម្មវិធី (Short Text):'
-                  : 'អក្សរកាត់កូនប្រុស (Groom Short Text):'}
-              </label>
-              <input
-                id="cover-monogram-groom-input"
-                type="text"
-                maxLength={8}
-                value={config.cover_monogram_groom || ''}
-                onChange={(e) => onUpdateConfig('cover_monogram_groom', e.target.value)}
-                placeholder={`Auto: ${autoGroomKh} / ${autoGroomEn}`}
-                className={`w-full px-3 py-2 rounded-xl text-sm font-bold text-center focus:outline-none ${
-                  theme === 'light'
-                    ? 'bg-white border-2 border-amber-300 text-neutral-900 focus:border-amber-500 shadow-xs'
-                    : 'bg-black/60 border-2 border-amber-500/40 text-amber-100 focus:border-amber-400'
-                }`}
-              />
+                {effectiveGroomInit}
+              </span>
             </div>
 
             {!singlePerson && (
-              <div className="space-y-1">
-                <label
-                  className={`block text-[11px] font-khmer font-semibold ${
-                    theme === 'light' ? 'text-amber-950' : 'text-amber-200'
-                  }`}
+              <div
+                className={`px-3 py-2.5 rounded-xl border flex items-center justify-between gap-2 ${
+                  theme === 'light'
+                    ? 'bg-white border-amber-300 text-neutral-900 shadow-xs'
+                    : 'bg-black/60 border-amber-500/40 text-amber-100'
+                }`}
+              >
+                <div className="min-w-0">
+                  <span className="block text-[10px] font-khmer opacity-75">
+                    កូនស្រី (ពីគំរូធៀបអាពាហ៍ពិពាហ៍):
+                  </span>
+                  <span className="block text-xs font-khmer font-bold truncate">
+                    {isKhmer ? bride || 'អួម វល្ខ័ក' : brideEn || bride || 'Uom Volak'}
+                  </span>
+                </div>
+                <span
+                  className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-400/50 text-base font-bold shrink-0"
+                  style={{ fontFamily: effectiveFontFamily, color: monogramColor }}
                 >
-                  អក្សរកាត់កូនស្រី (Bride Short Text):
-                </label>
-                <input
-                  id="cover-monogram-bride-input"
-                  type="text"
-                  maxLength={8}
-                  value={config.cover_monogram_bride || ''}
-                  onChange={(e) => onUpdateConfig('cover_monogram_bride', e.target.value)}
-                  placeholder={`Auto: ${autoBrideKh} / ${autoBrideEn}`}
-                  className={`w-full px-3 py-2 rounded-xl text-sm font-bold text-center focus:outline-none ${
-                    theme === 'light'
-                      ? 'bg-white border-2 border-amber-300 text-neutral-900 focus:border-amber-500 shadow-xs'
-                      : 'bg-black/60 border-2 border-amber-500/40 text-amber-100 focus:border-amber-400'
-                  }`}
-                />
+                  {effectiveBrideInit}
+                </span>
               </div>
             )}
           </div>
-
         </div>
       </div>
 
