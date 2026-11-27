@@ -1924,17 +1924,23 @@ export default function EventEditorModal({
                     config={formData.config}
                     onUpdateConfig={handleUpdateConfig}
                     eventImage={formData.image}
-                    onUpdateEventImage={(url) =>
-                      setFormData((prev) => ({
-                        ...prev,
+                    onUpdateEventImage={async (url) => {
+                      const updatedEvent: WeddingEvent = sanitizeWeddingEvent({
+                        ...formData,
+                        id: getScopedEventId(formData.id || 'cmgrawhnk0003le0434762j7n', effectiveScope),
+                        ...(effectiveScope !== 'guest_public' ? { ownerId: effectiveScope } : {}),
                         image: url,
                         cover_image: url,
                         config: {
-                          ...prev.config,
+                          ...formData.config,
                           image: url,
                         },
-                      }))
-                    }
+                        eventType: currentTemplateType,
+                        updatedAt: new Date().toISOString(),
+                      });
+                      setFormData(updatedEvent);
+                      await onSave(updatedEvent, false);
+                    }}
                     theme={theme}
                     onSave={handleSaveAll}
                     isSaving={isSaving}

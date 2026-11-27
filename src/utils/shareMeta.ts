@@ -110,10 +110,11 @@ export function isModernWeddingEvent(event: any): boolean {
 export function resolveEventCoverImage(event: any, category: InvitationCategory, fallbackCover?: string): string {
   const isModern = category === 'wedding' && isModernWeddingEvent(event);
   const candidates = [
-    event?.config?.envelope_header_image,
     event?.image,
-    event?.cover_image,
     event?.config?.image,
+    event?.cover_image,
+    event?.config?.envelope_header_image,
+    event?.config?.main_background,
     event?.config?.cover_background,
     event?.config?.photo_gallary?.photo1,
     fallbackCover,
@@ -487,10 +488,17 @@ export function readShareTemplatesStorageState(userScopeId?: string): {
         try {
           const val = JSON.parse(localStorage.getItem(key) || 'null');
           if (val) {
-            savedEventsById[rawId] = val;
+            const incomingMs = Date.parse(val?.updatedAt || '') || 0;
+            const existingRawMs = Date.parse(savedEventsById[rawId]?.updatedAt || '') || 0;
+            if (!savedEventsById[rawId] || incomingMs >= existingRawMs) {
+              savedEventsById[rawId] = val;
+            }
             const stripped = stripScopedEventId(rawId);
-            if (stripped && !savedEventsById[stripped]) {
-              savedEventsById[stripped] = val;
+            if (stripped) {
+              const existingStrippedMs = Date.parse(savedEventsById[stripped]?.updatedAt || '') || 0;
+              if (!savedEventsById[stripped] || incomingMs >= existingStrippedMs) {
+                savedEventsById[stripped] = val;
+              }
             }
           }
         } catch {}
@@ -630,20 +638,37 @@ export function buildInvitationMeta(params: {
       String(strippedEventId || '').toLowerCase().includes('modern'));
 
   const candidateImages = [
-    effectiveEvent?.config?.envelope_header_image,
     effectiveEvent?.image,
-    effectiveEvent?.cover_image,
     effectiveEvent?.config?.image,
+    effectiveEvent?.cover_image,
+    effectiveEvent?.config?.envelope_header_image,
+    effectiveEvent?.config?.main_background,
     effectiveEvent?.config?.cover_background,
     effectiveEvent?.config?.photo_gallary?.photo1,
   ];
+
+  const cleanOrigin = (origin || '').replace(/\/+$/, '');
+  const resolvedEventId = String(effectiveEvent?.id || eventId || '').trim();
+  const resolvedOwnerId = String(effectiveEvent?.ownerId || '').trim();
 
   let selectedImage = '';
   for (const candidate of candidateImages) {
     if (isInvalidCoverValue(candidate)) continue;
     const trimmed = String(candidate).trim();
-    if (trimmed.startsWith('data:')) continue;
     if ((category !== 'wedding' || isModern) && isWeddingDefaultCoverUrl(trimmed)) continue;
+    if (trimmed.startsWith('data:image/')) {
+      if (cleanOrigin && resolvedEventId) {
+        const qs = new URLSearchParams();
+        qs.set('id', resolvedEventId);
+        qs.set('type', category);
+        if (resolvedOwnerId) qs.set('ownerId', resolvedOwnerId);
+        if (effectiveEvent?.updatedAt) qs.set('v', String(effectiveEvent.updatedAt));
+        selectedImage = `${cleanOrigin}/api/og-image?${qs.toString()}`;
+        break;
+      }
+      continue;
+    }
+    if (trimmed.startsWith('data:')) continue;
     const abs = toAbsoluteHttpUrl(trimmed, origin);
     if (abs) {
       selectedImage = abs;

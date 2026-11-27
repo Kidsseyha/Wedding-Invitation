@@ -577,8 +577,20 @@ export default function ShareInvitationModal({
       ? 'preset-modern-wedding'
       : selectedCategory
   );
-  const effectiveCoverImage = !isInvalidCoverValue(selectedTemplate.coverImage)
-    ? selectedTemplate.coverImage
+  const liveCurrentPortrait =
+    isSameTemplateAsCurrent && fallbackCurrentEvent
+      ? (!isInvalidCoverValue(fallbackCurrentEvent.image) ? fallbackCurrentEvent.image : undefined) ||
+        (!isInvalidCoverValue(currentEvent?.config?.image) ? currentEvent?.config?.image : undefined) ||
+        (!isInvalidCoverValue(fallbackCurrentEvent.cover_image) ? fallbackCurrentEvent.cover_image : undefined)
+      : undefined;
+  const mainCouplePortrait =
+    liveCurrentPortrait ||
+    (!isInvalidCoverValue(selectedEventData?.image) ? selectedEventData?.image : undefined) ||
+    (!isInvalidCoverValue(selectedEventData?.config?.image) ? selectedEventData?.config?.image : undefined) ||
+    (!isInvalidCoverValue(selectedEventData?.cover_image) ? selectedEventData?.cover_image : undefined) ||
+    selectedTemplate.coverImage;
+  const effectiveCoverImage = !isInvalidCoverValue(mainCouplePortrait)
+    ? mainCouplePortrait
     : fallbackCategoryCover;
   const selectedGroom = (selectedEventData?.groom || '').trim();
   const selectedBride = (selectedEventData?.bride || '').trim();
@@ -1157,7 +1169,8 @@ Your presence will make our day truly special! 🙏✨`;
                         <img
                           src={effectiveCoverImage}
                           alt="Invitation Cover"
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover object-[50%_22%] group-hover:scale-105 transition-transform duration-700"
                           onError={(e) => {
                             e.currentTarget.onerror = null;
                             e.currentTarget.src = fallbackCategoryCover;

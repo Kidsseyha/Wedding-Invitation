@@ -6,6 +6,9 @@
     "api/og.ts": {
       "includeFiles": "{dist/app.html,firebase-applet-config.json,data/saved_short_links.json}"
     },
+    "api/og-image.ts": {
+      "includeFiles": "firebase-applet-config.json"
+    },
     "api/shorten.ts": {
       "includeFiles": "firebase-applet-config.json"
     },

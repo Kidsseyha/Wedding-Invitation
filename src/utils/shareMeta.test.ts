@@ -234,4 +234,48 @@ test('injectMetaIntoHtml injects Khmer html lang=km and og:locale=km_KH for Verc
   assert.ok(html.includes('សូមគោរពអញ្ជើញ លោក សុខ រតនៈ'));
 });
 
+test('Main Couple Portrait takes priority over envelope_header_image and serves data URLs via /api/og-image', () => {
+  const origin = 'https://wedding-invitation-inky-kappa.vercel.app';
+
+  const resolvedPortrait = resolveEventCoverImage(
+    {
+      id: 'u_alice__cmgrawhnk0003le0434762j7n',
+      eventType: 'wedding',
+      image: 'https://cdn.example.com/main-couple-portrait.jpg',
+      config: {
+        image: 'https://cdn.example.com/main-couple-portrait.jpg',
+        envelope_header_image: 'https://cdn.example.com/wax-seal.jpg',
+      },
+    },
+    'wedding'
+  );
+  assert.equal(resolvedPortrait, 'https://cdn.example.com/main-couple-portrait.jpg');
+
+  const dataUrlMeta = buildInvitationMeta({
+    event: {
+      id: 'u_alice__cmgrawhnk0003le0434762j7n',
+      ownerId: 'u_alice',
+      eventType: 'wedding',
+      name: 'អាពាហ៍ពិពាហ៍ ដារ៉ា & ស្រីពេជ្រ',
+      groom: 'ដារ៉ា',
+      bride: 'ស្រីពេជ្រ',
+      updatedAt: '2026-11-27T10:00:00.000Z',
+      image: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/',
+      config: {
+        image: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/',
+        envelope_header_image: 'https://cdn.example.com/wax-seal.jpg',
+      },
+    },
+    guestName: 'លោក សុខ',
+    queryType: 'wedding',
+    eventId: 'u_alice__cmgrawhnk0003le0434762j7n',
+    origin,
+  });
+
+  assert.ok(dataUrlMeta.image.startsWith(`${origin}/api/og-image?`));
+  assert.ok(dataUrlMeta.image.includes('id=u_alice__cmgrawhnk0003le0434762j7n'));
+  assert.ok(dataUrlMeta.image.includes('ownerId=u_alice'));
+});
+
+
 

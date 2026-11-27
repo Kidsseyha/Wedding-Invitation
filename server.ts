@@ -12,6 +12,9 @@ import {
   fetchShortLinkFromFirestoreRest,
   saveShortLinkToFirestoreRest,
   normalizeCategoryString,
+  resolveCategoryFromHints,
+  resolveEventCoverImage,
+  toAbsoluteHttpUrl,
 } from './src/utils/shareMeta';
 import {
   getEmailDatabaseId,
@@ -1950,6 +1953,58 @@ app.delete('/api/templates/:id', (req, res) => {
   });
 
   res.json({ success: true, deleted, id });
+});
+
+app.get('/api/og-image', async (req, res) => {
+  try {
+    const qStr = (val: unknown) => (Array.isArray(val) ? String(val[0] || '') : typeof val === 'string' ? val : '').trim();
+    const eventId = qStr(req.query.id);
+    const ownerId = qStr(req.query.ownerId);
+    const rawType = qStr(req.query.type || req.query.category);
+    const targetEvent = await resolveTargetEvent({
+      eventId: eventId || undefined,
+      eventType: rawType || undefined,
+      ownerId: ownerId || undefined,
+    });
+
+    const category = resolveCategoryFromHints({
+      queryType: rawType || null,
+      eventType: targetEvent?.eventType,
+      eventId: targetEvent?.id || eventId,
+      eventName: targetEvent?.name,
+    });
+
+    const cover = resolveEventCoverImage(targetEvent, category);
+    if (cover.startsWith('data:image/')) {
+      const match = cover.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+      if (match && match[1] && match[2]) {
+        const buffer = Buffer.from(match[2], 'base64');
+        res.setHeader('Content-Type', match[1]);
+        res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300');
+        return res.status(200).send(buffer);
+      }
+    }
+
+    if (cover.startsWith('/')) {
+      const cleanRel = cover.split('?')[0].replace(/^\/+/, '');
+      const publicCandidate = path.resolve(process.cwd(), 'public', cleanRel);
+      const distCandidate = path.resolve(process.cwd(), 'dist', cleanRel);
+      if (publicCandidate.startsWith(path.resolve(process.cwd(), 'public') + path.sep) && fs.existsSync(publicCandidate)) {
+        res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300');
+        return res.sendFile(publicCandidate);
+      }
+      if (distCandidate.startsWith(path.resolve(process.cwd(), 'dist') + path.sep) && fs.existsSync(distCandidate)) {
+        res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300');
+        return res.sendFile(distCandidate);
+      }
+    }
+
+    const origin = getRequestPublicOrigin(req);
+    return res.redirect(302, toAbsoluteHttpUrl(cover, origin));
+  } catch (err) {
+    console.error('[Server OG Image Error]:', err);
+    return res.redirect(302, '/assets/images/white_arch_columns_wedding_cover_1790394461049.jpg');
+  }
 });
 
     // In-app short link lookup API (used as SPA fallback and metadata inspector for /s/:code)
