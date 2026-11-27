@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Volume2, VolumeX, Music } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Language } from '../types';
@@ -9,9 +9,10 @@ interface AudioPlayerProps {
   hasOpenedEnvelope: boolean;
   language: Language;
   theme?: ThemeMode;
+  children?: ReactNode;
 }
 
-export default function AudioPlayer({ audioUrl, hasOpenedEnvelope, language, theme = 'dark' }: AudioPlayerProps) {
+export default function AudioPlayer({ audioUrl, hasOpenedEnvelope, language, theme = 'dark', children }: AudioPlayerProps) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
@@ -157,6 +158,8 @@ export default function AudioPlayer({ audioUrl, hasOpenedEnvelope, language, the
             )}
           </span>
         </motion.button>
+
+        {children}
 
         {showPrompt && !isPlaying && (
           <motion.div

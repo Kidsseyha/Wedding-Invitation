@@ -32,6 +32,8 @@ import { ThemeMode } from './ThemeToggle';
 import {
   decodeKhmerQueryValue,
   getPublicShareUrl,
+  getCachedShortUrl,
+  getInstantShareUrl,
   shortenUrl,
   getPreferredVercelOrigin,
   PUBLIC_APP_URL,
@@ -457,60 +459,45 @@ export default function ShareInvitationModal({
     khFont: selectedKhmerFontSlug,
   });
 
-  const shortUrl = shortUrlState && shortUrlState.targetUrl === fullUrl ? shortUrlState.shortUrl : '';
+  const cachedShortUrl = getCachedShortUrl(fullUrl, selectedDomainOrigin);
+  const instantShortUrl = isOpen ? getInstantShareUrl(fullUrl, selectedDomainOrigin) : cachedShortUrl;
+  const shortUrl =
+    (shortUrlState && shortUrlState.targetUrl === fullUrl ? shortUrlState.shortUrl : '') ||
+    cachedShortUrl ||
+    instantShortUrl;
 
-  // Automatically fetch short URL whenever fullUrl changes (debounced lightly to prevent keystroke races)
+  // Persist short URL in background immediately whenever fullUrl changes
   useEffect(() => {
     if (!isOpen) return;
     let isMounted = true;
     const reqSeq = ++shortenSeqRef.current;
-    setLoadingShort(true);
 
-    const timerId = window.setTimeout(() => {
-      shortenUrl(fullUrl, selectedDomainOrigin)
-        .then((res) => {
-          if (isMounted && reqSeq === shortenSeqRef.current) {
-            setShortUrlState({ targetUrl: fullUrl, shortUrl: res });
-            setLoadingShort(false);
-          }
-        })
-        .catch(() => {
-          if (isMounted && reqSeq === shortenSeqRef.current) {
-            setLoadingShort(false);
-          }
-        });
-    }, 100);
+    if (cachedShortUrl) {
+      setShortUrlState({ targetUrl: fullUrl, shortUrl: cachedShortUrl });
+      setLoadingShort(false);
+      return;
+    }
+
+    setLoadingShort(false);
+    shortenUrl(fullUrl, selectedDomainOrigin)
+      .then((res) => {
+        if (isMounted && reqSeq === shortenSeqRef.current && res) {
+          setShortUrlState({ targetUrl: fullUrl, shortUrl: res });
+        }
+      })
+      .catch(() => {});
 
     return () => {
       isMounted = false;
-      window.clearTimeout(timerId);
     };
-  }, [isOpen, fullUrl, selectedDomainOrigin]);
+  }, [isOpen, fullUrl, selectedDomainOrigin, cachedShortUrl]);
 
   const activeShareLink = shortUrl || fullUrl;
 
   const resolveFreshShareLink = async (): Promise<string> => {
-    if (pendingTemplateSaveRef.current) {
-      await pendingTemplateSaveRef.current.catch(() => {});
-    }
-    if (shortUrl && !loadingShort) {
-      return shortUrl;
-    }
-    const reqSeq = ++shortenSeqRef.current;
-    setLoadingShort(true);
-    try {
-      const resolved = await shortenUrl(fullUrl, selectedDomainOrigin);
-      if (reqSeq === shortenSeqRef.current) {
-        setShortUrlState({ targetUrl: fullUrl, shortUrl: resolved });
-      }
-      return resolved || fullUrl;
-    } catch {
-      return fullUrl;
-    } finally {
-      if (reqSeq === shortenSeqRef.current) {
-        setLoadingShort(false);
-      }
-    }
+    const immediate = shortUrl || getInstantShareUrl(fullUrl, selectedDomainOrigin) || fullUrl;
+    void shortenUrl(fullUrl, selectedDomainOrigin);
+    return immediate;
   };
 
   const copyTextSync = (text: string): boolean => {
@@ -626,23 +613,23 @@ export default function ShareInvitationModal({
 
   const celebrationCelebrants = (() => {
     if (selectedCategory === 'birthday') {
-      return `🎂 *${selectedGroom || displayHeaderKh}*`;
+      return `🎂 ${selectedGroom || displayHeaderKh}`;
     }
     if (selectedCategory === 'housewarming') {
       return selectedBride && selectedGroom
-        ? `🏡 *${selectedGroom}* & *${selectedBride}*`
-        : `🏡 *${selectedGroom || displayHeaderKh}*`;
+        ? `🏡 ${selectedGroom} & ${selectedBride}`
+        : `🏡 ${selectedGroom || displayHeaderKh}`;
     }
     if (selectedCategory === 'engagement') {
-      return `💍 *${selectedGroom}* & 👰 *${selectedBride}*`;
+      return `💍 ${selectedGroom} & 👰 ${selectedBride}`;
     }
     if (selectedCategory === 'anniversary') {
-      return `👑 *${selectedGroom}* & *${selectedBride}*`;
+      return `👑 ${selectedGroom} & ${selectedBride}`;
     }
     if (selectedSinglePerson) {
-      return `🎉 *${selectedGroom || displayHeaderKh}*`;
+      return `🎉 ${selectedGroom || displayHeaderKh}`;
     }
-    return `🤵 *${selectedGroom}* & 👰 *${selectedBride}*`;
+    return `🤵 ${selectedGroom} & 👰 ${selectedBride}`;
   })();
 
   const effectiveDate = language === 'kh' ? selectedTemplate.dateKh : selectedTemplate.dateEn;
@@ -707,31 +694,31 @@ export default function ShareInvitationModal({
 
   const buildShareMessage = (linkToUse: string) => {
     if (language === 'kh') {
-      return `💌 *${displayHeaderKh}*
+      return `💌 ${displayHeaderKh}
 
-សូមគោរពអញ្ជើញ៖ *${displayShareGuest}*
+សូមគោរពអញ្ជើញ៖ ${displayShareGuest}
 ចូលរួមជាអធិបតី និងជាភ្ញៀវកិត្តិយសក្នុងកម្មវិធីរបស់យើងខ្ញុំ៖
 ${celebrationCelebrants}
 
-📅 *កាលបរិច្ឆេទ*៖ ${effectiveDate}
-📍 *ទីតាំង*៖ ${effectiveLocation}
+📅 កាលបរិច្ឆេទ៖ ${effectiveDate}
+📍 ទីតាំង៖ ${effectiveLocation}
 
-👉 *សូមចុចតំណភ្ជាប់ខាងក្រោមដើម្បីបើកសំបុត្រអញ្ជើញ*៖
+👉 សូមចុចតំណភ្ជាប់ខាងក្រោមដើម្បីបើកសំបុត្រអញ្ជើញ៖
 ${linkToUse}
 
 វត្តមានដ៏ឧត្តុង្គឧត្តមរបស់លោកអ្នក ជាកិត្តិយសដ៏ធំធេងសម្រាប់ក្រុមគ្រួសារយើងខ្ញុំ! 🙏✨`;
     }
 
-    return `💌 *${displayHeaderEn}*
+    return `💌 ${displayHeaderEn}
 
-Cordially Invited: *${displayShareGuest}*
+Cordially Invited: ${displayShareGuest}
 To celebrate with us:
 ${celebrationCelebrants}
 
-📅 *Date*: ${effectiveDate}
-📍 *Venue*: ${effectiveLocation}
+📅 Date: ${effectiveDate}
+📍 Venue: ${effectiveLocation}
 
-👉 *Click the link below to open your personalized invitation*:
+👉 Click the link below to open your personalized invitation:
 ${linkToUse}
 
 Your presence will make our day truly special! 🙏✨`;
@@ -745,29 +732,21 @@ Your presence will make our day truly special! 🙏✨`;
       setTimeout(() => setCopiedLink(false), 2000);
     };
 
-    // Synchronous path when short link is ready and template save finished (preserves click activation in iframes)
-    if (shortUrl && !pendingTemplateSaveRef.current) {
-      handleCopyLink(shortUrl, displayShareGuest);
+    const linkToCopy = shortUrl || getInstantShareUrl(fullUrl, selectedDomainOrigin) || fullUrl;
+    void shortenUrl(fullUrl, selectedDomainOrigin);
+
+    if (copyTextSync(linkToCopy)) {
+      showCopyToast(
+        language === 'kh'
+          ? `បានចម្លងតំណភ្ជាប់សំបុត្រសម្រាប់ ${displayShareGuest}!`
+          : `Copied invitation link for ${displayShareGuest}!`
+      );
       markCopied();
       return;
     }
 
-    setCopyingAction('link');
-    resolveFreshShareLink()
-      .then(async (resolvedLink) => {
-        const ok = await copyTextReliably(resolvedLink);
-        if (ok) {
-          showCopyToast(
-            language === 'kh'
-              ? `បានចម្លងតំណភ្ជាប់សំបុត្រសម្រាប់ ${displayShareGuest}!`
-              : `Copied invitation link for ${displayShareGuest}!`
-          );
-          markCopied();
-        }
-      })
-      .finally(() => {
-        setCopyingAction((prev) => (prev === 'link' ? null : prev));
-      });
+    handleCopyLink(linkToCopy, displayShareGuest);
+    markCopied();
   };
 
   const handleCopyMessage = () => {
@@ -783,48 +762,34 @@ Your presence will make our day truly special! 🙏✨`;
       }, 2500);
     };
 
-    // Synchronous path when short link is ready and template save finished (preserves click activation in iframes)
-    if (shortUrl && !pendingTemplateSaveRef.current) {
-      const messageToCopy = buildShareMessage(shortUrl);
-      if (copyTextSync(messageToCopy)) {
-        onCopied();
-        return;
-      }
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard
-          .writeText(messageToCopy)
-          .then(onCopied)
-          .catch(() => {
-            if (copyTextSync(messageToCopy)) {
-              onCopied();
-            }
-          });
-      }
+    const linkToCopy = shortUrl || getInstantShareUrl(fullUrl, selectedDomainOrigin) || fullUrl;
+    void shortenUrl(fullUrl, selectedDomainOrigin);
+    const messageToCopy = buildShareMessage(linkToCopy);
+
+    if (copyTextSync(messageToCopy)) {
+      onCopied();
       return;
     }
 
-    setCopyingAction('message');
-    resolveFreshShareLink()
-      .then(async (resolvedLink) => {
-        const messageToCopy = buildShareMessage(resolvedLink);
-        const ok = await copyTextReliably(messageToCopy);
-        if (ok) {
-          onCopied();
-        }
-      })
-      .finally(() => {
-        setCopyingAction((prev) => (prev === 'message' ? null : prev));
-      });
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard
+        .writeText(messageToCopy)
+        .then(onCopied)
+        .catch(() => {
+          if (copyTextSync(messageToCopy)) {
+            onCopied();
+          }
+        });
+      return;
+    }
+
+    void copyTextReliably(messageToCopy).then((ok) => {
+      if (ok) onCopied();
+    });
   };
 
-  const openPendingAwareLink = (e: React.MouseEvent<HTMLAnchorElement>, targetUrl: string) => {
-    if (!pendingTemplateSaveRef.current) return;
-    e.preventDefault();
-    pendingTemplateSaveRef.current
-      .catch(() => {})
-      .finally(() => {
-        window.open(targetUrl, '_blank', 'noopener,noreferrer');
-      });
+  const openPendingAwareLink = (_e: React.MouseEvent<HTMLAnchorElement>, _targetUrl: string) => {
+    // Allow immediate navigation without blocking on background cloud sync
   };
 
   const buildTelegramCaption = () => {
@@ -834,48 +799,31 @@ Your presence will make our day truly special! 🙏✨`;
     return `💌 ${displayHeaderEn}\n\nCordially Invited: ${displayShareGuest}\n${celebrationCelebrants.replace(/\*/g, '')}\n\n📅 Date: ${effectiveDate}\n📍 Venue: ${effectiveLocation}`;
   };
 
-  const shareTelegram = async () => {
+  const shareTelegram = () => {
     const caption = buildTelegramCaption();
-    if (!pendingTemplateSaveRef.current && (shortUrl || !loadingShort)) {
-      window.open(
-        `https://t.me/share/url?url=${encodeURIComponent(activeShareLink)}&text=${encodeURIComponent(caption)}`,
-        '_blank',
-        'noopener,noreferrer'
-      );
-      return;
-    }
-    const resolvedLink = await resolveFreshShareLink();
+    const linkToUse = shortUrl || getInstantShareUrl(fullUrl, selectedDomainOrigin) || fullUrl;
+    void shortenUrl(fullUrl, selectedDomainOrigin);
     window.open(
-      `https://t.me/share/url?url=${encodeURIComponent(resolvedLink)}&text=${encodeURIComponent(caption)}`,
+      `https://t.me/share/url?url=${encodeURIComponent(linkToUse)}&text=${encodeURIComponent(caption)}`,
       '_blank',
       'noopener,noreferrer'
     );
   };
 
-  const shareFacebook = async () => {
-    if (!pendingTemplateSaveRef.current && (shortUrl || !loadingShort)) {
-      window.open(
-        `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(activeShareLink)}`,
-        '_blank',
-        'noopener,noreferrer'
-      );
-      return;
-    }
-    const resolvedLink = await resolveFreshShareLink();
+  const shareFacebook = () => {
+    const linkToUse = shortUrl || getInstantShareUrl(fullUrl, selectedDomainOrigin) || fullUrl;
+    void shortenUrl(fullUrl, selectedDomainOrigin);
     window.open(
-      `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(resolvedLink)}`,
+      `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(linkToUse)}`,
       '_blank',
       'noopener,noreferrer'
     );
   };
 
-  const shareWhatsApp = async () => {
-    if (!pendingTemplateSaveRef.current && (shortUrl || !loadingShort)) {
-      window.open(`https://wa.me/?text=${encodeURIComponent(activeMessage)}`, '_blank', 'noopener,noreferrer');
-      return;
-    }
-    const resolvedLink = await resolveFreshShareLink();
-    const resolvedMessage = buildShareMessage(resolvedLink);
+  const shareWhatsApp = () => {
+    const linkToUse = shortUrl || getInstantShareUrl(fullUrl, selectedDomainOrigin) || fullUrl;
+    void shortenUrl(fullUrl, selectedDomainOrigin);
+    const resolvedMessage = buildShareMessage(linkToUse);
     window.open(`https://wa.me/?text=${encodeURIComponent(resolvedMessage)}`, '_blank', 'noopener,noreferrer');
   };
 
@@ -891,37 +839,38 @@ Your presence will make our day truly special! 🙏✨`;
     setBatchGuests(batchGuests.filter((_, i) => i !== index));
   };
 
-  const handleCopyBatchGuestLink = async (name: string) => {
+  const handleCopyBatchGuestLink = (name: string) => {
     const cleanName = name.trim();
     if (!cleanName) return;
-    setCopyingGuestKey(cleanName);
-    try {
-      if (pendingTemplateSaveRef.current) {
-        await pendingTemplateSaveRef.current.catch(() => {});
-      }
-      const url = getPublicShareUrl(cleanName, activeEventId, selectedCategory, {
-        customOrigin: selectedDomainOrigin,
-        lang: targetShareLang,
-        ownerId: effectiveScope,
-        khFont: selectedKhmerFontSlug,
-      });
-      const resolvedUrl = await shortenUrl(url, selectedDomainOrigin).catch(() => url);
-      const finalUrl = resolvedUrl || url;
-      const ok = await copyTextReliably(finalUrl);
-      if (ok) {
-        showCopyToast(
-          language === 'kh'
-            ? `បានចម្លងតំណភ្ជាប់សំបុត្រសម្រាប់ ${cleanName}!`
-            : `Copied invitation link for ${cleanName}!`
-        );
-        setCopiedGuestKey(cleanName);
-        setTimeout(() => {
-          setCopiedGuestKey((prev) => (prev === cleanName ? null : prev));
-        }, 2000);
-      }
-    } finally {
-      setCopyingGuestKey((prev) => (prev === cleanName ? null : prev));
+    const url = getPublicShareUrl(cleanName, activeEventId, selectedCategory, {
+      customOrigin: selectedDomainOrigin,
+      lang: targetShareLang,
+      ownerId: effectiveScope,
+      khFont: selectedKhmerFontSlug,
+    });
+    const finalUrl = getInstantShareUrl(url, selectedDomainOrigin) || url;
+    void shortenUrl(url, selectedDomainOrigin);
+
+    const onRowCopied = () => {
+      showCopyToast(
+        language === 'kh'
+          ? `បានចម្លងតំណភ្ជាប់សំបុត្រសម្រាប់ ${cleanName}!`
+          : `Copied invitation link for ${cleanName}!`
+      );
+      setCopiedGuestKey(cleanName);
+      setTimeout(() => {
+        setCopiedGuestKey((prev) => (prev === cleanName ? null : prev));
+      }, 2000);
+    };
+
+    if (copyTextSync(finalUrl)) {
+      onRowCopied();
+      return;
     }
+
+    void copyTextReliably(finalUrl).then((ok) => {
+      if (ok) onRowCopied();
+    });
   };
 
   // QR code encoding data: uses standard high-contrast black on white
@@ -1346,7 +1295,7 @@ Your presence will make our day truly special! 🙏✨`;
                           disabled={copyingAction === 'link'}
                           className={`w-full text-xs ${isLight ? 'text-amber-800 hover:text-amber-950 bg-white hover:bg-amber-50' : 'text-amber-300 hover:text-amber-100 bg-black/40 hover:bg-amber-500/15'} font-khmer font-semibold flex items-center justify-center gap-1.5 border border-amber-400/40 px-3 py-2 rounded-xl transition-colors cursor-pointer disabled:opacity-70`}
                         >
-                          {copyingAction === 'link' || (loadingShort && !shortUrl) ? (
+                          {copyingAction === 'link' ? (
                             <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
                           ) : copiedLink ? (
                             <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
@@ -1361,7 +1310,7 @@ Your presence will make our day truly special! 🙏✨`;
                           disabled={copyingAction === 'message'}
                           className={`w-full text-xs ${isLight ? 'text-amber-950 hover:text-amber-950 bg-amber-400/35 hover:bg-amber-400/50' : 'text-amber-200 hover:text-amber-100 bg-amber-500/20 hover:bg-amber-500/30'} font-khmer font-bold flex items-center justify-center gap-1.5 border border-amber-500/50 px-3 py-2 rounded-xl transition-colors cursor-pointer disabled:opacity-70`}
                         >
-                          {copyingAction === 'message' || (loadingShort && !shortUrl) ? (
+                          {copyingAction === 'message' ? (
                             <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
                           ) : copiedMessage ? (
                             <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />

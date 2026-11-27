@@ -49,6 +49,7 @@ import {
   Moon,
   Sun,
   Database,
+  Menu,
 } from 'lucide-react';
 import { WEDDING_EVENT } from './data/weddingData';
 import { sanitizeWeddingEvent, VERIFIED_WEDDING_COVER } from './utils/sanitizeEvent';
@@ -145,10 +146,34 @@ export default function App() {
   const [showAnniversaryStoryEditor, setShowAnniversaryStoryEditor] = useState(false);
   const [showAddGuestModal, setShowAddGuestModal] = useState(false);
   const [showEventTypeModal, setShowEventTypeModal] = useState(false);
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
   const [theme, setTheme] = useState<ThemeMode>(() => {
     return (localStorage.getItem('wedding_theme') as ThemeMode) || 'dark';
   });
   const [isThemeTransitioning, setIsThemeTransitioning] = useState(false);
+
+  useEffect(() => {
+    if (!showActionsMenu) return;
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      if (actionsMenuRef.current && !actionsMenuRef.current.contains(e.target as Node)) {
+        setShowActionsMenu(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowActionsMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showActionsMenu]);
 
   const wsContextRef = useRef<{
     eventId: string;
@@ -2756,164 +2781,14 @@ export default function App() {
         </div>
       )}
 
-      {/* Floating Top Right Controls: Music Player, Share & Edit Button */}
+      {/* Floating Top Right Controls: Music Player, Reload Button & Admin Controls */}
       <AudioPlayer
         audioUrl={config.background_music}
         hasOpenedEnvelope={hasOpenedEnvelope}
         language={language}
         theme={theme}
-      />
-
-      <div
-        className="fixed right-2.5 sm:right-4 z-40 flex max-w-[calc(100vw-1.25rem)] top-[max(calc(env(safe-area-inset-top)+48px),54px)] sm:top-16 flex-row flex-wrap justify-end items-center gap-1.5 sm:flex-col sm:items-end sm:gap-2"
       >
-        {/* Admin and Auth Controls (hidden for shared link viewers so they only see Reload & Music) */}
-        {!isViewer ? (
-          <>
-            {/* PlanEssential Event Template Manager & Creator Button */}
-            <motion.button
-              id="planessential-template-btn"
-              type="button"
-              onClick={() => setShowEventTypeModal(true)}
-              onTap={() => setShowEventTypeModal(true)}
-              whileHover={{ scale: 1.05, y: -2 }}
-              whileTap={{ scale: 0.94 }}
-              className="group relative flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full border border-amber-300/90 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 text-amber-950 font-bold shadow-[0_4px_22px_rgba(245,158,11,0.5)] backdrop-blur-md hover:from-amber-300 hover:to-amber-100 transition-all ring-2 ring-amber-400/70 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 cursor-pointer select-none"
-              title={language === 'kh' ? `គ្រប់គំរូប្លង់ទាំងអស់ / All Templates (${currentTemplateTypeLabel})` : `All Templates: ${currentTemplateTypeLabel}`}
-            >
-              <div className="flex items-center justify-center w-5 h-5 rounded-full bg-amber-950/20 group-hover:bg-amber-950/30 transition-colors shadow-xs">
-                <currentTemplateTypeInfo.icon className="w-3.5 h-3.5 text-amber-950 shrink-0" />
-              </div>
-              <span className={`text-xs sm:text-[13.5px] font-bold whitespace-nowrap tracking-tight ${language === 'kh' ? 'font-khmer' : 'font-sans'}`}>
-                {language === 'kh' ? 'គ្រប់គំរូប្លង់' : 'All Templates'}
-              </span>
-              <span
-                id="active-template-type-badge"
-                className="inline-flex items-center gap-1 text-[10.5px] sm:text-[11.5px] font-khmer px-2 py-0.5 sm:px-2.5 rounded-full bg-amber-950/30 text-amber-950 font-bold border border-amber-950/40 shadow-[inset_0_1px_2px_rgba(0,0,0,0.1)] transition-all tracking-wide ring-1 ring-amber-900/10"
-              >
-                <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-emerald-700 animate-pulse inline-block ring-2 ring-emerald-700/40" />
-                {currentTemplateTypeLabel}
-              </span>
-            </motion.button>
-
-            {/* Edit Event / Template & Settings Button */}
-            <motion.button
-              id="open-editor-btn"
-              onClick={() => handleOpenEditor()}
-              onTap={() => handleOpenEditor()}
-              whileHover={{ scale: 1.05, y: -2 }}
-              whileTap={{ scale: 0.94 }}
-              className="group relative flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full border border-amber-300/90 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 text-amber-950 font-bold shadow-[0_4px_22px_rgba(245,158,11,0.5)] backdrop-blur-md hover:from-amber-300 hover:to-amber-100 transition-all ring-2 ring-amber-400/70 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 cursor-pointer select-none"
-              title={language === 'kh' ? 'ការកំណត់ & កែសម្រួល / Settings & Edit' : 'Settings & Edit All'}
-            >
-              <div className="flex items-center justify-center w-5 h-5 rounded-full bg-amber-950/20 group-hover:bg-amber-950/30 transition-colors shadow-xs">
-                <SlidersHorizontal className="w-3.5 h-3.5 text-amber-950 shrink-0" />
-              </div>
-              <span className={`text-xs sm:text-[13.5px] font-bold whitespace-nowrap tracking-tight ${language === 'kh' ? 'font-khmer' : 'font-sans'}`}>
-                {language === 'kh' ? 'ការកំណត់ & កែ' : 'Settings & Edit'}
-              </span>
-              <span className="absolute -top-1 -right-1 flex h-3 w-3" title="Server Synced">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border-2 border-[#141210]"></span>
-              </span>
-            </motion.button>
-
-            {/* Add Guest Button */}
-            <motion.button
-              id="add-guest-btn"
-              onClick={handleOpenAddGuest}
-              onTap={handleOpenAddGuest}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.94 }}
-              className="group relative flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full border border-amber-400/70 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 text-amber-950 font-bold shadow-2xl backdrop-blur-md hover:from-amber-300 hover:to-amber-200 transition-all ring-2 ring-amber-400/40 whitespace-nowrap"
-              title={language === 'kh' ? 'បន្ថែមឈ្មោះភ្ញៀវលើលិខិតអញ្ជើញ' : 'Add Guest'}
-            >
-              <UserPlus className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-950 shrink-0" />
-              <span className={`font-bold text-xs sm:text-[14px] whitespace-nowrap ${language === 'kh' ? 'font-khmer' : 'font-sans'}`}>
-                {language === 'kh' ? 'បន្ថែមភ្ញៀវ' : 'Add Guest'}
-              </span>
-            </motion.button>
-
-            {/* Logout Button */}
-            <motion.button
-              onClick={() => {
-                hasSavedLocallyRef.current = false;
-                setLocalAdminOverride(false);
-                setLoggedInIdentifier('');
-                setAuthUser(null);
-                localStorage.removeItem('wedding_admin_override');
-                localStorage.removeItem('wedding_logged_in_identifier');
-                auth.signOut();
-                if (typeof window !== 'undefined' && !isFromShareLink) {
-                  try {
-                    const cleanUrl = new URL(window.location.href);
-                    cleanUrl.searchParams.delete('id');
-                    cleanUrl.searchParams.delete('type');
-                    cleanUrl.searchParams.delete('category');
-                    cleanUrl.searchParams.delete('ownerId');
-                    window.history.replaceState({}, '', normalizeShareUrlEncoding(cleanUrl.toString()));
-                  } catch {}
-                }
-                setEvent(sanitizeWeddingEvent({
-                  ...WEDDING_EVENT,
-                  id: DEFAULT_PRESET_EVENT_ID,
-                  templateId: DEFAULT_PRESET_EVENT_ID,
-                  eventType: 'wedding',
-                }));
-              }}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.94 }}
-              className="group relative flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full border border-red-500/50 bg-gradient-to-br from-black/95 via-black/95 to-black/95 text-red-400 shadow-[0_4px_18px_rgba(0,0,0,0.5)] backdrop-blur-md hover:border-red-400 hover:text-red-300 transition-all ring-1 ring-red-500/20"
-              title={language === 'kh' ? 'ចាកចេញ / Logout' : 'Logout'}
-            >
-              <LogOut className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-red-400 group-hover:text-red-300" />
-              <span className="text-xs sm:text-[14px] font-khmer font-bold transition-colors whitespace-nowrap">
-                {language === 'kh' ? 'ចាកចេញ' : 'Logout'}
-              </span>
-            </motion.button>
-          </>
-        ) : !isSharedViewer ? (
-          /* Login Button - Only visible if not admin and not a guest viewing a shared link */
-          <motion.button
-            id="admin-login-btn"
-            type="button"
-            onClick={() => handleAdminLogin()}
-            onTap={() => handleAdminLogin()}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.94 }}
-            style={{ cursor: 'pointer', pointerEvents: 'auto' }}
-            className="group relative z-50 flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full border border-emerald-500/60 bg-gradient-to-br from-black/95 via-[#0e1611]/95 to-[#0d1c14]/95 text-emerald-400 shadow-[0_4px_22px_rgba(16,185,129,0.35)] backdrop-blur-md hover:border-emerald-400 hover:text-emerald-300 transition-all ring-2 ring-emerald-500/30"
-            title={language === 'kh' ? 'ចូលគណនី / Login' : 'Login'}
-          >
-            <LogIn className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-400 group-hover:text-emerald-300" />
-            <span className="text-xs sm:text-[14px] font-khmer font-bold transition-colors whitespace-nowrap">
-              {language === 'kh' ? 'ចូលគណនី' : 'Login'}
-            </span>
-          </motion.button>
-        ) : null}
-
-        {/* Share Button (hidden for shared link viewers so they see Reload & Music only) */}
-        {!isSharedViewer && (
-          <motion.button
-            id="share-btn"
-            onClick={() => {
-              setShowShareModal(true);
-            }}
-            whileHover={{ scale: 1.05, y: -2 }}
-            whileTap={{ scale: 0.94 }}
-            className="group relative flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full border border-amber-400/80 bg-gradient-to-br from-black/95 via-black/95 to-black/95 text-amber-300 shadow-[0_6px_25px_rgba(245,158,11,0.3)] backdrop-blur-md hover:border-amber-300 hover:text-amber-100 hover:shadow-[0_8px_30px_rgba(245,158,11,0.55)] transition-all ring-2 ring-amber-400/50 cursor-pointer select-none"
-            title={language === 'kh' ? 'ចែករំលែកលិខិតអញ្ជើញ / Share Invitation' : 'Share Invitation'}
-          >
-            <div className="p-1 rounded-full bg-amber-400/15 group-hover:bg-amber-400/30 transition-colors">
-              <Share2 className="w-3.5 h-3.5 text-amber-300 group-hover:text-amber-200 transition-colors" />
-            </div>
-            <span className="text-xs sm:text-[14px] font-khmer font-bold text-amber-200 group-hover:text-white transition-colors whitespace-nowrap">
-              {language === 'kh' ? 'ចែករំលែក' : 'Share'}
-            </span>
-          </motion.button>
-        )}
-
-        {/* Reload Page Button */}
+        {/* Reload Page Button directly below Music */}
         <motion.button
           id="reload-refresh-btn"
           type="button"
@@ -2939,48 +2814,273 @@ export default function App() {
               : (language === 'kh' ? 'ផ្ទុកឡើងវិញ' : 'Reload')}
           </span>
         </motion.button>
+      </AudioPlayer>
 
-        {/* Manage Users Data Button for Owner (seyhayoeurn2017@gmail.com) & Admin Only */}
-        {!isViewer && (checkIsCurrentActorOwner() || checkIsCurrentActorAdmin()) && (
-          <motion.button
-            id="manage-users-data-btn"
-            onClick={() => setShowAdminUsersModal(true)}
-            whileHover={{ scale: 1.05, y: -2 }}
-            whileTap={{ scale: 0.94 }}
-            className={`group relative flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full border ${
-              checkIsCurrentActorOwner()
-                ? 'border-amber-400 bg-gradient-to-r from-amber-950/95 via-black to-amber-950/95 text-amber-200 ring-2 ring-amber-400/60 shadow-[0_4px_25px_rgba(245,158,11,0.55)] hover:border-amber-300'
-                : 'border-amber-500/60 bg-gradient-to-br from-black/95 via-neutral-900 to-black text-amber-200 ring-1 ring-amber-500/30 shadow-[0_4px_18px_rgba(0,0,0,0.5)] hover:border-amber-400'
-            } backdrop-blur-md hover:text-amber-100 hover:shadow-[0_4px_28px_rgba(245,158,11,0.65)] transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:ring-offset-black cursor-pointer`}
-            title={
-              checkIsCurrentActorOwner()
-                ? (language === 'kh' ? '👑 គ្រប់គ្រងអ្នកប្រើប្រាស់ (Owner - សិទ្ធិពេញលេញ)' : '👑 Users Data (Owner - Full Control)')
-                : (language === 'kh' ? 'ទិន្នន័យអ្នកប្រើប្រាស់' : 'Users Data')
-            }
-          >
-            <div className={`p-1 rounded-full ${checkIsCurrentActorOwner() ? 'bg-amber-400/35 ring-1 ring-amber-300/50' : 'bg-amber-500/20'} group-hover:bg-amber-400/40 transition-colors`}>
-              {checkIsCurrentActorOwner() ? (
-                <Crown className="w-3.5 h-3.5 text-amber-300 group-hover:scale-110 group-hover:text-amber-100 transition-all duration-300" />
-              ) : (
-                <Users className="w-3.5 h-3.5 text-amber-400 group-hover:scale-110 group-hover:text-amber-200 transition-all duration-300" />
-              )}
-            </div>
-            <span className="text-xs sm:text-[14px] font-khmer font-medium text-neutral-200 group-hover:text-amber-100 transition-colors whitespace-nowrap flex items-center gap-1.5">
-              {checkIsCurrentActorOwner() ? (
-                <>
-                  <span className="text-amber-300 font-bold flex items-center gap-1">
-                    👑 Owner
-                  </span>
-                  <span>{language === 'kh' ? 'ទិន្នន័យអ្នកប្រើ' : 'Users Data'}</span>
-                </>
-              ) : (
-                language === 'kh' ? 'ទិន្នន័យអ្នកប្រើប្រាស់' : 'Users Data'
-              )}
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-400/30 text-amber-200 border border-amber-400/40">
-                {dbUsersList.length}
+      <div
+        className="fixed right-2.5 sm:right-4 z-40 flex max-w-[calc(100vw-1.25rem)] top-[max(calc(env(safe-area-inset-top)+92px),98px)] sm:top-28 flex-col items-end gap-2"
+      >
+        {/* Single "Menu" button housing all floating action buttons (hidden for shared link viewers) */}
+        {!isSharedViewer && (
+          <div ref={actionsMenuRef} className="relative flex flex-col items-end">
+            <motion.button
+              id="floating-menu-btn"
+              type="button"
+              aria-expanded={showActionsMenu}
+              aria-haspopup="menu"
+              onClick={() => setShowActionsMenu((prev) => !prev)}
+              whileHover={{ scale: 1.05, y: -1 }}
+              whileTap={{ scale: 0.94 }}
+              className="group relative flex items-center gap-1.5 sm:gap-2 px-3 py-1.5 sm:px-3.5 sm:py-2 min-h-[38px] sm:min-h-[40px] rounded-full border border-amber-400/80 bg-gradient-to-br from-black/95 via-neutral-900 to-black text-amber-200 shadow-[0_6px_25px_rgba(245,158,11,0.35)] backdrop-blur-md hover:border-amber-300 hover:text-amber-100 hover:shadow-[0_8px_28px_rgba(245,158,11,0.5)] transition-all ring-1 ring-amber-400/50 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 cursor-pointer select-none"
+              title={language === 'kh' ? 'ម៉ឺនុយ / Menu' : 'Menu'}
+            >
+              <div className="p-1 rounded-full bg-amber-500/20 group-hover:bg-amber-400/30 transition-colors">
+                {showActionsMenu ? (
+                  <X className="w-3.5 h-3.5 text-amber-300 group-hover:text-amber-100 transition-colors" />
+                ) : (
+                  <Menu className="w-3.5 h-3.5 text-amber-300 group-hover:text-amber-100 transition-colors" />
+                )}
+              </div>
+              <span className="text-xs sm:text-[14px] font-sans font-bold text-amber-100 group-hover:text-white transition-colors whitespace-nowrap">
+                Menu
               </span>
-            </span>
-          </motion.button>
+              <ChevronDown
+                className={`w-3.5 h-3.5 text-amber-300/90 transition-transform duration-200 ${showActionsMenu ? 'rotate-180' : ''}`}
+              />
+              {!isViewer && (
+                <span className="flex h-2.5 w-2.5" title="Server Synced">
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 border border-[#141210]"></span>
+                </span>
+              )}
+            </motion.button>
+
+            <AnimatePresence>
+              {showActionsMenu && (
+                <motion.div
+                  id="floating-actions-dropdown"
+                  role="menu"
+                  initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                  transition={{ duration: 0.16, ease: 'easeOut' }}
+                  className="absolute right-0 top-full mt-2 z-50 flex flex-col items-stretch gap-2 p-2.5 rounded-2xl border border-amber-400/60 bg-black/95 backdrop-blur-xl shadow-[0_18px_50px_rgba(0,0,0,0.88)] ring-1 ring-amber-400/25 min-w-[220px] max-w-[calc(100vw-1.5rem)] max-h-[calc(100vh-175px)] overflow-y-auto"
+                >
+                  {!isViewer ? (
+                    <>
+                      {/* PlanEssential Event Template Manager & Creator Button */}
+                      <motion.button
+                        id="planessential-template-btn"
+                        type="button"
+                        onClick={() => {
+                          setShowActionsMenu(false);
+                          setShowEventTypeModal(true);
+                        }}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.97 }}
+                        className="group relative w-full flex items-center justify-between gap-2 px-3 py-2 rounded-full border border-amber-300/90 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 text-amber-950 font-bold shadow-[0_4px_18px_rgba(245,158,11,0.4)] hover:from-amber-300 hover:to-amber-100 transition-all ring-1 ring-amber-400/70 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 cursor-pointer select-none"
+                        title={language === 'kh' ? `គ្រប់គំរូប្លង់ទាំងអស់ / All Templates (${currentTemplateTypeLabel})` : `All Templates: ${currentTemplateTypeLabel}`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="flex items-center justify-center w-5 h-5 rounded-full bg-amber-950/20 group-hover:bg-amber-950/30 transition-colors shrink-0">
+                            <currentTemplateTypeInfo.icon className="w-3.5 h-3.5 text-amber-950 shrink-0" />
+                          </div>
+                          <span className={`text-xs sm:text-[13.5px] font-bold whitespace-nowrap tracking-tight ${language === 'kh' ? 'font-khmer' : 'font-sans'}`}>
+                            {language === 'kh' ? 'គ្រប់គំរូប្លង់' : 'All Templates'}
+                          </span>
+                        </div>
+                        <span
+                          id="active-template-type-badge"
+                          className="inline-flex items-center gap-1 text-[10.5px] font-khmer px-2 py-0.5 rounded-full bg-amber-950/30 text-amber-950 font-bold border border-amber-950/40 shrink-0"
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-700 animate-pulse inline-block" />
+                          {currentTemplateTypeLabel}
+                        </span>
+                      </motion.button>
+
+                      {/* Edit Event / Template & Settings Button */}
+                      <motion.button
+                        id="open-editor-btn"
+                        type="button"
+                        onClick={() => {
+                          setShowActionsMenu(false);
+                          handleOpenEditor();
+                        }}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.97 }}
+                        className="group relative w-full flex items-center gap-2 px-3 py-2 rounded-full border border-amber-300/90 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 text-amber-950 font-bold shadow-[0_4px_18px_rgba(245,158,11,0.4)] hover:from-amber-300 hover:to-amber-100 transition-all ring-1 ring-amber-400/70 whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 cursor-pointer select-none"
+                        title={language === 'kh' ? 'ការកំណត់ & កែសម្រួល / Settings & Edit' : 'Settings & Edit All'}
+                      >
+                        <div className="flex items-center justify-center w-5 h-5 rounded-full bg-amber-950/20 group-hover:bg-amber-950/30 transition-colors shrink-0">
+                          <SlidersHorizontal className="w-3.5 h-3.5 text-amber-950 shrink-0" />
+                        </div>
+                        <span className={`text-xs sm:text-[13.5px] font-bold whitespace-nowrap tracking-tight ${language === 'kh' ? 'font-khmer' : 'font-sans'}`}>
+                          {language === 'kh' ? 'ការកំណត់ & កែ' : 'Settings & Edit'}
+                        </span>
+                        <span className="ml-auto flex h-2.5 w-2.5 shrink-0" title="Server Synced">
+                          <span className="animate-ping absolute inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-600 border border-amber-950/40"></span>
+                        </span>
+                      </motion.button>
+
+                      {/* Add Guest Button */}
+                      <motion.button
+                        id="add-guest-btn"
+                        type="button"
+                        onClick={() => {
+                          setShowActionsMenu(false);
+                          handleOpenAddGuest();
+                        }}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.97 }}
+                        className="group relative w-full flex items-center gap-2 px-3 py-2 rounded-full border border-amber-400/70 bg-gradient-to-r from-amber-400 via-amber-300 to-amber-400 text-amber-950 font-bold shadow-lg hover:from-amber-300 hover:to-amber-200 transition-all ring-1 ring-amber-400/40 whitespace-nowrap cursor-pointer select-none"
+                        title={language === 'kh' ? 'បន្ថែមឈ្មោះភ្ញៀវលើលិខិតអញ្ជើញ' : 'Add Guest'}
+                      >
+                        <div className="flex items-center justify-center w-5 h-5 rounded-full bg-amber-950/20 group-hover:bg-amber-950/30 transition-colors shrink-0">
+                          <UserPlus className="w-3.5 h-3.5 text-amber-950 shrink-0" />
+                        </div>
+                        <span className={`font-bold text-xs sm:text-[13.5px] whitespace-nowrap ${language === 'kh' ? 'font-khmer' : 'font-sans'}`}>
+                          {language === 'kh' ? 'បន្ថែមភ្ញៀវ' : 'Add Guest'}
+                        </span>
+                      </motion.button>
+                    </>
+                  ) : (
+                    /* Login Button inside Menu when logged out */
+                    <motion.button
+                      id="admin-login-btn"
+                      type="button"
+                      onClick={() => {
+                        setShowActionsMenu(false);
+                        handleAdminLogin();
+                      }}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.97 }}
+                      className="group relative w-full flex items-center gap-2 px-3 py-2 rounded-full border border-emerald-500/60 bg-gradient-to-br from-black/95 via-[#0e1611]/95 to-[#0d1c14]/95 text-emerald-400 shadow-[0_4px_16px_rgba(16,185,129,0.25)] hover:border-emerald-400 hover:text-emerald-300 transition-all ring-1 ring-emerald-500/30 cursor-pointer select-none"
+                      title={language === 'kh' ? 'ចូលគណនី / Login' : 'Login'}
+                    >
+                      <div className="p-1 rounded-full bg-emerald-500/15 shrink-0">
+                        <LogIn className="w-3.5 h-3.5 text-emerald-400 group-hover:text-emerald-300" />
+                      </div>
+                      <span className="text-xs sm:text-[13.5px] font-khmer font-bold transition-colors whitespace-nowrap">
+                        {language === 'kh' ? 'ចូលគណនី' : 'Login'}
+                      </span>
+                    </motion.button>
+                  )}
+
+                  {/* Share Button */}
+                  <motion.button
+                    id="share-btn"
+                    type="button"
+                    onClick={() => {
+                      setShowActionsMenu(false);
+                      setShowShareModal(true);
+                    }}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.97 }}
+                    className="group relative w-full flex items-center gap-2 px-3 py-2 rounded-full border border-amber-400/80 bg-gradient-to-br from-black/95 via-neutral-900 to-black text-amber-300 shadow-[0_4px_18px_rgba(245,158,11,0.25)] hover:border-amber-300 hover:text-amber-100 transition-all ring-1 ring-amber-400/40 cursor-pointer select-none"
+                    title={language === 'kh' ? 'ចែករំលែកលិខិតអញ្ជើញ / Share Invitation' : 'Share Invitation'}
+                  >
+                    <div className="p-1 rounded-full bg-amber-400/15 group-hover:bg-amber-400/30 transition-colors shrink-0">
+                      <Share2 className="w-3.5 h-3.5 text-amber-300 group-hover:text-amber-200 transition-colors" />
+                    </div>
+                    <span className="text-xs sm:text-[13.5px] font-khmer font-bold text-amber-200 group-hover:text-white transition-colors whitespace-nowrap">
+                      {language === 'kh' ? 'ចែករំលែក' : 'Share'}
+                    </span>
+                  </motion.button>
+
+                  {/* Manage Users Data Button for Owner & Admin Only */}
+                  {!isViewer && (checkIsCurrentActorOwner() || checkIsCurrentActorAdmin()) && (
+                    <motion.button
+                      id="manage-users-data-btn"
+                      type="button"
+                      onClick={() => {
+                        setShowActionsMenu(false);
+                        setShowAdminUsersModal(true);
+                      }}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.97 }}
+                      className={`group relative w-full flex items-center gap-2 px-3 py-2 rounded-full border ${
+                        checkIsCurrentActorOwner()
+                          ? 'border-amber-400 bg-gradient-to-r from-amber-950/95 via-black to-amber-950/95 text-amber-200 ring-1 ring-amber-400/60 shadow-[0_4px_20px_rgba(245,158,11,0.45)] hover:border-amber-300'
+                          : 'border-amber-500/60 bg-gradient-to-br from-black/95 via-neutral-900 to-black text-amber-200 ring-1 ring-amber-500/30 shadow-[0_4px_14px_rgba(0,0,0,0.5)] hover:border-amber-400'
+                      } hover:text-amber-100 transition-all whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 cursor-pointer select-none`}
+                      title={
+                        checkIsCurrentActorOwner()
+                          ? (language === 'kh' ? '👑 គ្រប់គ្រងអ្នកប្រើប្រាស់ (Owner - សិទ្ធិពេញលេញ)' : '👑 Users Data (Owner - Full Control)')
+                          : (language === 'kh' ? 'ទិន្នន័យអ្នកប្រើប្រាស់' : 'Users Data')
+                      }
+                    >
+                      <div className={`p-1 rounded-full ${checkIsCurrentActorOwner() ? 'bg-amber-400/35 ring-1 ring-amber-300/50' : 'bg-amber-500/20'} group-hover:bg-amber-400/40 transition-colors shrink-0`}>
+                        {checkIsCurrentActorOwner() ? (
+                          <Crown className="w-3.5 h-3.5 text-amber-300 group-hover:text-amber-100 transition-colors" />
+                        ) : (
+                          <Users className="w-3.5 h-3.5 text-amber-400 group-hover:text-amber-200 transition-colors" />
+                        )}
+                      </div>
+                      <span className="text-xs sm:text-[13.5px] font-khmer font-medium text-neutral-200 group-hover:text-amber-100 transition-colors whitespace-nowrap flex items-center gap-1.5 flex-1">
+                        {checkIsCurrentActorOwner() ? (
+                          <>
+                            <span className="text-amber-300 font-bold flex items-center gap-1">
+                              👑 Owner
+                            </span>
+                            <span>{language === 'kh' ? 'ទិន្នន័យអ្នកប្រើ' : 'Users Data'}</span>
+                          </>
+                        ) : (
+                          language === 'kh' ? 'ទិន្នន័យអ្នកប្រើប្រាស់' : 'Users Data'
+                        )}
+                        <span className="ml-auto px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-amber-400/30 text-amber-200 border border-amber-400/40">
+                          {dbUsersList.length}
+                        </span>
+                      </span>
+                    </motion.button>
+                  )}
+
+                  {/* Logout Button */}
+                  {!isViewer && (
+                    <motion.button
+                      id="logout-btn"
+                      type="button"
+                      onClick={() => {
+                        setShowActionsMenu(false);
+                        hasSavedLocallyRef.current = false;
+                        setLocalAdminOverride(false);
+                        setLoggedInIdentifier('');
+                        setAuthUser(null);
+                        localStorage.removeItem('wedding_admin_override');
+                        localStorage.removeItem('wedding_logged_in_identifier');
+                        auth.signOut();
+                        if (typeof window !== 'undefined' && !isFromShareLink) {
+                          try {
+                            const cleanUrl = new URL(window.location.href);
+                            cleanUrl.searchParams.delete('id');
+                            cleanUrl.searchParams.delete('type');
+                            cleanUrl.searchParams.delete('category');
+                            cleanUrl.searchParams.delete('ownerId');
+                            window.history.replaceState({}, '', normalizeShareUrlEncoding(cleanUrl.toString()));
+                          } catch {}
+                        }
+                        setEvent(sanitizeWeddingEvent({
+                          ...WEDDING_EVENT,
+                          id: DEFAULT_PRESET_EVENT_ID,
+                          templateId: DEFAULT_PRESET_EVENT_ID,
+                          eventType: 'wedding',
+                        }));
+                      }}
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.97 }}
+                      className="group relative w-full flex items-center gap-2 px-3 py-2 rounded-full border border-red-500/50 bg-gradient-to-br from-black/95 via-black/95 to-black/95 text-red-400 shadow-[0_4px_14px_rgba(0,0,0,0.45)] hover:border-red-400 hover:text-red-300 transition-all ring-1 ring-red-500/20 cursor-pointer select-none"
+                      title={language === 'kh' ? 'ចាកចេញ / Logout' : 'Logout'}
+                    >
+                      <div className="p-1 rounded-full bg-red-500/15 shrink-0">
+                        <LogOut className="w-3.5 h-3.5 text-red-400 group-hover:text-red-300" />
+                      </div>
+                      <span className="text-xs sm:text-[13.5px] font-khmer font-bold transition-colors whitespace-nowrap">
+                        {language === 'kh' ? 'ចាកចេញ' : 'Logout'}
+                      </span>
+                    </motion.button>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         )}
 
         {/* Authenticated Google User Badge - With Dedicated Database indicator */}

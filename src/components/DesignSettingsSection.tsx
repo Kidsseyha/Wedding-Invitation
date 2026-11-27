@@ -663,6 +663,8 @@ export default function DesignSettingsSection({
       {/* Inserted Top Content (e.g. Cover Preview) right below Title Header */}
       {children}
 
+      {currentCategory !== 'wedding' && currentCategory !== 'anniversary' && (
+        <>
       {/* Colors Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {/* 1. ពណ៌អក្សរខាងមុខ */}
@@ -1292,6 +1294,8 @@ export default function DesignSettingsSection({
           </div>
         </div>
       </div>
+        </>
+      )}
 
       {/* 2.6. អក្សរកាត់ឈ្មោះកូនប្រុស និងកូនស្រីលើ Cover (Cover Monogram Short Text & Styles) */}
       {currentCategory !== 'birthday' &&

@@ -2272,38 +2272,24 @@ app.post('/api/shorten', async (req, res) => {
       }
     };
 
-    // Check if an identical URL is already cached/saved
+    // Check if an identical URL is already cached/saved locally
     const existingLinks = getShortLinks();
     for (const [existingCode, targetUrl] of Object.entries(existingLinks)) {
       if (targetUrl === cleanUrl) {
-        const persistedToFirestore = await saveShortLinkToFirestoreRest({
+        // Sync to Firestore in background without blocking the response
+        void saveShortLinkToFirestoreRest({
           projectId: rawFirebaseConfig.projectId,
           databaseId: (rawFirebaseConfig as any).firestoreDatabaseId || '(default)',
           code: existingCode,
           url: cleanUrl,
           lang: targetLang,
           apiKey: rawFirebaseConfig.apiKey,
-        });
-        if (isRemoteOrigin && !persistedToFirestore) {
-          const remote = await tryRemoteShorten();
-          if (!remote) {
-            return res.status(503).json({
-              success: false,
-              persisted: false,
-              fallbackUrl: cleanUrl,
-              error: 'Remote short link persistence unavailable',
-            });
+          timeoutMs: 1500,
+        }).then((persisted) => {
+          if (isRemoteOrigin && !persisted) {
+            void tryRemoteShorten();
           }
-          return res.json({
-            success: true,
-            persisted: true,
-            shortUrl: remote.shortUrl,
-            internalShortUrl: remote.shortUrl,
-            code: remote.code || existingCode,
-            lang: targetLang,
-            provider: 'remote',
-          });
-        }
+        });
         const cachedShortUrl = `${baseOrigin}/s/${existingCode}`;
         return res.json({
           success: true,
@@ -2334,6 +2320,7 @@ app.post('/api/shorten', async (req, res) => {
       url: cleanUrl,
       lang: targetLang,
       apiKey: rawFirebaseConfig.apiKey,
+      timeoutMs: 1500,
     });
 
     if (isRemoteOrigin && !persistedToFirestore) {

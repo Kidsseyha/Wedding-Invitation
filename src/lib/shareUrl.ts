@@ -469,10 +469,48 @@ export function getPublicShareUrl(
   return normalizeShareUrlEncoding(url.toString());
 }
 
+const SHORT_URL_CACHE_STORAGE_KEY = 'wedding_short_url_cache_v2';
+
 /**
- * In-memory cache for shortened URLs so repeated requests are instantaneous
+ * In-memory cache for shortened URLs (hydrated from localStorage) so repeated requests are 0ms instantaneous
  */
 const shortUrlCache = new Map<string, string>();
+const inFlightShortenRequests = new Map<string, Promise<string>>();
+
+function hydrateShortUrlCache(): void {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+  try {
+    const raw = localStorage.getItem(SHORT_URL_CACHE_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof k === 'string' && typeof v === 'string' && v) {
+          shortUrlCache.set(k, v);
+        }
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+}
+
+hydrateShortUrlCache();
+
+function persistShortUrlToCache(cacheKey: string, shortUrl: string): void {
+  shortUrlCache.set(cacheKey, shortUrl);
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
+  try {
+    const entries = Array.from(shortUrlCache.entries()).slice(-300);
+    const serialized: Record<string, string> = {};
+    for (const [k, v] of entries) {
+      serialized[k] = v;
+    }
+    localStorage.setItem(SHORT_URL_CACHE_STORAGE_KEY, JSON.stringify(serialized));
+  } catch {
+    // ignore quota errors
+  }
+}
 
 /**
  * Returns the preferred Vercel origin (uses current .vercel.app origin if running on Vercel, otherwise VERCEL_APP_URL)
@@ -491,14 +529,13 @@ export function getDefaultShareDomain(): 'vercel' | 'preview' {
   return 'vercel';
 }
 
-/**
- * Converts a long URL to a short link (using in-app /s/:code) with Khmer language support.
- * Only returns a /s/:code URL when short-link persistence succeeds; otherwise falls back to the
- * self-contained full personalized URL so viewers never open a dead/unresolved short link.
- */
-export async function shortenUrl(longUrl: string, customOrigin?: string): Promise<string> {
-  if (!longUrl) return '';
-
+function prepareShortenTarget(longUrl: string, customOrigin?: string): {
+  fallbackOrigin: string;
+  cleanedUrl: string;
+  targetLang: 'kh' | 'en';
+  cacheKey: string;
+  code: string;
+} {
   let inferredOrigin = PUBLIC_APP_URL;
   try {
     const parsedOrigin = new URL(longUrl).origin;
@@ -529,14 +566,15 @@ export async function shortenUrl(longUrl: string, customOrigin?: string): Promis
 
   let cleanedUrl = longUrl;
   if (cleanedUrl.includes('localhost') || cleanedUrl.includes('127.0.0.1')) {
-    cleanedUrl = cleanedUrl.replace(/http:\/\/localhost:\d+/, fallbackOrigin).replace(/https:\/\/localhost:\d+/, fallbackOrigin);
+    cleanedUrl = cleanedUrl
+      .replace(/http:\/\/localhost:\d+/, fallbackOrigin)
+      .replace(/https:\/\/localhost:\d+/, fallbackOrigin);
   }
   if (cleanedUrl.includes('ais-dev-')) {
     cleanedUrl = cleanedUrl.replace('ais-dev-', 'ais-pre-');
   }
 
-  // Keep clean Khmer-first parameters without re-injecting redundant lang=kh or share=1 bloat
-  let targetLang = 'kh';
+  let targetLang: 'kh' | 'en' = 'kh';
   try {
     const parsed = new URL(cleanedUrl);
     const rawLang = (parsed.searchParams.get('lang') || parsed.searchParams.get('l') || '').toLowerCase().trim();
@@ -562,77 +600,143 @@ export async function shortenUrl(longUrl: string, customOrigin?: string): Promis
   }
 
   const cacheKey = `${fallbackOrigin}::${cleanedUrl}`;
-  if (shortUrlCache.has(cacheKey)) {
-    return shortUrlCache.get(cacheKey)!;
-  }
+  const code = generateDeterministicShortCode(cleanedUrl);
+  return { fallbackOrigin, cleanedUrl, targetLang, cacheKey, code };
+}
 
-  // Try server-side shortener endpoint (/api/shorten on Express or Vercel)
-  try {
-    const res = await fetch('/api/shorten', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: cleanedUrl, origin: fallbackOrigin, lang: targetLang }),
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data?.success !== false && data?.persisted !== false && data?.shortUrl) {
-        let finalShortUrl = String(data.shortUrl);
-        if (finalShortUrl.includes('localhost') || finalShortUrl.includes('127.0.0.1')) {
-          finalShortUrl = finalShortUrl.replace(/http:\/\/localhost:\d+/, fallbackOrigin).replace(/https:\/\/localhost:\d+/, fallbackOrigin);
-        }
-        if (finalShortUrl.includes('ais-dev-')) {
-          finalShortUrl = finalShortUrl.replace('ais-dev-', 'ais-pre-');
-        }
-        if (customOrigin) {
-          try {
-            const u = new URL(finalShortUrl);
-            finalShortUrl = `${fallbackOrigin}${u.pathname}${u.search}`;
-          } catch {}
-        }
-        shortUrlCache.set(cacheKey, finalShortUrl);
-        return finalShortUrl;
-      }
-    }
-  } catch (err) {
-    console.warn('API shorten failed, trying Firestore direct short link:', err);
-  }
+/**
+ * Synchronously returns a previously shortened and cached `/s/:code` URL in 0ms, or empty string if not cached yet.
+ */
+export function getCachedShortUrl(longUrl: string, customOrigin?: string): string {
+  if (!longUrl) return '';
+  const { cacheKey } = prepareShortenTarget(longUrl, customOrigin);
+  return shortUrlCache.get(cacheKey) || '';
+}
 
-  // Client-side Firestore fallback with strict timeout so missing/offline DB never hangs or returns a dead /s/ link
+/**
+ * Synchronously returns the deterministic `/s/:code` short URL in 0ms while immediately
+ * triggering background persistence to `/api/shorten` and Firestore `short_links/{code}`.
+ */
+export function getInstantShareUrl(longUrl: string, customOrigin?: string): string {
+  if (!longUrl) return '';
+  const { fallbackOrigin, cleanedUrl, cacheKey, code } = prepareShortenTarget(longUrl, customOrigin);
+  const existing = shortUrlCache.get(cacheKey);
+  if (existing) return existing;
+
+  // Kick off background persistence immediately
+  void shortenUrl(longUrl, customOrigin);
+
   const isQuotaBlocked =
     typeof window !== 'undefined' &&
     typeof localStorage !== 'undefined' &&
     localStorage.getItem('firestore_quota_exceeded') === 'true';
 
-  if (!isQuotaBlocked) {
-    try {
-      const { doc, setDoc } = await import('firebase/firestore');
-      const { db, IS_FIRESTORE_WRITE_DISABLED } = await import('./firebase');
-      if (!IS_FIRESTORE_WRITE_DISABLED) {
-        const code = generateDeterministicShortCode(cleanedUrl);
-        let timeoutId: ReturnType<typeof setTimeout> | undefined;
-        await Promise.race([
-          setDoc(doc(db, 'short_links', code), {
-            code,
-            url: cleanedUrl,
-            lang: targetLang,
-            createdAt: new Date().toISOString(),
-          }),
-          new Promise<never>((_, reject) => {
-            timeoutId = setTimeout(() => reject(new Error('Short link Firestore write timed out')), 2500);
-          }),
-        ]).finally(() => {
-          if (timeoutId !== undefined) clearTimeout(timeoutId);
-        });
-        const firestoreShortUrl = `${fallbackOrigin}/s/${code}`;
-        shortUrlCache.set(cacheKey, firestoreShortUrl);
-        return firestoreShortUrl;
-      }
-    } catch {
-      // fallback to self-contained cleanedUrl when Firestore is unreachable/not provisioned
-    }
+  if (isQuotaBlocked) {
+    return cleanedUrl;
   }
 
-  return cleanedUrl;
+  return `${fallbackOrigin}/s/${code}`;
+}
+
+/**
+ * Converts a long URL to a short link (using in-app /s/:code) with Khmer language support.
+ * Runs server-side `/api/shorten` and client-side Firestore `short_links` write in parallel
+ * so persistence completes in ~80-150ms.
+ */
+export async function shortenUrl(longUrl: string, customOrigin?: string): Promise<string> {
+  if (!longUrl) return '';
+
+  const { fallbackOrigin, cleanedUrl, targetLang, cacheKey, code } = prepareShortenTarget(longUrl, customOrigin);
+
+  if (shortUrlCache.has(cacheKey)) {
+    return shortUrlCache.get(cacheKey)!;
+  }
+
+  if (inFlightShortenRequests.has(cacheKey)) {
+    return inFlightShortenRequests.get(cacheKey)!;
+  }
+
+  const shortenPromise = (async (): Promise<string> => {
+    const tryServerApi = async (): Promise<string> => {
+      const controller = new AbortController();
+      const timerId = setTimeout(() => controller.abort(), 1800);
+      try {
+        const res = await fetch('/api/shorten', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: cleanedUrl, origin: fallbackOrigin, lang: targetLang }),
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data?.success !== false && data?.persisted !== false && data?.shortUrl) {
+          let finalShortUrl = String(data.shortUrl);
+          if (finalShortUrl.includes('localhost') || finalShortUrl.includes('127.0.0.1')) {
+            finalShortUrl = finalShortUrl
+              .replace(/http:\/\/localhost:\d+/, fallbackOrigin)
+              .replace(/https:\/\/localhost:\d+/, fallbackOrigin);
+          }
+          if (finalShortUrl.includes('ais-dev-')) {
+            finalShortUrl = finalShortUrl.replace('ais-dev-', 'ais-pre-');
+          }
+          if (customOrigin) {
+            try {
+              const u = new URL(finalShortUrl);
+              finalShortUrl = `${fallbackOrigin}${u.pathname}${u.search}`;
+            } catch {}
+          }
+          return finalShortUrl;
+        }
+        throw new Error('Server shorten unpersisted');
+      } finally {
+        clearTimeout(timerId);
+      }
+    };
+
+    const tryClientFirestore = async (): Promise<string> => {
+      const isQuotaBlocked =
+        typeof window !== 'undefined' &&
+        typeof localStorage !== 'undefined' &&
+        localStorage.getItem('firestore_quota_exceeded') === 'true';
+      if (isQuotaBlocked) throw new Error('Firestore quota blocked');
+
+      const { doc, setDoc } = await import('firebase/firestore');
+      const { db, IS_FIRESTORE_WRITE_DISABLED, isFirestoreKnownUnavailable } = await import('./firebase');
+      if (IS_FIRESTORE_WRITE_DISABLED || isFirestoreKnownUnavailable()) {
+        throw new Error('Firestore write disabled or unavailable');
+      }
+
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        setDoc(doc(db, 'short_links', code), {
+          code,
+          url: cleanedUrl,
+          lang: targetLang,
+          createdAt: new Date().toISOString(),
+        }),
+        new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(() => reject(new Error('Short link Firestore write timed out')), 1800);
+        }),
+      ]).finally(() => {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+      });
+
+      return `${fallbackOrigin}/s/${code}`;
+    };
+
+    try {
+      const resolvedShortUrl = await Promise.any([tryServerApi(), tryClientFirestore()]);
+      persistShortUrlToCache(cacheKey, resolvedShortUrl);
+      return resolvedShortUrl;
+    } catch {
+      return cleanedUrl;
+    } finally {
+      inFlightShortenRequests.delete(cacheKey);
+    }
+  })();
+
+  inFlightShortenRequests.set(cacheKey, shortenPromise);
+  return shortenPromise;
 }
 
 /**

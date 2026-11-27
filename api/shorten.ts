@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { decodeKhmerQueryValue, normalizeShareUrlEncoding } from '../src/lib/shareUrl.js';
+import { decodeKhmerQueryValue, generateDeterministicShortCode, normalizeShareUrlEncoding } from '../src/lib/shareUrl.js';
 import { saveShortLinkToFirestoreRest } from '../src/utils/shareMeta.js';
 
 interface FirebaseRuntimeConfig {
@@ -46,42 +46,6 @@ function getHeader(req: VercelReq, key: string): string {
   const val = req.headers?.[key] ?? req.headers?.[key.toLowerCase()];
   if (Array.isArray(val)) return val[0] || '';
   return val || '';
-}
-
-function hashUrlBase36(input: string): string {
-  let h1 = 0x811c9dc5;
-  let h2 = 0x9e3779b9;
-  for (let i = 0; i < input.length; i++) {
-    const ch = input.charCodeAt(i);
-    h1 = Math.imul(h1 ^ ch, 0x01000193);
-    h2 = Math.imul(h2 ^ ch, 0x85ebca6b);
-  }
-  const p1 = (h1 >>> 0).toString(36).padStart(7, '0').slice(-4);
-  const p2 = (h2 >>> 0).toString(36).padStart(7, '0').slice(-4);
-  return `${p1}${p2}`;
-}
-
-function generateShortCode(targetUrl: string): string {
-  let prefix = 'kh';
-  try {
-    const parsed = new URL(targetUrl);
-    const typeParam = (parsed.searchParams.get('type') || '').toLowerCase().trim();
-    if (typeParam.startsWith('wedding')) prefix = 'wd';
-    else if (typeParam.startsWith('engage')) prefix = 'eg';
-    else if (typeParam.startsWith('house')) prefix = 'hw';
-    else if (typeParam.startsWith('birth')) prefix = 'bd';
-    else if (typeParam.startsWith('anniv')) prefix = 'an';
-
-    const nameParam = parsed.searchParams.get('name') || '';
-    const asciiSlug = nameParam
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, '')
-      .slice(0, 10);
-    if (asciiSlug) prefix = asciiSlug;
-  } catch {
-    // fallback prefix
-  }
-  return `${prefix}-${hashUrlBase36(targetUrl)}`;
 }
 
 export default async function handler(req: VercelReq, res: VercelRes) {
@@ -158,7 +122,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       // keep cleanUrl as-is
     }
 
-    const code = generateShortCode(cleanUrl);
+    const code = generateDeterministicShortCode(cleanUrl);
     const firebaseCfg = loadFirebaseConfig();
     const persisted = await saveShortLinkToFirestoreRest({
       projectId: firebaseCfg.projectId,
@@ -167,6 +131,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       url: cleanUrl,
       lang: targetLang,
       apiKey: firebaseCfg.apiKey,
+      timeoutMs: 1800,
     });
 
     if (!persisted) {

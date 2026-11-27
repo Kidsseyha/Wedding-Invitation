@@ -30,6 +30,8 @@ import {
   Clock,
   Star,
   Palette,
+  RotateCw,
+  RotateCcw,
 } from 'lucide-react';
 import { Language, WeddingEvent } from '../types';
 import { getSavedGuests, GuestPreset } from '../data/guests';
@@ -240,6 +242,68 @@ export default function EnvelopeModal({
   const [isWaxFlapOpen, setIsWaxFlapOpen] = useState(false);
   const [isGiftSurpriseOpen, setIsGiftSurpriseOpen] = useState(false);
   const [isLocationExpanded, setIsLocationExpanded] = useState(false);
+  const [screenRotation, setScreenRotation] = useState<0 | 90 | 180 | 270>(0);
+  const [viewportSize, setViewportSize] = useState<{ width: number; height: number }>(() => ({
+    width: typeof window !== 'undefined' ? window.innerWidth : 1024,
+    height: typeof window !== 'undefined' ? window.innerHeight : 768,
+  }));
+  const envelopeCardRef = useRef<HTMLDivElement>(null);
+  const [cardBounds, setCardBounds] = useState<{ width: number; height: number }>({ width: 440, height: 680 });
+
+  useEffect(() => {
+    if (!isOpen || typeof window === 'undefined') return;
+    const syncViewportAndCard = () => {
+      setViewportSize({ width: window.innerWidth, height: window.innerHeight });
+      if (envelopeCardRef.current) {
+        const w = envelopeCardRef.current.offsetWidth;
+        const h = envelopeCardRef.current.offsetHeight;
+        if (w > 0 && h > 0) {
+          setCardBounds((prev) => (prev.width === w && prev.height === h ? prev : { width: w, height: h }));
+        }
+      }
+    };
+    syncViewportAndCard();
+    const rafId = window.requestAnimationFrame(syncViewportAndCard);
+    window.addEventListener('resize', syncViewportAndCard);
+    window.addEventListener('orientationchange', syncViewportAndCard);
+
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined' && envelopeCardRef.current) {
+      ro = new ResizeObserver(() => {
+        if (envelopeCardRef.current) {
+          const w = envelopeCardRef.current.offsetWidth;
+          const h = envelopeCardRef.current.offsetHeight;
+          if (w > 0 && h > 0) {
+            setCardBounds((prev) => (prev.width === w && prev.height === h ? prev : { width: w, height: h }));
+          }
+        }
+      });
+      ro.observe(envelopeCardRef.current);
+    }
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener('resize', syncViewportAndCard);
+      window.removeEventListener('orientationchange', syncViewportAndCard);
+      ro?.disconnect();
+    };
+  }, [isOpen, eventType, language, guestName]);
+
+  const isLandscapeViewport = viewportSize.width > viewportSize.height;
+  const isCompactLandscapePhone = isLandscapeViewport && viewportSize.height <= 580;
+  const isQuarterTurn = screenRotation === 90 || screenRotation === 270;
+  const safeCardW = Math.max(260, cardBounds.width || 420);
+  const safeCardH = Math.max(360, cardBounds.height || 660);
+  const availRotateW = Math.max(240, viewportSize.width - 28);
+  const availRotateH = Math.max(240, viewportSize.height - (isAdmin ? 156 : 128));
+  const rotationFitScale = isQuarterTurn
+    ? Math.max(0.36, Math.min(1, availRotateW / safeCardH, availRotateH / safeCardW))
+    : 1;
+  const rotationStageHeightPx = isQuarterTurn ? Math.round(safeCardW * rotationFitScale + 14) : undefined;
+
+  const handleCycleScreenRotation = () => {
+    setScreenRotation((prev) => ((prev + 90) % 360) as 0 | 90 | 180 | 270);
+  };
 
   const handleGiftClick = () => {
     setIsGiftSurpriseOpen(true);
@@ -545,7 +609,7 @@ export default function EnvelopeModal({
           initial={{ opacity: 1 }}
           exit={{ opacity: 0, scale: 1.05, filter: 'blur(8px)' }}
           transition={{ duration: 0.8, ease: 'easeInOut' }}
-          className={`fixed inset-0 z-40 overflow-y-auto scroll-smooth touch-auto ${
+          className={`fixed inset-0 z-40 overflow-y-auto overflow-x-hidden scroll-smooth touch-auto ${
             isTraditionalWedding
               ? 'bg-[#e9e4dc]'
               : isHousewarming || isEngagement
@@ -586,8 +650,18 @@ export default function EnvelopeModal({
           <div className={`fixed inset-0 z-0 ${isBirthday ? 'opacity-30' : theme === 'light' ? 'opacity-10' : 'opacity-20'} pointer-events-none bg-[radial-gradient(#fde047_1px,transparent_1px)] [background-size:28px_28px]`} />
 
           <div
-            className={`min-h-[100dvh] w-full flex flex-col items-center justify-start sm:justify-center relative z-10 ${
-              isHousewarming || isAnniversary
+            data-screen-rotation={screenRotation}
+            data-viewport-orientation={isLandscapeViewport ? 'landscape' : 'portrait'}
+            className={`min-h-[100dvh] w-full flex flex-col items-center ${
+              isQuarterTurn
+                ? 'justify-center'
+                : isCompactLandscapePhone
+                ? 'justify-start'
+                : 'justify-start sm:justify-center'
+            } relative z-10 transition-all duration-300 ${
+              isCompactLandscapePhone
+                ? 'pl-[max(env(safe-area-inset-left),0.75rem)] pr-[max(env(safe-area-inset-right),0.75rem)] pt-[max(calc(env(safe-area-inset-top)+60px),62px)] pb-[max(calc(env(safe-area-inset-bottom)+18px),20px)]'
+                : isHousewarming || isAnniversary
                 ? `px-2.5 sm:px-6 md:px-8 ${
                     isAnniversary && isAdmin
                       ? 'pt-[182px]'
@@ -610,8 +684,33 @@ export default function EnvelopeModal({
                   } pb-[max(calc(env(safe-area-inset-bottom)+18px),20px)] sm:py-8`
             }`}
           >
+            {/* Screen Rotation Stage Wrapper */}
+            <div
+              className="w-full flex items-center justify-center my-auto transition-all duration-300"
+              style={rotationStageHeightPx ? { height: `${rotationStageHeightPx}px` } : undefined}
+            >
+              <motion.div
+                animate={{
+                  rotate: screenRotation,
+                  scale: rotationFitScale,
+                }}
+                transition={{
+                  type: 'spring',
+                  stiffness: 220,
+                  damping: 26,
+                }}
+                style={{ transformOrigin: 'center center' }}
+                className={`w-full ${
+                  isCompactLandscapePhone && !isQuarterTurn
+                    ? 'max-w-[540px]'
+                    : isBirthday
+                    ? 'max-w-[380px] sm:max-w-[395px] md:max-w-[425px]'
+                    : 'max-w-[calc(100%-0.25rem)] sm:max-w-md md:max-w-lg'
+                } flex items-center justify-center will-change-transform`}
+              >
             {/* Envelope Card Container */}
             <motion.div
+              ref={envelopeCardRef}
               initial={{ opacity: 0, y: 32, scale: 0.96 }}
               animate={
                 isOpening
@@ -622,7 +721,13 @@ export default function EnvelopeModal({
                 duration: isOpening ? 0.75 : 0.8,
                 ease: [0.22, 1, 0.36, 1],
               }}
-              className={`relative w-full ${isBirthday ? 'max-w-[380px] sm:max-w-[395px] md:max-w-[425px]' : 'max-w-[calc(100%-0.25rem)] sm:max-w-md md:max-w-lg'} mx-auto my-auto rounded-[24px] sm:rounded-[32px] p-0.5 transition-shadow duration-500 ${
+              className={`relative w-full ${
+                isCompactLandscapePhone && !isQuarterTurn
+                  ? 'max-w-[540px]'
+                  : isBirthday
+                  ? 'max-w-[380px] sm:max-w-[395px] md:max-w-[425px]'
+                  : 'max-w-[calc(100%-0.25rem)] sm:max-w-md md:max-w-lg'
+              } mx-auto my-auto rounded-[24px] sm:rounded-[32px] p-0.5 transition-shadow duration-500 ${
                 isBirthday
                   ? 'bg-gradient-to-b from-[#2dd4bf]/50 via-[#fde047]/35 to-[#0d9488]/60 shadow-[0_25px_60px_rgba(1,14,18,0.9),0_0_40px_rgba(45,212,191,0.2)]'
                   : isHousewarming
@@ -644,7 +749,11 @@ export default function EnvelopeModal({
             >
               {/* Modern Invitation Card Body */}
               <div
-                className={`relative rounded-[22px] sm:rounded-[30px] overflow-hidden min-h-[500px] sm:min-h-[660px] md:min-h-[720px] flex flex-col justify-between items-center text-center border backdrop-blur-xl transition-all duration-300 ${
+                className={`relative rounded-[22px] sm:rounded-[30px] overflow-hidden ${
+                  isCompactLandscapePhone && !isQuarterTurn
+                    ? 'min-h-[420px] sm:min-h-[480px]'
+                    : 'min-h-[500px] sm:min-h-[660px] md:min-h-[720px]'
+                } flex flex-col justify-between items-center text-center border backdrop-blur-xl transition-all duration-300 ${
                   isBirthday
                     ? 'p-0 border-[#2dd4bf]/40 shadow-[0_20px_50px_rgba(1,14,18,0.85),inset_0_1px_3px_rgba(255,255,255,0.25)] bg-gradient-to-b from-[#051f26]/95 via-[#082d36]/90 to-[#021317]/98'
                     : isHousewarming
@@ -1672,6 +1781,45 @@ export default function EnvelopeModal({
                 )}
               </div>
             </motion.div>
+              </motion.div>
+            </div>
+
+            {/* Screen Rotation Bar for Computer & Smartphone */}
+            <div className="mt-3 mb-1 flex items-center justify-center gap-2 z-30">
+              <button
+                id="screen-rotate-btn"
+                type="button"
+                onClick={handleCycleScreenRotation}
+                className="group flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-amber-400/60 bg-black/80 hover:bg-black/95 text-amber-200 hover:text-amber-100 shadow-[0_6px_22px_rgba(0,0,0,0.45)] backdrop-blur-md transition-all cursor-pointer select-none active:scale-95"
+                title={language === 'kh' ? 'បង្វិលអេក្រង់ 90° (កុំព្យូទ័រ និងទូរស័ព្ទ)' : 'Rotate Screen 90° (Desktop & Mobile)'}
+              >
+                <RotateCw className="w-3.5 h-3.5 text-amber-300 group-hover:rotate-90 transition-transform duration-300" />
+                <span className="text-xs font-khmer font-semibold whitespace-nowrap">
+                  {language === 'kh' ? 'បង្វិលអេក្រង់' : 'Rotate Screen'}
+                </span>
+                <span className="px-1.5 py-0.5 rounded-full bg-amber-400/20 border border-amber-400/40 text-[10px] font-mono font-bold text-amber-300">
+                  {screenRotation}°
+                </span>
+              </button>
+
+              <AnimatePresence>
+                {screenRotation !== 0 && (
+                  <motion.button
+                    id="screen-rotate-reset-btn"
+                    type="button"
+                    initial={{ opacity: 0, scale: 0.85 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.85 }}
+                    onClick={() => setScreenRotation(0)}
+                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-full border border-amber-400/40 bg-black/75 hover:bg-black/95 text-amber-300 hover:text-white text-xs font-khmer shadow-md backdrop-blur-md transition-all cursor-pointer select-none active:scale-95"
+                    title={language === 'kh' ? 'កំណត់ទៅ 0° វិញ' : 'Reset to 0°'}
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>0°</span>
+                  </motion.button>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
         </motion.div>
       )}
