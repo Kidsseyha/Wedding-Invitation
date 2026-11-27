@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Sparkles, RefreshCw, Check, Save, Languages } from 'lucide-react';
 import { Language, TemplateConfig } from '../types';
 import { ThemeMode } from './ThemeToggle';
@@ -6,6 +7,7 @@ import {
   MONOGRAM_COLOR_PRESETS,
   MONOGRAM_FONT_PRESETS_EN,
   MONOGRAM_FONT_PRESETS_KH,
+  MonogramFontPreset,
   resolveMonogramFontFamily,
 } from '../utils/monogramHelpers';
 
@@ -60,20 +62,103 @@ export default function CoverMonogramSettingsCard({
     config.cover_monogram_font_family_en,
     isLatinPreview
   );
-  const activePresets = isKhmer ? MONOGRAM_FONT_PRESETS_KH : MONOGRAM_FONT_PRESETS_EN;
-  const activeFontKey: 'cover_monogram_font_family' | 'cover_monogram_font_family_en' = isKhmer
-    ? 'cover_monogram_font_family'
-    : 'cover_monogram_font_family_en';
-  const activeSelectedFont = isKhmer
-    ? (config.cover_monogram_font_family &&
-      MONOGRAM_FONT_PRESETS_KH.some((p) => p.fontFamily === config.cover_monogram_font_family)
-        ? config.cover_monogram_font_family
-        : '')
-    : (config.cover_monogram_font_family_en ??
-      (config.cover_monogram_font_family &&
-      MONOGRAM_FONT_PRESETS_EN.some((p) => p.fontFamily === config.cover_monogram_font_family)
-        ? config.cover_monogram_font_family
-        : ''));
+
+  const [styleCategoryFilter, setStyleCategoryFilter] = useState<'all' | 'traditional' | 'modern'>('all');
+
+  const selectedKhFont =
+    config.cover_monogram_font_family &&
+    MONOGRAM_FONT_PRESETS_KH.some((p) => p.fontFamily === config.cover_monogram_font_family)
+      ? config.cover_monogram_font_family
+      : '';
+  const selectedEnFont =
+    config.cover_monogram_font_family_en ??
+    (config.cover_monogram_font_family &&
+    MONOGRAM_FONT_PRESETS_EN.some((p) => p.fontFamily === config.cover_monogram_font_family)
+      ? config.cover_monogram_font_family
+      : '');
+
+  const khSampleText = singlePerson ? autoGroomKh : `${autoGroomKh} & ${autoBrideKh}`;
+  const enSampleText = singlePerson ? autoGroomEn : `${autoGroomEn} & ${autoBrideEn}`;
+
+  const handleSelectKhStyle = (font: MonogramFontPreset) => {
+    onUpdateConfig('cover_monogram_lang', 'kh');
+    onUpdateConfig('cover_monogram_font_family', font.fontFamily);
+  };
+
+  const handleSelectEnStyle = (font: MonogramFontPreset) => {
+    onUpdateConfig('cover_monogram_lang', 'en');
+    onUpdateConfig('cover_monogram_font_family_en', font.fontFamily);
+  };
+
+  const renderPresetButton = (font: MonogramFontPreset, langType: 'kh' | 'en') => {
+    const isKhStyle = langType === 'kh';
+    const isSelectedFont = isKhStyle
+      ? selectedKhFont === font.fontFamily
+      : selectedEnFont === font.fontFamily;
+    const isActiveLangAndFont = (isKhStyle ? isKhmer : !isKhmer) && isSelectedFont;
+
+    return (
+      <button
+        key={`mono-font-${langType}-${font.styleGroup}-${font.id}`}
+        type="button"
+        onClick={() => (isKhStyle ? handleSelectKhStyle(font) : handleSelectEnStyle(font))}
+        className={`p-2.5 rounded-xl border text-left transition-all flex flex-col justify-between gap-1 active:scale-95 cursor-pointer relative ${
+          isActiveLangAndFont
+            ? 'border-amber-400 ring-2 ring-amber-400/50 font-bold bg-amber-400/20 ' +
+              (theme === 'light' ? 'text-amber-950 shadow-sm' : 'text-amber-200 shadow-sm')
+            : isSelectedFont
+            ? 'border-amber-400/60 bg-amber-400/10 ' +
+              (theme === 'light' ? 'text-amber-950' : 'text-amber-200')
+            : theme === 'light'
+            ? 'bg-white border-amber-200 text-neutral-800 hover:border-amber-400 hover:bg-amber-50/50'
+            : 'bg-black/40 border-white/10 text-amber-100 hover:border-amber-400/40'
+        }`}
+      >
+        <div className="flex items-center justify-between gap-1 w-full">
+          <span className="text-[10px] font-khmer opacity-80 truncate">{font.nameKh}</span>
+          <span
+            className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase shrink-0 ${
+              isKhStyle
+                ? 'bg-amber-500/20 text-amber-600 dark:text-amber-300 border border-amber-500/30'
+                : 'bg-rose-500/20 text-rose-600 dark:text-rose-300 border border-rose-500/30'
+            }`}
+          >
+            {isKhStyle ? 'KH' : 'EN'}
+          </span>
+        </div>
+
+        <span
+          className="text-base sm:text-lg truncate leading-tight py-0.5"
+          style={{
+            fontFamily:
+              font.fontFamily ||
+              (isKhStyle
+                ? "'Moulpali', 'Moul', 'Noto Serif Khmer', serif"
+                : "'Playfair Display', 'Cinzel', Georgia, serif"),
+            color: monogramColor,
+          }}
+        >
+          {isKhStyle ? khSampleText : enSampleText}
+        </span>
+
+        <div className="flex items-center justify-between gap-1 w-full pt-0.5 border-t border-amber-500/10">
+          <span className="text-[9px] font-khmer opacity-65 truncate">
+            {font.styleGroup === 'traditional'
+              ? 'មង្គលការប្រពៃណី • Traditional'
+              : 'មង្គលការបែបសម័យ • Modern'}
+          </span>
+          {isActiveLangAndFont && (
+            <Check className="w-3 h-3 text-amber-500 shrink-0 stroke-[3]" />
+          )}
+        </div>
+      </button>
+    );
+  };
+
+  const traditionalKhPresets = MONOGRAM_FONT_PRESETS_KH.filter((p) => p.styleGroup === 'traditional');
+  const modernKhPresets = MONOGRAM_FONT_PRESETS_KH.filter((p) => p.styleGroup === 'modern');
+  const traditionalEnPresets = MONOGRAM_FONT_PRESETS_EN.filter((p) => p.styleGroup === 'traditional');
+  const modernEnPresets = MONOGRAM_FONT_PRESETS_EN.filter((p) => p.styleGroup === 'modern');
 
   return (
     <div
@@ -406,57 +491,154 @@ export default function CoverMonogramSettingsCard({
         </div>
       </div>
 
-      {/* Font Family Selection */}
-      <div className="space-y-2 pt-2 border-t border-amber-500/20">
-        <div className="flex items-center justify-between">
-          <label
-            className={`text-[11px] font-semibold font-khmer ${
-              theme === 'light' ? 'text-amber-950' : 'text-amber-200'
+      {/* Font Family Selection: All KH & EN Styles for Khmer Traditional Wedding & Modern Wedding Reception */}
+      <div className="space-y-3 pt-2.5 border-t border-amber-500/20">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <label
+              className={`block text-[11px] sm:text-xs font-bold font-khmer ${
+                theme === 'light' ? 'text-amber-950' : 'text-amber-200'
+              }`}
+            >
+              ម៉ូតអក្សរកាត់ទាំងអស់ KH &amp; EN (Khmer Traditional Wedding &amp; Modern Wedding Reception):
+            </label>
+            <p className="text-[10px] font-khmer opacity-75">
+              ចុចជ្រើសរើសម៉ូតអក្សរខ្មែរ (KH) ឬ អង់គ្លេស (EN) សម្រាប់មង្គលការបែបប្រពៃណី និងអាពាហ៍ពិពាហ៍បែបសម័យ
+            </p>
+          </div>
+
+          <div className="flex items-center gap-1 flex-wrap">
+            {[
+              { id: 'all' as const, labelKh: 'ទាំងអស់ (All KH & EN)' },
+              { id: 'traditional' as const, labelKh: 'មង្គលការប្រពៃណី (Traditional)' },
+              { id: 'modern' as const, labelKh: 'មង្គលការបែបសម័យ (Modern)' },
+            ].map((tab) => {
+              const active = styleCategoryFilter === tab.id;
+              return (
+                <button
+                  key={`mono-style-tab-${tab.id}`}
+                  type="button"
+                  onClick={() => setStyleCategoryFilter(tab.id)}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-khmer font-bold border transition-all cursor-pointer ${
+                    active
+                      ? 'bg-amber-400 text-amber-950 border-amber-300 shadow-xs'
+                      : theme === 'light'
+                      ? 'bg-white text-amber-950 border-amber-200 hover:bg-amber-100/70'
+                      : 'bg-black/40 text-amber-200 border-amber-500/30 hover:bg-amber-500/15'
+                  }`}
+                >
+                  {tab.labelKh}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 1. Khmer Traditional Wedding (មង្គលការបែបប្រពៃណី) - KH & EN Styles */}
+        {(styleCategoryFilter === 'all' || styleCategoryFilter === 'traditional') && (
+          <div
+            className={`p-3 rounded-xl border space-y-2.5 ${
+              theme === 'light'
+                ? 'bg-amber-100/40 border-amber-300/80'
+                : 'bg-amber-950/20 border-amber-500/25'
             }`}
           >
-            {isKhmer
-              ? 'ម៉ូតអក្សរកាត់ (Monogram Font Style - ខ្មែរ):'
-              : 'Monogram Font Style (EN):'}
-          </label>
-          <span className="text-[10px] font-khmer opacity-75">
-            {isKhmer ? 'ចុចដើម្បីប្តូរម៉ូតអក្សរ' : 'Click to switch EN style'}
-          </span>
-        </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {activePresets.map((font) => {
-            const isSelected = activeSelectedFont === font.fontFamily;
-            return (
-              <button
-                key={`mono-font-${monogramLang}-${font.id}`}
-                type="button"
-                onClick={() => onUpdateConfig(activeFontKey, font.fontFamily)}
-                className={`p-2 rounded-xl border text-left transition-all flex flex-col gap-0.5 active:scale-95 cursor-pointer ${
-                  isSelected
-                    ? 'border-amber-400 ring-2 ring-amber-400/40 font-bold bg-amber-400/20 ' +
-                      (theme === 'light' ? 'text-amber-950' : 'text-amber-300')
-                    : theme === 'light'
-                    ? 'bg-white border-amber-200 text-neutral-800 hover:border-amber-400 hover:bg-amber-50/50'
-                    : 'bg-black/40 border-white/10 text-amber-100 hover:border-amber-400/40'
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-amber-500/20">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-amber-500" />
+                <span
+                  className={`text-[11px] font-khmer font-bold ${
+                    theme === 'light' ? 'text-amber-950' : 'text-amber-200'
+                  }`}
+                >
+                  ១. មង្គលការបែបប្រពៃណី (Khmer Traditional Wedding — KH &amp; EN Styles)
+                </span>
+              </div>
+              <span className="text-[10px] font-khmer opacity-75">
+                ម៉ូតអក្សរខ្មែរ ({traditionalKhPresets.length}) &amp; អង់គ្លេស ({traditionalEnPresets.length})
+              </span>
+            </div>
+
+            <div className="space-y-1.5">
+              <span
+                className={`block text-[10px] font-khmer font-semibold ${
+                  theme === 'light' ? 'text-amber-900' : 'text-amber-300/90'
                 }`}
               >
-                <span className="text-[10px] font-khmer opacity-75 truncate">{font.nameKh}</span>
+                • ម៉ូតអក្សរខ្មែរប្រពៃណី (Khmer Traditional Styles - {khSampleText}):
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+                {traditionalKhPresets.map((font) => renderPresetButton(font, 'kh'))}
+              </div>
+            </div>
+
+            <div className="space-y-1.5 pt-1">
+              <span
+                className={`block text-[10px] font-khmer font-semibold ${
+                  theme === 'light' ? 'text-amber-900' : 'text-amber-300/90'
+                }`}
+              >
+                • ម៉ូតអក្សរអង់គ្លេសប្រពៃណី (English Traditional Styles - {enSampleText}):
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+                {traditionalEnPresets.map((font) => renderPresetButton(font, 'en'))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 2. Modern Wedding Reception (អាពាហ៍ពិពាហ៍បែបសម័យ) - KH & EN Styles */}
+        {(styleCategoryFilter === 'all' || styleCategoryFilter === 'modern') && (
+          <div
+            className={`p-3 rounded-xl border space-y-2.5 ${
+              theme === 'light'
+                ? 'bg-rose-50/60 border-rose-200/90'
+                : 'bg-rose-950/15 border-rose-500/25'
+            }`}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-rose-500/20">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-rose-500" />
                 <span
-                  className="text-base truncate leading-tight"
-                  style={{
-                    fontFamily:
-                      font.fontFamily ||
-                      (isKhmer
-                        ? "'Moulpali', 'Moul', 'Noto Serif Khmer', serif"
-                        : "'Playfair Display', 'Cinzel', Georgia, serif"),
-                    color: monogramColor,
-                  }}
+                  className={`text-[11px] font-khmer font-bold ${
+                    theme === 'light' ? 'text-rose-950' : 'text-rose-200'
+                  }`}
                 >
-                  {singlePerson ? effectiveGroomInit : `${effectiveGroomInit} & ${effectiveBrideInit}`}
+                  ២. អាពាហ៍ពិពាហ៍បែបសម័យ (Modern Wedding Reception — KH &amp; EN Styles)
                 </span>
-              </button>
-            );
-          })}
-        </div>
+              </div>
+              <span className="text-[10px] font-khmer opacity-75">
+                ម៉ូតអក្សរខ្មែរ ({modernKhPresets.length}) &amp; អង់គ្លេស ({modernEnPresets.length})
+              </span>
+            </div>
+
+            <div className="space-y-1.5">
+              <span
+                className={`block text-[10px] font-khmer font-semibold ${
+                  theme === 'light' ? 'text-rose-900' : 'text-rose-300/90'
+                }`}
+              >
+                • ម៉ូតអក្សរខ្មែរបែបសម័យ (Khmer Modern Reception Styles - {khSampleText}):
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+                {modernKhPresets.map((font) => renderPresetButton(font, 'kh'))}
+              </div>
+            </div>
+
+            <div className="space-y-1.5 pt-1">
+              <span
+                className={`block text-[10px] font-khmer font-semibold ${
+                  theme === 'light' ? 'text-rose-900' : 'text-rose-300/90'
+                }`}
+              >
+                • ម៉ូតអក្សរអង់គ្លេសបែបសម័យ (English Modern Reception Styles - {enSampleText}):
+              </span>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+                {modernEnPresets.map((font) => renderPresetButton(font, 'en'))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

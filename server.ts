@@ -1261,16 +1261,24 @@ app.delete('/api/guests', (req, res) => {
     return false;
   };
 
+  let remainingScopedGuests: any[] = [];
   if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
     const dbGuests = readUserDbJson<any[]>(dbId, 'guests.json', []);
     const nextGuests = dbGuests.filter((g: any) => !matchesTargetGuest(g, dbId));
     writeUserDbJson(dbId, 'guests.json', nextGuests);
+    remainingScopedGuests = eventId
+      ? nextGuests.filter((g: any) => guestMatchesEventScope(g, dbId, eventId))
+      : nextGuests;
   } else {
     const guests = getSavedGuests().filter((g: any) => {
       if (!shouldIncludePublicRecord(g)) return true;
       return !matchesTargetGuest(g, GUEST_PUBLIC_SCOPE);
     });
     saveGuests(guests);
+    remainingScopedGuests = guests.filter((g: any) => {
+      if (!shouldIncludePublicRecord(g)) return false;
+      return eventId ? guestMatchesEventScope(g, GUEST_PUBLIC_SCOPE, eventId) : true;
+    });
   }
 
   broadcastWebSocket({
@@ -1279,7 +1287,7 @@ app.delete('/api/guests', (req, res) => {
     ...(eventId ? { eventId } : {}),
     deletedId: id,
   });
-  res.json({ success: true });
+  res.json({ success: true, guests: remainingScopedGuests });
 });
 
 // Get Event by ID, Type, or ownerId (strictly isolated across per-user DBs)

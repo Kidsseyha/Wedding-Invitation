@@ -276,6 +276,25 @@ export async function fetchGuestsFromFirebase(
           }
           return scopedApiGuests;
         }
+        // If user already has an initialized local guest list or deletion tombstones, return immediately without slow Firestore waterfall!
+        const hasLocalState = typeof localStorage !== 'undefined' && localStorage.getItem(storageKey) !== null;
+        const hasTombstones = readDeletedGuestTokens(effectiveOwner, effectiveEventId).size > 0;
+        if (hasLocalState || hasTombstones) {
+          try {
+            const localRaw = localStorage.getItem(storageKey);
+            if (localRaw !== null) {
+              const parsed = JSON.parse(localRaw);
+              if (Array.isArray(parsed)) {
+                const filteredLocal = normalizeAndFilterGuests(parsed, effectiveOwner, effectiveEventId, eventType);
+                localStorage.setItem(storageKey, JSON.stringify(filteredLocal));
+                return filteredLocal;
+              }
+            }
+          } catch {
+            // ignore
+          }
+          return [];
+        }
       }
     }
   } catch {
@@ -769,7 +788,7 @@ export async function deleteGuestFromFirebase(
   eventId?: string,
   guestName?: string,
   eventType?: string
-) {
+): Promise<GuestPreset[]> {
   const effectiveOwner = resolveOwnerId(ownerId);
   const effectiveEventId = resolveEventId(eventId, effectiveOwner);
   const storageKey = getGuestStorageKey(effectiveOwner, effectiveEventId);
@@ -780,9 +799,11 @@ export async function deleteGuestFromFirebase(
 
   let resolvedName = guestName || '';
   let remainingGuests: GuestPreset[] = [];
+  let hadUnseededDefaults = false;
 
   try {
     const local = localStorage.getItem(storageKey);
+    hadUnseededDefaults = local === null;
     const currentList: GuestPreset[] =
       local !== null && Array.isArray(JSON.parse(local))
         ? JSON.parse(local)
@@ -803,14 +824,15 @@ export async function deleteGuestFromFirebase(
     }
 
     addDeletedGuestTokens(effectiveOwner, effectiveEventId, id, resolvedName);
+    remainingGuests = normalizeAndFilterGuests(remainingGuests, effectiveOwner, effectiveEventId, eventType);
     localStorage.setItem(storageKey, JSON.stringify(remainingGuests));
   } catch {
     addDeletedGuestTokens(effectiveOwner, effectiveEventId, id, resolvedName);
   }
 
-  // Delete from server API (matching id, baseId, and name)
+  // Delete from server API immediately (single fast local HTTP request)
   try {
-    await fetch(
+    const res = await fetch(
       buildGuestsApiUrl(effectiveOwner, effectiveEventId, {
         id,
         ...(resolvedName ? { name: resolvedName } : {}),
@@ -820,59 +842,70 @@ export async function deleteGuestFromFirebase(
         cache: 'no-store',
       }
     );
-    // Ensure remaining guests are persisted on the server if they were previously only unseeded defaults
-    if (remainingGuests.length > 0) {
-      await fetch('/api/guests/batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ownerId: effectiveOwner,
-          eventId: effectiveEventId,
-          ...(eventType ? { eventType } : {}),
-          guests: remainingGuests,
-        }),
-      });
+    if (res.ok) {
+      const data = await res.json().catch(() => null);
+      if (data && Array.isArray(data.guests) && data.guests.length > 0) {
+        remainingGuests = normalizeAndFilterGuests(
+          data.guests,
+          effectiveOwner,
+          effectiveEventId,
+          eventType
+        );
+        localStorage.setItem(storageKey, JSON.stringify(remainingGuests));
+      } else if (hadUnseededDefaults && remainingGuests.length > 0) {
+        // Persist remaining defaults in background without blocking UI
+        void fetch('/api/guests/batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ownerId: effectiveOwner,
+            eventId: effectiveEventId,
+            ...(eventType ? { eventType } : {}),
+            guests: remainingGuests,
+          }),
+        }).catch(() => {});
+      }
     }
   } catch {
     // ignore
   }
 
-  if (IS_FIRESTORE_WRITE_DISABLED || (typeof window !== 'undefined' && localStorage.getItem('firestore_quota_exceeded') === 'true')) {
-    return;
+  if (IS_FIRESTORE_WRITE_DISABLED || isFirestoreKnownUnavailable()) {
+    return remainingGuests;
   }
 
-  try {
-    // 1. Delete all candidate document IDs directly
-    await Promise.all(
-      candidateIds.map(async cid => {
-        if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
-          try {
-            await deleteDoc(getUserEventGuestDoc(effectiveOwner, effectiveEventId, cid));
-          } catch {
-            // ignore
-          }
-          try {
-            await deleteDoc(getScopedGuestDoc(effectiveOwner, cid));
-          } catch {
-            // ignore
-          }
-        }
+  // Run Firestore candidate document cleanup asynchronously in the background so UI never stalls
+  void Promise.all(
+    candidateIds.map(async cid => {
+      if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
         try {
-          await deleteDoc(doc(db, GUESTS_COLLECTION, cid));
+          await deleteDoc(getUserEventGuestDoc(effectiveOwner, effectiveEventId, cid));
         } catch {
           // ignore
         }
-      })
-    );
-  } catch (error) {
+        try {
+          await deleteDoc(getScopedGuestDoc(effectiveOwner, cid));
+        } catch {
+          // ignore
+        }
+      }
+      try {
+        await deleteDoc(doc(db, GUESTS_COLLECTION, cid));
+      } catch {
+        // ignore
+      }
+    })
+  ).catch(error => {
     handleFirestoreError(error, OperationType.DELETE, `${GUESTS_COLLECTION}/${id}`);
-  }
+  });
+
+  return remainingGuests;
 }
 
 /**
  * Clear ONLY the specified owner's AND specified invitation's guests from localStorage, API, and Firestore
  */
-export async function clearAllGuestsFromFirebase(ownerId?: string, eventId?: string) {
+export async function clearAllGuestsFromFirebase(ownerId?: string, eventId?: string): Promise<GuestPreset[]> {
   const effectiveOwner = resolveOwnerId(ownerId);
   const effectiveEventId = resolveEventId(eventId, effectiveOwner);
   const storageKey = getGuestStorageKey(effectiveOwner, effectiveEventId);
@@ -896,42 +929,47 @@ export async function clearAllGuestsFromFirebase(ownerId?: string, eventId?: str
     // ignore
   }
 
-  if (IS_FIRESTORE_WRITE_DISABLED || (typeof window !== 'undefined' && localStorage.getItem('firestore_quota_exceeded') === 'true')) {
-    return;
+  if (IS_FIRESTORE_WRITE_DISABLED || isFirestoreKnownUnavailable()) {
+    return [];
   }
 
-  try {
-    if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
-      try {
-        const eventSubSnap = await getDocs(
-          query(getUserEventGuestsCollection(effectiveOwner, effectiveEventId), where('ownerId', '==', effectiveOwner))
-        );
-        await Promise.all(
-          eventSubSnap.docs.map(docSnap => deleteDoc(getUserEventGuestDoc(effectiveOwner, effectiveEventId, docSnap.id)))
-        );
-      } catch {
-        // ignore
+  // Run Firestore bulk cleanup in background so UI clears immediately
+  void (async () => {
+    try {
+      if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
+        try {
+          const eventSubSnap = await getDocs(
+            query(getUserEventGuestsCollection(effectiveOwner, effectiveEventId), where('ownerId', '==', effectiveOwner))
+          );
+          await Promise.all(
+            eventSubSnap.docs.map(docSnap => deleteDoc(getUserEventGuestDoc(effectiveOwner, effectiveEventId, docSnap.id)))
+          );
+        } catch {
+          // ignore
+        }
+        try {
+          const subSnap = await getDocs(
+            query(collection(db, USER_DATABASES_COLLECTION, effectiveOwner, GUESTS_COLLECTION), where('ownerId', '==', effectiveOwner))
+          );
+          await Promise.all(
+            subSnap.docs
+              .filter(docSnap => guestMatchesEventScope(docSnap.data() as GuestPreset, effectiveOwner, effectiveEventId))
+              .map(docSnap => deleteDoc(getScopedGuestDoc(effectiveOwner, docSnap.id)))
+          );
+        } catch {
+          // ignore
+        }
       }
-      try {
-        const subSnap = await getDocs(
-          query(collection(db, USER_DATABASES_COLLECTION, effectiveOwner, GUESTS_COLLECTION), where('ownerId', '==', effectiveOwner))
-        );
-        await Promise.all(
-          subSnap.docs
-            .filter(docSnap => guestMatchesEventScope(docSnap.data() as GuestPreset, effectiveOwner, effectiveEventId))
-            .map(docSnap => deleteDoc(getScopedGuestDoc(effectiveOwner, docSnap.id)))
-        );
-      } catch {
-        // ignore
-      }
+      const q = query(collection(db, GUESTS_COLLECTION), where('ownerId', '==', effectiveOwner));
+      const querySnapshot = await getDocs(q);
+      const deletePromises = querySnapshot.docs
+        .filter(docSnap => guestMatchesEventScope(docSnap.data() as GuestPreset, effectiveOwner, effectiveEventId))
+        .map(docSnap => deleteDoc(doc(db, GUESTS_COLLECTION, docSnap.id)));
+      await Promise.all(deletePromises);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, GUESTS_COLLECTION);
     }
-    const q = query(collection(db, GUESTS_COLLECTION), where('ownerId', '==', effectiveOwner));
-    const querySnapshot = await getDocs(q);
-    const deletePromises = querySnapshot.docs
-      .filter(docSnap => guestMatchesEventScope(docSnap.data() as GuestPreset, effectiveOwner, effectiveEventId))
-      .map(docSnap => deleteDoc(doc(db, GUESTS_COLLECTION, docSnap.id)));
-    await Promise.all(deletePromises);
-  } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, GUESTS_COLLECTION);
-  }
+  })();
+
+  return [];
 }

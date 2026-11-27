@@ -19,7 +19,7 @@ import {
 import { Language, WeddingEvent } from '../types';
 import { ThemeMode } from './ThemeToggle';
 import { GuestPreset } from '../data/guests';
-import { KhmerCornerKbach, KhmerDividerKbach } from './KhmerRoyalOrnament';
+import { KhmerCornerKbach, KhmerDividerKbach, ShapedTitleText } from './KhmerRoyalOrnament';
 import AnniversaryQuickEditor from './AnniversaryQuickEditor';
 import {
   formatAnniversaryMilestone,
@@ -46,6 +46,7 @@ interface KhmerStoryAnniversaryCoverProps {
   singlePerson?: boolean;
   subtitleKh?: string;
   subtitleEn?: string;
+  titleShape?: 'straight' | 'arch-up' | 'arch-down' | 'wave';
   anniversaryMilestone?: string;
   anniversaryMilestoneEn?: string;
   storyStartYear?: string;
@@ -102,6 +103,7 @@ export default function KhmerStoryAnniversaryCover({
   singlePerson = false,
   subtitleKh,
   subtitleEn,
+  titleShape = 'straight',
   anniversaryMilestone,
   anniversaryMilestoneEn,
   storyStartYear,
@@ -465,18 +467,18 @@ export default function KhmerStoryAnniversaryCover({
           {milestone.kickerLabel}
         </p>
 
-        <h1
+        <ShapedTitleText
+          text={language === 'kh' ? headingKh : headingEn}
+          shape={titleShape}
+          color={crimsonInk}
+          fontFamily={language === 'kh' ? "'Moul', serif" : "'Playfair Display', serif"}
           className={`mt-1 text-lg sm:text-2xl md:text-[26px] font-bold leading-[1.55] px-2 text-balance ${
             language === 'kh' ? 'tracking-normal' : 'tracking-wide'
           }`}
           style={{
-            fontFamily: language === 'kh' ? "'Moul', serif" : "'Playfair Display', serif",
-            color: crimsonInk,
             textShadow: isLight ? '0 1px 0 rgba(255,255,255,0.85)' : '0 2px 10px rgba(0,0,0,0.6)',
           }}
-        >
-          {language === 'kh' ? headingKh : headingEn}
-        </h1>
+        />
 
         <p
           className={`mt-0.5 font-medium ${

@@ -541,26 +541,44 @@ export default function EventEditorModal({
     });
   };
 
+  const latestConfigRef = useRef(formData.config);
+  latestConfigRef.current = formData.config;
+
   const handleUpdateConfig = async <K extends keyof WeddingEvent['config']>(
     key: K,
     value: WeddingEvent['config'][K]
   ) => {
     const newConfig = {
-      ...formData.config,
+      ...latestConfigRef.current,
       [key]: value,
     };
-    
+    latestConfigRef.current = newConfig;
+
     setFormData(prev => ({
       ...prev,
-      config: newConfig,
+      config: {
+        ...prev.config,
+        [key]: value,
+      },
     }));
 
-    // Automatic save for image-related and cover monogram style config changes
+    // Automatic save for image-related, background, and cover monogram style config changes
     const autoSaveKeys = [
       'event_location',
       'qr_code',
       'qr_code_riel',
       'cover_photo',
+      'main_background',
+      'details_background',
+      'hide_main_background',
+      'cover_background',
+      'hide_cover_background',
+      'title_text_shape',
+      'cover_subtitle_kh',
+      'cover_subtitle_en',
+      'cover_en_name_color',
+      'cover_en_font_family',
+      'portrait_shape',
       'cover_monogram_color',
       'cover_monogram_font_size',
       'cover_monogram_font_family',

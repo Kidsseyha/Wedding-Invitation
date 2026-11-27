@@ -18,7 +18,7 @@ import {
 import { Language } from '../types';
 import { ThemeMode } from './ThemeToggle';
 import { GuestPreset } from '../data/guests';
-import { KhmerCornerKbach, KhmerDividerKbach } from './KhmerRoyalOrnament';
+import { KhmerCornerKbach, KhmerDividerKbach, ShapedTitleText } from './KhmerRoyalOrnament';
 import {
   formatHousewarmingSchedule,
   buildHousewarmingHostsDisplay,
@@ -39,6 +39,7 @@ interface KhmerNatureHousewarmingCoverProps {
   singlePerson?: boolean;
   subtitleKh?: string;
   subtitleEn?: string;
+  titleShape?: 'straight' | 'arch-up' | 'arch-down' | 'wave';
   ribbonLabel?: string;
   guestName?: string;
   language: Language;
@@ -84,6 +85,7 @@ export default function KhmerNatureHousewarmingCover({
   singlePerson = false,
   subtitleKh,
   subtitleEn,
+  titleShape = 'straight',
   ribbonLabel,
   guestName,
   language,
@@ -358,22 +360,24 @@ export default function KhmerNatureHousewarmingCover({
           <circle cx="60" cy="30" r="1.8" fill={goldInk} />
         </svg>
 
-        <h1
+        <ShapedTitleText
+          text={
+            language === 'kh'
+              ? subtitleKh || 'ពិធីឡើងគេហដ្ឋានថ្មី'
+              : subtitleEn || 'Housewarming Blessing'
+          }
+          shape={titleShape}
+          color={goldInk}
+          fontFamily={language === 'kh' ? "'Moul', serif" : "'Playfair Display', serif"}
           className={`text-lg sm:text-2xl md:text-[26px] font-bold leading-[1.55] px-2 text-balance ${
             language === 'kh' ? 'tracking-normal' : 'tracking-wide'
           }`}
           style={{
-            fontFamily: language === 'kh' ? "'Moul', serif" : "'Playfair Display', serif",
-            color: goldInk,
             textShadow: isLight
               ? '0 1px 0 rgba(255,255,255,0.9)'
               : '0 2px 10px rgba(0,0,0,0.55)',
           }}
-        >
-          {language === 'kh'
-            ? subtitleKh || 'ពិធីឡើងគេហដ្ឋានថ្មី'
-            : subtitleEn || 'Housewarming Blessing'}
-        </h1>
+        />
 
         <p
           className={`mt-0.5 font-semibold ${

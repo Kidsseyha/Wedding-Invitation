@@ -444,15 +444,16 @@ export default function AddGuestModal({
     }
   };
 
-  // Delete guest from list (Syncs to Firebase & server scoped by user + invitation, then reloads guest database)
+  // Delete guest from list (Syncs to Firebase & server scoped by user + invitation, then reloads guest database instantly)
   const handleDeleteGuest = async (id: string, name: string) => {
     setIsSyncingWithCloud(true);
     setSavedGuests(prev => prev.filter(g => g.id !== id && g.name.trim() !== name.trim()));
     try {
-      await deleteGuestFromFirebase(id, effectiveOwnerId, effectiveEventId, name, effectiveEventType);
-      const reloadedGuests = await fetchGuestsFromFirebase(
+      const reloadedGuests = await deleteGuestFromFirebase(
+        id,
         effectiveOwnerId,
         effectiveEventId,
+        name,
         effectiveEventType
       );
       setSavedGuests(reloadedGuests);
@@ -481,13 +482,9 @@ export default function AddGuestModal({
   // Delete all guests for current user AND current invitation only
   const handleClearAllGuests = async () => {
     setIsSyncingWithCloud(true);
+    setSavedGuests([]);
     try {
-      await clearAllGuestsFromFirebase(effectiveOwnerId, effectiveEventId);
-      const reloadedGuests = await fetchGuestsFromFirebase(
-        effectiveOwnerId,
-        effectiveEventId,
-        effectiveEventType
-      );
+      const reloadedGuests = await clearAllGuestsFromFirebase(effectiveOwnerId, effectiveEventId);
       setSavedGuests(reloadedGuests);
       window.dispatchEvent(
         new CustomEvent('wedding:guests-updated', {

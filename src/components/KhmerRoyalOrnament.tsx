@@ -3129,21 +3129,32 @@ export function ShapedTitleText({
 }) {
   const uid = React.useId().replace(/:/g, '');
   const pathId = `titlePath-${uid}`;
-  const gradId = `titleGrad-${uid}`;
-  const filterId = `titleFilter-${uid}`;
 
-  let pathD = 'M 15 62 Q 200 12 385 62'; // arch-up
+  // Smooth, wide ceremonial curves so large Khmer & English headlines sit balanced without cramping
+  let pathD = 'M 6 88 Q 210 34 414 88'; // arch-up
   if (shape === 'arch-down') {
-    pathD = 'M 15 15 Q 200 68 385 15';
+    pathD = 'M 6 38 Q 210 92 414 38';
   } else if (shape === 'wave') {
-    pathD = 'M 15 42 Q 110 10 200 42 T 385 42';
+    pathD = 'M 6 64 Q 108 32 210 64 T 414 64';
   }
 
-  const effectiveFontFamily = fontFamily || "'Khmer OS Bokor', 'Bokor', 'Moul', 'AKbalthom Kbach', serif";
+  const effectiveFontFamily =
+    fontFamily || "'Moulpali', 'Moul', 'Khmer OS Bokor', 'Bokor', 'Noto Serif Khmer', serif";
+  const cleanText = (text || '').trim();
+  // Strip Khmer combining vowels, Coeng, and diacritics so visual width is measured accurately
+  const visualLength = cleanText.replace(/[\u17B4-\u17D3\u17DD\u200B-\u200D\uFEFF]/g, '').length;
+  const computedFontSize =
+    visualLength > 26
+      ? '26px'
+      : visualLength > 20
+      ? '30px'
+      : visualLength > 15
+      ? '33px'
+      : '36px';
 
   return (
     <h1
-      className={`relative w-full max-w-[340px] sm:max-w-[420px] mx-auto select-none my-1 flex justify-center items-center text-center text-xl sm:text-2xl md:text-3xl font-bold tracking-wide ${className}`}
+      className={`relative w-full max-w-[390px] sm:max-w-[490px] mx-auto select-none my-1 flex justify-center items-center text-center text-xl sm:text-2xl md:text-3xl font-bold tracking-wide ${className}`}
       style={{
         fontFamily: effectiveFontFamily,
         color: color,
@@ -3155,28 +3166,38 @@ export function ShapedTitleText({
           style={{
             fontFamily: effectiveFontFamily,
             color: color,
-            lineHeight: '45px',
+            lineHeight: '1.65',
           }}
         >
-          {text}
+          {cleanText}
         </span>
       ) : (
-        <div className="w-full h-auto overflow-visible">
-          <svg viewBox="0 0 400 85" className="w-full h-auto overflow-visible">
+        <div className="w-full h-auto overflow-visible -mx-2 sm:mx-0">
+          <svg
+            viewBox="0 0 420 116"
+            className="w-full h-auto overflow-visible"
+            style={{ overflow: 'visible' }}
+          >
             <defs>
               <path id={pathId} d={pathD} fill="none" />
             </defs>
             <text
               fill={color || '#b8860b'}
+              dominantBaseline="middle"
               style={{
                 fontFamily: effectiveFontFamily,
-                fontSize: text.length > 25 ? '20px' : text.length > 18 ? '24px' : '28px',
+                fontSize: computedFontSize,
                 fontWeight: 'bold',
-                letterSpacing: '1px',
+                letterSpacing: '0.01em',
               }}
             >
-              <textPath href={`#${pathId}`} startOffset="50%" textAnchor="middle">
-                {text}
+              <textPath
+                href={`#${pathId}`}
+                xlinkHref={`#${pathId}`}
+                startOffset="50%"
+                textAnchor="middle"
+              >
+                {cleanText}
               </textPath>
             </text>
           </svg>

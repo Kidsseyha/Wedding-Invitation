@@ -509,7 +509,16 @@ export default function DesignSettingsSection({
   const bottomColor = config.textColor || '#f5b80f';
   const envelopeColor = config.envelope_theme_color || '#6c2925';
   const currentFrame = config.envelope_frame || '';
-  const currentBackground = config.main_background || '';
+  const rawMiddleBackground = config.details_background || config.main_background || '';
+  const isDefaultTemplateBg =
+    rawMiddleBackground.includes('template-1/free-background.jpg') ||
+    rawMiddleBackground.includes('contents/cover-2.jpg');
+  const currentBackground =
+    rawMiddleBackground && !isDefaultTemplateBg
+      ? rawMiddleBackground
+      : rawMiddleBackground
+      ? VENUE_PLACE_PRESETS[0].imageUrl
+      : '';
   const [showPresets, setShowPresets] = useState(true);
   const [justSaved, setJustSaved] = useState(false);
   const [appliedAll, setAppliedAll] = useState(false);
@@ -545,9 +554,9 @@ export default function DesignSettingsSection({
   const [showSilkPresets, setShowSilkPresets] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('wedding_show_silk_presets');
-      return stored !== null ? stored === 'true' : false;
+      return stored !== null ? stored === 'true' : true;
     }
-    return false;
+    return true;
   });
 
   const handleSaveToDatabase = async () => {
@@ -569,6 +578,9 @@ export default function DesignSettingsSection({
   };
 
   const handleApplyPlaceToBackground = (placeUrl: string) => {
+    if (config.hide_main_background) {
+      onUpdateConfig('hide_main_background', false);
+    }
     onUpdateConfig('main_background', placeUrl);
     onUpdateConfig('details_background', placeUrl);
   };
@@ -1118,37 +1130,161 @@ export default function DesignSettingsSection({
         </div>
 
         {/* ទម្រង់រាងអក្សរចំណងជើង (Title Text Shape / Curved Options) */}
-        <div className="space-y-2 pt-2.5 border-t border-amber-500/20">
+        <div className="space-y-2.5 pt-2.5 border-t border-amber-500/20">
           <div className="flex items-center justify-between">
             <label className={`text-xs font-semibold font-khmer ${theme === 'light' ? 'text-amber-950' : 'text-amber-200'}`}>
-              ទម្រង់រាងអក្សរចំណងជើង (Title Style & Shape):
+              ទម្រង់រាងអក្សរចំណងជើង (Title Style &amp; Shape):
             </label>
-            <span className="text-[10px] font-khmer opacity-75">ជម្រើសអក្សរត្រង់ ឬកោង</span>
+            <span className="text-[10px] font-khmer opacity-75">ជម្រើសអក្សរត្រង់ ឬកោង (អនុវត្តលើគ្រប់គំរូធៀប)</span>
+          </div>
+
+          {/* Live Title Shape Preview Box */}
+          <div
+            className={`px-3 py-3 rounded-xl border flex flex-col items-center justify-center overflow-hidden ${
+              theme === 'light'
+                ? 'bg-white/95 border-amber-300/80 shadow-inner'
+                : 'bg-black/60 border-amber-500/30 shadow-inner'
+            }`}
+          >
+            <span className="text-[10px] font-khmer opacity-70 mb-1">
+              មើលគំរូទម្រង់ចំណងជើងផ្ទាល់ (Live Title Shape Preview):
+            </span>
+            {(() => {
+              const previewText =
+                config.cover_subtitle_kh ||
+                config.invitation_kh?.main_title ||
+                (currentCategory === 'anniversary'
+                  ? 'ពិធីខួបអាពាហ៍ពិពាហ៍'
+                  : currentCategory === 'housewarming'
+                  ? 'ពិធីឡើងគេហដ្ឋានថ្មី'
+                  : currentCategory === 'birthday'
+                  ? 'រីករាយពិធីខួបកំណើត'
+                  : currentCategory === 'engagement'
+                  ? 'ពិធីភ្ជាប់ពាក្យ'
+                  : 'សិរីសួស្តីអាពាហ៍ពិពាហ៍');
+              const activeShape = config.title_text_shape || 'straight';
+              const visualLen = previewText.replace(/[\u17B4-\u17D3\u17DD\u200B-\u200D\uFEFF]/g, '').length;
+              const previewFontSize =
+                visualLen > 24 ? '24px' : visualLen > 18 ? '28px' : '32px';
+              const pathD =
+                activeShape === 'arch-down'
+                  ? 'M 6 34 Q 200 88 394 34'
+                  : activeShape === 'wave'
+                  ? 'M 6 60 Q 103 28 200 60 T 394 60'
+                  : 'M 6 84 Q 200 30 394 84';
+
+              if (activeShape === 'straight') {
+                return (
+                  <div
+                    className="py-2.5 text-center font-bold tracking-wide"
+                    style={{
+                      fontFamily: "'Moulpali', 'Moul', serif",
+                      color: frontColor,
+                      fontSize: 'clamp(1.25rem, 4.5vw, 1.65rem)',
+                      lineHeight: '1.65',
+                    }}
+                  >
+                    {previewText}
+                  </div>
+                );
+              }
+
+              return (
+                <svg viewBox="0 0 400 108" className="w-full max-w-[380px] sm:max-w-[440px] h-20 sm:h-24 overflow-visible">
+                  <defs>
+                    <path id="settings-title-shape-preview-path" d={pathD} fill="none" />
+                  </defs>
+                  <text
+                    fill={frontColor}
+                    dominantBaseline="middle"
+                    style={{
+                      fontFamily: "'Moulpali', 'Moul', serif",
+                      fontSize: previewFontSize,
+                      fontWeight: 'bold',
+                      letterSpacing: '0.01em',
+                    }}
+                  >
+                    <textPath
+                      href="#settings-title-shape-preview-path"
+                      startOffset="50%"
+                      textAnchor="middle"
+                    >
+                      {previewText}
+                    </textPath>
+                  </text>
+                </svg>
+              );
+            })()}
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             {[
-              { id: 'straight', labelKh: 'អក្សរត្រង់ (Straight)', desc: 'ទម្រង់អក្សររាយស្មើត្រង់បុរាណ' },
-              { id: 'arch-up', labelKh: 'អក្សរកោងឡើង (Arch Up)', desc: 'ទម្រង់អក្សរកោងឡើងលើរាងក្លោងទ្វារ' },
-              { id: 'arch-down', labelKh: 'អក្សរកោងចុះ (Arc Down)', desc: 'ទម្រង់អក្សរកោងចុះក្រោមរាងស្នាមញញឹម' },
-              { id: 'wave', labelKh: 'អក្សររលក (Wave Shape)', desc: 'ទម្រង់អក្សររលកទឹកទន់ភ្លន់' },
+              {
+                id: 'straight',
+                labelKh: 'អក្សរត្រង់ (Straight)',
+                desc: 'ទម្រង់អក្សររាយស្មើត្រង់បុរាណ',
+                svgPath: 'M 6 24 L 114 24',
+              },
+              {
+                id: 'arch-up',
+                labelKh: 'អក្សរកោងឡើង (Arch Up)',
+                desc: 'ទម្រង់អក្សរកោងឡើងលើរាងក្លោងទ្វារ',
+                svgPath: 'M 6 34 Q 60 10 114 34',
+              },
+              {
+                id: 'arch-down',
+                labelKh: 'អក្សរកោងចុះ (Arc Down)',
+                desc: 'ទម្រង់អក្សរកោងចុះក្រោមរាងស្នាមញញឹម',
+                svgPath: 'M 6 14 Q 60 38 114 14',
+              },
+              {
+                id: 'wave',
+                labelKh: 'អក្សររលក (Wave Shape)',
+                desc: 'ទម្រង់អក្សររលកទឹកទន់ភ្លន់',
+                svgPath: 'M 6 24 Q 33 10 60 24 T 114 24',
+              },
             ].map((shapeOption) => {
               const currentShape = config.title_text_shape || 'straight';
               const isSelected = currentShape === shapeOption.id;
+              const btnPathId = `btn-shape-path-${shapeOption.id}`;
               return (
                 <button
                   key={`title-shape-${shapeOption.id}`}
                   type="button"
                   onClick={() => onUpdateConfig('title_text_shape', shapeOption.id as any)}
-                  className={`p-2.5 rounded-xl border text-left transition-all flex flex-col justify-between gap-1 active:scale-95 cursor-pointer ${
+                  className={`p-2.5 rounded-xl border text-left transition-all flex flex-col justify-between gap-1.5 active:scale-95 cursor-pointer relative ${
                     isSelected
-                      ? 'border-amber-400 ring-2 ring-amber-400/40 font-bold bg-amber-400/20 text-amber-300'
+                      ? 'border-amber-400 ring-2 ring-amber-400/50 font-bold bg-amber-400/20 ' +
+                        (theme === 'light' ? 'text-amber-950 shadow-xs' : 'text-amber-300 shadow-xs')
                       : theme === 'light'
                       ? 'bg-white border-amber-200 text-neutral-800 hover:border-amber-400 hover:bg-amber-50/50'
                       : 'bg-black/40 border-white/10 text-amber-100 hover:border-amber-400/40'
                   }`}
                 >
-                  <span className="text-xs font-khmer font-bold">{shapeOption.labelKh}</span>
+                  <div className="flex items-center justify-between gap-1 w-full">
+                    <span className="text-xs font-khmer font-bold truncate">{shapeOption.labelKh}</span>
+                    {isSelected && <Check className="w-3.5 h-3.5 text-amber-500 shrink-0 stroke-[3]" />}
+                  </div>
+                  <div className="w-full flex items-center justify-center py-1.5 px-1 rounded-lg bg-amber-500/10 border border-amber-500/20 overflow-visible">
+                    <svg viewBox="0 0 120 44" className="w-full h-9 overflow-visible">
+                      <defs>
+                        <path id={btnPathId} d={shapeOption.svgPath} fill="none" />
+                      </defs>
+                      <text
+                        fill={isSelected ? '#f59e0b' : theme === 'light' ? '#92400e' : '#fcd34d'}
+                        dominantBaseline="middle"
+                        style={{
+                          fontFamily: "'Moulpali', 'Moul', serif",
+                          fontSize: '14.5px',
+                          fontWeight: 'bold',
+                        }}
+                      >
+                        <textPath href={`#${btnPathId}`} startOffset="50%" textAnchor="middle">
+                          សិរីមង្គល
+                        </textPath>
+                      </text>
+                    </svg>
+                  </div>
                   <span className="text-[10px] font-khmer opacity-70 leading-tight">{shapeOption.desc}</span>
                 </button>
               );
@@ -1525,11 +1661,11 @@ export default function DesignSettingsSection({
           ? 'bg-amber-50/50 border-amber-200/90'
           : 'bg-gradient-to-br from-black via-black/80 to-black border-amber-500/35'
       }`}>
-        <div className={`flex items-center justify-between pb-2 border-b ${
+        <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2 border-b ${
           theme === 'light' ? 'border-amber-200' : 'border-amber-500/20'
         }`}>
           <div className="flex items-center gap-2">
-            <div className={`w-7 h-7 rounded-lg ${theme === 'light' ? 'bg-amber-200 text-amber-950' : 'bg-amber-400/20 text-amber-300'} flex items-center justify-center`}>
+            <div className={`w-7 h-7 rounded-lg ${theme === 'light' ? 'bg-amber-200 text-amber-950' : 'bg-amber-400/20 text-amber-300'} flex items-center justify-center shrink-0`}>
               <MapPin className="w-4 h-4 text-amber-600" />
             </div>
             <div>
@@ -1542,12 +1678,38 @@ export default function DesignSettingsSection({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 flex-wrap self-end sm:self-center">
+            {/* Save to Database Button */}
+            {onSave && (
+              <button
+                type="button"
+                onClick={handleSaveToDatabase}
+                disabled={isSaving}
+                className={`px-2.5 py-1.5 rounded-xl text-xs font-khmer font-bold flex items-center gap-1.5 border transition-all active:scale-95 shadow-xs cursor-pointer ${
+                  justSaved
+                    ? 'bg-emerald-500 text-white border-emerald-400'
+                    : theme === 'light'
+                    ? 'bg-amber-200/80 hover:bg-amber-300 text-amber-950 border-amber-400'
+                    : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
+                }`}
+                title="រក្សាទុកការផ្លាស់ប្តូររូបភាពកណ្ដាលធៀបទៅក្នុង Database"
+              >
+                {isSaving ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : justSaved ? (
+                  <Check className="w-3.5 h-3.5" />
+                ) : (
+                  <Save className="w-3.5 h-3.5" />
+                )}
+                <span>{justSaved ? 'បានរក្សាទុក' : 'រក្សាទុក (Save)'}</span>
+              </button>
+            )}
+
             {/* Hide / Release (បិទ/លែងលាក់) Button */}
             <button
               type="button"
               onClick={() => onUpdateConfig('hide_main_background', !config.hide_main_background)}
-              className={`px-2.5 py-1.5 rounded-xl border font-khmer font-bold text-xs flex items-center gap-1.5 shadow-md transition-all active:scale-95 ${
+              className={`px-2.5 py-1.5 rounded-xl border font-khmer font-bold text-xs flex items-center gap-1.5 shadow-md transition-all active:scale-95 cursor-pointer ${
                 config.hide_main_background
                   ? 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-600 dark:text-emerald-400 border-emerald-500/40 ring-1 ring-emerald-400/30'
                   : theme === 'light'
@@ -1570,11 +1732,11 @@ export default function DesignSettingsSection({
             </button>
 
             {/* Quick Clear / Reset Button */}
-            {currentBackground && (
+            {rawMiddleBackground && (
               <button
                 type="button"
                 onClick={handleClearBackground}
-                className="px-3 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-500 border border-red-500/30 font-khmer font-bold text-xs flex items-center gap-1.5 shadow-md transition-all active:scale-95"
+                className="px-3 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-500 border border-red-500/30 font-khmer font-bold text-xs flex items-center gap-1.5 shadow-md transition-all active:scale-95 cursor-pointer"
                 title="លុបរូបភាពកណ្ដាលធៀប"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -1598,7 +1760,7 @@ export default function DesignSettingsSection({
             <button
               type="button"
               onClick={() => onUpdateConfig('hide_main_background', false)}
-              className="mt-1 px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-amber-950 font-khmer text-xs font-bold shadow flex items-center gap-1.5 transition-all active:scale-95"
+              className="mt-1 px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-amber-950 font-khmer text-xs font-bold shadow flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
             >
               <Eye className="w-3.5 h-3.5" />
               <span>លែងលាក់ (Release & Show)</span>
@@ -1608,28 +1770,39 @@ export default function DesignSettingsSection({
           <div className="space-y-3">
             {/* Place / Venue Presets Grid */}
             <div className="space-y-1.5">
-              <label className={`block text-[11px] font-khmer font-semibold ${theme === 'light' ? 'text-amber-950' : 'text-amber-300/90'} flex items-center justify-between`}>
-                <span>ជ្រើសរើសគំរូរូបភាពក្បាច់សូត្រសម្រាប់កណ្ដាលធៀប (Silk Wallpaper Presets):</span>
-                <span className={`text-[10px] ${theme === 'light' ? 'text-amber-800' : 'text-amber-400/70'} font-normal`}>ចុច ១ ឃ្លីកដើម្បីប្តូរភ្លាមៗ</span>
-              </label>
+              <div className="flex items-center justify-between gap-2">
+                <label className={`text-[11px] font-khmer font-semibold ${theme === 'light' ? 'text-amber-950' : 'text-amber-300/90'}`}>
+                  ជ្រើសរើសគំរូរូបភាពក្បាច់សូត្រសម្រាប់កណ្ដាលធៀប (Silk Wallpaper Presets):
+                </label>
+                <span className={`text-[10px] ${theme === 'light' ? 'text-amber-800' : 'text-amber-400/70'} font-khmer`}>
+                  ចុច ១ ឃ្លីកដើម្បីជ្រើសរើសភ្លាមៗ
+                </span>
+              </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
                 {VENUE_PLACE_PRESETS.map((preset, idx) => {
-                  const isSelected = currentBackground === preset.imageUrl;
+                  const isSelected =
+                    currentBackground === preset.imageUrl ||
+                    config.details_background === preset.imageUrl ||
+                    config.main_background === preset.imageUrl;
                   return (
                     <button
                       key={`mid-venue-${preset.id}-${idx}`}
                       type="button"
                       onClick={() => handleApplyPlaceToBackground(preset.imageUrl)}
-                      className={`p-2 rounded-xl border text-left flex flex-col items-center gap-1.5 transition-all group ${
+                      className={`p-2 rounded-xl border text-left flex flex-col items-center gap-1.5 transition-all group cursor-pointer ${
                         isSelected
-                          ? 'bg-amber-500/25 border-amber-500 ring-2 ring-amber-400/40 shadow-md scale-[1.02]'
+                          ? 'bg-amber-500/25 border-amber-500 ring-2 ring-amber-400/50 shadow-md scale-[1.02]'
                           : theme === 'light'
                           ? 'bg-white border-amber-200/90 hover:border-amber-400 hover:scale-[1.01] shadow-sm'
                           : 'bg-black/60 border-amber-500/20 hover:bg-black/90 hover:border-amber-400/60 hover:scale-[1.01]'
                       }`}
                     >
                       <div className={`w-full aspect-[4/3] rounded-lg ${theme === 'light' ? 'bg-amber-100/30' : 'bg-black'} border ${
-                        theme === 'light' ? 'border-amber-200' : 'border-amber-500/20'
+                        isSelected
+                          ? 'border-amber-400'
+                          : theme === 'light'
+                          ? 'border-amber-200'
+                          : 'border-amber-500/20'
                       } overflow-hidden relative transition-colors`}>
                         <img
                           src={preset.previewUrl}
@@ -1637,13 +1810,22 @@ export default function DesignSettingsSection({
                           className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
                         />
                         {isSelected && (
-                          <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-amber-400 text-amber-950 flex items-center justify-center shadow">
+                          <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded-full bg-amber-400 text-amber-950 flex items-center gap-0.5 shadow font-khmer font-bold text-[9px]">
                             <Check className="w-2.5 h-2.5 stroke-[3]" />
+                            <span>ជ្រើសរើស</span>
                           </div>
                         )}
                       </div>
                       <div className="w-full text-center">
-                        <span className={`block text-[10px] sm:text-[11px] font-khmer font-bold ${theme === 'light' ? 'text-amber-950' : 'text-amber-200'} leading-tight truncate`}>
+                        <span className={`block text-[10px] sm:text-[11px] font-khmer font-bold ${
+                          isSelected
+                            ? theme === 'light'
+                              ? 'text-amber-950'
+                              : 'text-amber-300'
+                            : theme === 'light'
+                            ? 'text-amber-950'
+                            : 'text-amber-200'
+                        } leading-tight truncate`}>
                           {preset.nameKh}
                         </span>
                         <span className={`block text-[9px] ${theme === 'light' ? 'text-neutral-500' : 'text-amber-400/70'} truncate mt-0.5`}>
@@ -1659,7 +1841,7 @@ export default function DesignSettingsSection({
             {/* Custom Background Upload / File Picker */}
             <DesignFilePicker
               label="ឬបញ្ចូលរូបភាពកណ្ដាលធៀបផ្ទាល់ខ្លួន (Custom Upload for Middle Card)"
-              previewUrl={config.main_background}
+              previewUrl={currentBackground || rawMiddleBackground}
               onFileSelected={(url) => {
                 onUpdateConfig('main_background', url);
                 onUpdateConfig('details_background', url);

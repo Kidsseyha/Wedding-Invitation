@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { ChevronDown, Check, X } from 'lucide-react';
 import { getFirstNameInitial, resolveMonogramFontFamily } from '../utils/monogramHelpers';
+import { ShapedTitleText } from './KhmerRoyalOrnament';
 
 interface TheapKhmerTemplate15CoverProps {
   groom?: string;
@@ -11,6 +12,7 @@ interface TheapKhmerTemplate15CoverProps {
   singlePerson?: boolean;
   subtitleKh?: string;
   subtitleEn?: string;
+  titleShape?: 'straight' | 'arch-up' | 'arch-down' | 'wave';
   coverMonogramGroom?: string;
   coverMonogramBride?: string;
   coverMonogramLang?: 'kh' | 'en';
@@ -58,6 +60,7 @@ export default function TheapKhmerTemplate15Cover({
   singlePerson = false,
   subtitleKh = 'សិរីសួស្តីអាពាហ៍ពិពាហ៍',
   subtitleEn = 'Wedding Celebration',
+  titleShape = 'straight',
   coverMonogramGroom,
   coverMonogramBride,
   coverMonogramLang,
@@ -148,18 +151,16 @@ export default function TheapKhmerTemplate15Cover({
         transition={{ duration: 0.7, delay: 0.08, ease: 'easeOut' }}
         className="relative z-[10] flex flex-col items-center w-full mt-2"
       >
-        <h1
+        <ShapedTitleText
+          text={language === 'kh' ? subtitleKh || 'សិរីសួស្តីអាពាហ៍ពិពាហ៍' : subtitleEn || 'Wedding Celebration'}
+          shape={titleShape}
+          color="#9c732d"
+          fontFamily={language === 'kh' ? "'Moulpali', 'Moul', serif" : "'Playfair Display', Georgia, serif"}
           className="font-bold tracking-wide px-2"
           style={{
-            fontFamily: 'Moulpali, serif',
-            lineHeight: '1.75',
-            fontSize: 'clamp(1.375rem, 6vw, 2rem)',
-            color: '#9c732d',
             textShadow: '0 1px 2px rgba(255,255,255,0.95)',
           }}
-        >
-          {language === 'kh' ? subtitleKh || 'សិរីសួស្តីអាពាហ៍ពិពាហ៍' : subtitleEn || 'Wedding Celebration'}
-        </h1>
+        />
 
         <TheapKhmerDivider className="w-48 sm:w-56 h-auto mt-1" />
       </motion.header>

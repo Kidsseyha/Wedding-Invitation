@@ -3066,44 +3066,60 @@ export default function App() {
           </div>
 
           {/* Middle Card Header Background Wallpaper */}
-          {isHousewarming || isEngagement || isAnniversary ? (
-            <>
-              <div
-                className={`absolute inset-0 bg-cover bg-center ${theme === 'light' ? 'opacity-45' : 'opacity-55'}`}
-                style={{
-                  backgroundImage: `url(${
-                    isAnniversary
-                      ? khmerAnnivSilkBg
-                      : isEngagement
-                      ? '/assets/aistudio/image_6e49a03a.png'
-                      : khmerNatureBg
-                  })`,
-                }}
-              />
-              <div
-                className="absolute inset-0 transition-colors duration-500"
-                style={{
-                  background: isAnniversary
-                    ? theme === 'light'
-                      ? 'linear-gradient(to bottom, rgba(252, 247, 235, 0.62) 0%, rgba(252, 247, 235, 0.88) 58%, #fcf7eb 100%)'
-                      : 'linear-gradient(to bottom, rgba(26, 7, 13, 0.58) 0%, rgba(26, 7, 13, 0.88) 58%, #1a070d 100%)'
-                    : theme === 'light'
-                    ? 'linear-gradient(to bottom, rgba(250, 247, 238, 0.55) 0%, rgba(250, 247, 238, 0.85) 58%, #faf7ee 100%)'
-                    : 'linear-gradient(to bottom, rgba(4, 22, 16, 0.55) 0%, rgba(6, 31, 23, 0.86) 58%, #061f17 100%)',
-                }}
-              />
-            </>
-          ) : (
-            <>
-              {!config.hide_main_background && (
-                <div
-                  className="absolute inset-0 bg-cover bg-top opacity-65"
-                  style={{ backgroundImage: `url(${config.details_background || config.main_background || config.cover_background})` }}
-                />
-              )}
-              <div className={`absolute inset-0 bg-gradient-to-b ${theme === 'light' ? 'from-white/20 via-transparent to-white/80' : theme === 'gray' ? 'from-[#1b1e25]/20 via-transparent to-[#1b1e25]/80' : 'from-black/10 via-transparent to-black/60'} transition-all duration-500 ease-in-out`} />
-            </>
-          )}
+          {(() => {
+            const rawMidBg = config.details_background || config.main_background || '';
+            const hasCustomMidBg =
+              Boolean(rawMidBg) &&
+              !rawMidBg.includes('template-1/free-background.jpg') &&
+              !rawMidBg.includes('contents/cover-2.jpg');
+
+            if (isHousewarming || isEngagement || isAnniversary) {
+              const effectiveMidBg = hasCustomMidBg
+                ? rawMidBg
+                : isAnniversary
+                ? khmerAnnivSilkBg
+                : isEngagement
+                ? '/assets/aistudio/image_6e49a03a.png'
+                : khmerNatureBg;
+
+              return (
+                <>
+                  {!config.hide_main_background && (
+                    <div
+                      className={`absolute inset-0 bg-cover bg-center ${theme === 'light' ? 'opacity-45' : 'opacity-55'}`}
+                      style={{
+                        backgroundImage: `url(${effectiveMidBg})`,
+                      }}
+                    />
+                  )}
+                  <div
+                    className="absolute inset-0 transition-colors duration-500"
+                    style={{
+                      background: isAnniversary
+                        ? theme === 'light'
+                          ? 'linear-gradient(to bottom, rgba(252, 247, 235, 0.62) 0%, rgba(252, 247, 235, 0.88) 58%, #fcf7eb 100%)'
+                          : 'linear-gradient(to bottom, rgba(26, 7, 13, 0.58) 0%, rgba(26, 7, 13, 0.88) 58%, #1a070d 100%)'
+                        : theme === 'light'
+                        ? 'linear-gradient(to bottom, rgba(250, 247, 238, 0.55) 0%, rgba(250, 247, 238, 0.85) 58%, #faf7ee 100%)'
+                        : 'linear-gradient(to bottom, rgba(4, 22, 16, 0.55) 0%, rgba(6, 31, 23, 0.86) 58%, #061f17 100%)',
+                    }}
+                  />
+                </>
+              );
+            }
+
+            return (
+              <>
+                {!config.hide_main_background && (rawMidBg || config.cover_background) && (
+                  <div
+                    className="absolute inset-0 bg-cover bg-top opacity-65"
+                    style={{ backgroundImage: `url(${rawMidBg || config.cover_background})` }}
+                  />
+                )}
+                <div className={`absolute inset-0 bg-gradient-to-b ${theme === 'light' ? 'from-white/20 via-transparent to-white/80' : theme === 'gray' ? 'from-[#1b1e25]/20 via-transparent to-[#1b1e25]/80' : 'from-black/10 via-transparent to-black/60'} transition-all duration-500 ease-in-out`} />
+              </>
+            );
+          })()}
 
           {/* Main Hero Portrait/Villa Emblem with Artistic Frame & Shape */}
           <div className="relative pt-24 sm:pt-10 pb-3 sm:pb-4 px-3.5 sm:px-8 flex flex-col items-center">
@@ -3224,12 +3240,13 @@ export default function App() {
               >
                 {language === 'kh' ? badgeKh : badgeEn}
               </span>
-              <h1
-                style={{ color: isAnniversary ? sectionPrimaryColor : isHousewarming ? hwGoldColor : (config.primaryColor || '#f5b80f') }}
+              <ShapedTitleText
+                text={textContent.main_title}
+                shape={config.title_text_shape}
+                color={isAnniversary ? sectionPrimaryColor : isHousewarming ? hwGoldColor : (config.primaryColor || '#f5b80f')}
+                fontFamily="'Moul', 'Moulpali', 'Noto Serif Khmer', serif"
                 className="text-xl sm:text-3xl md:text-4xl font-moul py-1 sm:py-1.5 leading-normal drop-shadow-[0_2px_6px_rgba(0,0,0,0.2)] px-1"
-              >
-                {textContent.main_title}
-              </h1>
+              />
             </motion.div>
 
             {/* Couple / Host Names */}

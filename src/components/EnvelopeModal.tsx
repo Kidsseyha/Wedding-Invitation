@@ -719,6 +719,7 @@ export default function EnvelopeModal({
                     singlePerson={singlePerson}
                     subtitleKh={subtitleKh}
                     subtitleEn={subtitleEn}
+                    titleShape={titleTextShape}
                     anniversaryMilestone={anniversaryMilestone}
                     anniversaryMilestoneEn={anniversaryMilestoneEn}
                     storyStartYear={storyStartYear}
@@ -912,6 +913,8 @@ export default function EnvelopeModal({
                         brideEn={brideEn}
                         singlePerson={singlePerson}
                         subtitleKh={subtitleKh}
+                        subtitleEn={subtitleEn}
+                        titleShape={titleTextShape}
                         coverMonogramGroom={coverMonogramGroom}
                         coverMonogramBride={coverMonogramBride}
                         coverMonogramLang={coverMonogramLang}
@@ -1103,19 +1106,18 @@ export default function EnvelopeModal({
                     </div>
 
                     {/* Main Headline: Bold & Highly Readable Khmer Headline */}
-                    <div className="relative z-10 flex flex-col items-center justify-center mt-1 mb-0.5 px-2">
-                      <h1
-                        className="tracking-wide font-bold font-moul bg-gradient-to-r from-[#fef08a] via-[#fde047] to-[#2dd4bf] bg-clip-text text-transparent drop-shadow-[0_2px_12px_rgba(253,224,71,0.4)]"
-                        style={{
-                          fontFamily: "'Moul', serif",
-                          fontSize: 'clamp(1.25rem, 5.2vw, 1.625rem)',
-                          lineHeight: '1.6',
-                        }}
-                      >
-                        {language === 'kh' 
-                          ? (subtitleKh || 'រីករាយពិធីខួបកំណើត') 
-                          : (subtitleEn || 'HAPPY BIRTHDAY PARTY')}
-                      </h1>
+                    <div className="relative z-10 flex flex-col items-center justify-center mt-1 mb-0.5 px-2 w-full">
+                      <ShapedTitleText
+                        text={
+                          language === 'kh'
+                            ? subtitleKh || 'រីករាយពិធីខួបកំណើត'
+                            : subtitleEn || 'HAPPY BIRTHDAY PARTY'
+                        }
+                        shape={titleTextShape}
+                        color="#fde047"
+                        fontFamily="'Moul', serif"
+                        className="tracking-wide font-bold font-moul drop-shadow-[0_2px_12px_rgba(253,224,71,0.4)]"
+                      />
                       {(anniversaryMilestone?.trim() || anniversaryMilestoneEn?.trim()) ? (
                         <span
                           className="mt-0.5 px-3 py-0.5 rounded-full bg-[#fde047]/15 border border-[#fde047]/45 text-xs sm:text-[13px] font-bold text-[#fef08a] tracking-wide drop-shadow-sm"
@@ -1359,6 +1361,7 @@ export default function EnvelopeModal({
                     singlePerson={singlePerson}
                     subtitleKh={subtitleKh}
                     subtitleEn={subtitleEn}
+                    titleShape={titleTextShape}
                     ribbonLabel={ribbonLabel}
                     guestName={guestName}
                     language={language}
@@ -1436,54 +1439,20 @@ export default function EnvelopeModal({
                       transition={{ duration: 0.8, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
                       className="flex flex-col items-center relative z-10 pt-2"
                     >
-                      {/* Curved Heading with Shimmer Animation */}
+                      {/* Curved / Shaped Heading with Shimmer Animation */}
                       <motion.div
                         initial={{ opacity: 0, y: -8 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ duration: 0.8 }}
                         className="flex justify-center -mt-2 mb-1 select-none w-full drop-shadow-[0_4px_10px_rgba(0,0,0,0.35)]"
                       >
-                        <motion.svg
-                          viewBox="0 0 340 90"
-                          animate={{
-                            y: [0, -4, 0, 3, 0],
-                            scale: [1, 1.02, 1, 1.015, 1],
-                          }}
-                          transition={{
-                            duration: 4.2,
-                            repeat: Infinity,
-                            ease: 'easeInOut',
-                          }}
-                          className="w-full max-w-[290px] sm:max-w-[340px] h-auto overflow-visible"
-                        >
-                          <defs>
-                            <linearGradient id="curveGoldGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                              <stop offset="0%" stopColor="#d4af37" />
-                              <stop offset="25%" stopColor="#fff8db" />
-                              <stop offset="50%" stopColor="#f5b80f" />
-                              <stop offset="75%" stopColor="#fff8db" />
-                              <stop offset="100%" stopColor="#d4af37" />
-                            </linearGradient>
-                          </defs>
-                          <path
-                            id="subtitleCurve"
-                            d="M 20,78 Q 170,20 320,78"
-                            fill="transparent"
-                          />
-                          <text
-                            style={{
-                              fill: 'url(#curveGoldGradient)',
-                              fontFamily: language === 'kh' ? 'Moul, Moulpali, serif' : 'Norican, cursive',
-                              fontSize: '24px',
-                              letterSpacing: '0.12em',
-                              fontWeight: 'bold',
-                            }}
-                          >
-                            <textPath href="#subtitleCurve" startOffset="50%" textAnchor="middle">
-                              {language === 'kh' ? subtitleKh : subtitleEn}
-                            </textPath>
-                          </text>
-                        </motion.svg>
+                        <ShapedTitleText
+                          text={(language === 'kh' ? subtitleKh : subtitleEn) || ''}
+                          shape={titleTextShape || 'arch-up'}
+                          color={primaryColor || '#f5b80f'}
+                          fontFamily={language === 'kh' ? "'Moul', 'Moulpali', serif" : "'Norican', cursive"}
+                          className="w-full max-w-[290px] sm:max-w-[340px]"
+                        />
                       </motion.div>
 
                       {/* Couple / Host Names */}
