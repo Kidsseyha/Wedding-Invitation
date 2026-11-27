@@ -1783,43 +1783,6 @@ export default function EnvelopeModal({
             </motion.div>
               </motion.div>
             </div>
-
-            {/* Screen Rotation Bar for Computer & Smartphone */}
-            <div className="mt-3 mb-1 flex items-center justify-center gap-2 z-30">
-              <button
-                id="screen-rotate-btn"
-                type="button"
-                onClick={handleCycleScreenRotation}
-                className="group flex items-center gap-2 px-3.5 py-1.5 rounded-full border border-amber-400/60 bg-black/80 hover:bg-black/95 text-amber-200 hover:text-amber-100 shadow-[0_6px_22px_rgba(0,0,0,0.45)] backdrop-blur-md transition-all cursor-pointer select-none active:scale-95"
-                title={language === 'kh' ? 'បង្វិលអេក្រង់ 90° (កុំព្យូទ័រ និងទូរស័ព្ទ)' : 'Rotate Screen 90° (Desktop & Mobile)'}
-              >
-                <RotateCw className="w-3.5 h-3.5 text-amber-300 group-hover:rotate-90 transition-transform duration-300" />
-                <span className="text-xs font-khmer font-semibold whitespace-nowrap">
-                  {language === 'kh' ? 'បង្វិលអេក្រង់' : 'Rotate Screen'}
-                </span>
-                <span className="px-1.5 py-0.5 rounded-full bg-amber-400/20 border border-amber-400/40 text-[10px] font-mono font-bold text-amber-300">
-                  {screenRotation}°
-                </span>
-              </button>
-
-              <AnimatePresence>
-                {screenRotation !== 0 && (
-                  <motion.button
-                    id="screen-rotate-reset-btn"
-                    type="button"
-                    initial={{ opacity: 0, scale: 0.85 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.85 }}
-                    onClick={() => setScreenRotation(0)}
-                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-full border border-amber-400/40 bg-black/75 hover:bg-black/95 text-amber-300 hover:text-white text-xs font-khmer shadow-md backdrop-blur-md transition-all cursor-pointer select-none active:scale-95"
-                    title={language === 'kh' ? 'កំណត់ទៅ 0° វិញ' : 'Reset to 0°'}
-                  >
-                    <RotateCcw className="w-3 h-3" />
-                    <span>0°</span>
-                  </motion.button>
-                )}
-              </AnimatePresence>
-            </div>
           </div>
         </motion.div>
       )}
