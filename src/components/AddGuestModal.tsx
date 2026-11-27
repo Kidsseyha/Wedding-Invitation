@@ -328,14 +328,42 @@ export default function AddGuestModal({
   // Add guest to dropbox list (Syncs to Firebase & server scoped by user + invitation)
   const handleAddNewGuestToDropbox = async (e?: FormEvent) => {
     if (e) e.preventDefault();
-    if (!newGuestQuickName.trim()) return;
-    const catLabels = getCategoryLabel(newGuestQuickCategory);
+    const trimmedName = newGuestQuickName.trim();
+    if (!trimmedName) return;
+    const selectedCategory = newGuestQuickCategory;
+    const catLabels = getCategoryLabel(selectedCategory);
+
+    // Clear input and optimistically update UI immediately
+    setNewGuestQuickName('');
+    setGuestInput(trimmedName);
+    setCategory(selectedCategory);
+    setSavedGuests(prev => {
+      const existingIdx = prev.findIndex(g => g.name.trim().toLowerCase() === trimmedName.toLowerCase());
+      const optimisticGuest: GuestPreset = {
+        id: existingIdx >= 0 ? prev[existingIdx].id : `guest-${Date.now()}`,
+        name: trimmedName,
+        category: selectedCategory,
+        categoryLabelKh: catLabels.kh,
+        categoryLabelEn: catLabels.en,
+        ownerId: effectiveOwnerId,
+        eventId: effectiveEventId,
+        ...(effectiveEventType ? { eventType: effectiveEventType } : {}),
+      };
+      if (existingIdx >= 0) {
+        const copy = [...prev];
+        copy[existingIdx] = { ...copy[existingIdx], ...optimisticGuest };
+        return copy;
+      }
+      return [...prev, optimisticGuest];
+    });
+    showFeedback(language === 'kh' ? 'បានរក្សាទុកភ្ញៀវថ្មីចូល Database!' : 'Guest saved to Database!');
+
     setIsSyncingWithCloud(true);
     try {
-      const saved = await saveGuestToFirebase(
+      await saveGuestToFirebase(
         {
-          name: newGuestQuickName.trim(),
-          category: newGuestQuickCategory,
+          name: trimmedName,
+          category: selectedCategory,
           categoryLabelKh: catLabels.kh,
           categoryLabelEn: catLabels.en,
           eventId: effectiveEventId,
@@ -352,10 +380,6 @@ export default function AddGuestModal({
           detail: { ownerId: effectiveOwnerId, eventId: effectiveEventId, guests: nextGuests },
         })
       );
-      setGuestInput(newGuestQuickName.trim());
-      setCategory(newGuestQuickCategory);
-      setNewGuestQuickName('');
-      showFeedback(language === 'kh' ? 'បានរក្សាទុកភ្ញៀវថ្មីចូល Database!' : 'Guest saved to Database!');
     } catch (err) {
       showFeedback(language === 'kh' ? 'បានបន្ថែមភ្ញៀវ' : 'Guest added');
     } finally {
@@ -365,13 +389,37 @@ export default function AddGuestModal({
 
   // Save/Update selected guest directly in dropbox list (Syncs to Firebase & server scoped by user + invitation)
   const handleUpdateCurrentInDropbox = async () => {
-    const nameToSave = fullName;
-    if (!nameToSave.trim()) return;
+    const nameToSave = fullName.trim();
+    if (!nameToSave) return;
     const catLabels = getCategoryLabel(category);
+    const existing = savedGuests.find(g => g.name.toLowerCase() === nameToSave.toLowerCase());
+
+    // Optimistically update UI immediately
+    setSavedGuests(prev => {
+      const idx = prev.findIndex(g => g.id === existing?.id || g.name.toLowerCase() === nameToSave.toLowerCase());
+      const optimisticGuest: GuestPreset = {
+        id: existing?.id || `guest-${Date.now()}`,
+        name: nameToSave,
+        category,
+        categoryLabelKh: catLabels.kh,
+        categoryLabelEn: catLabels.en,
+        note: note.trim() || undefined,
+        ownerId: effectiveOwnerId,
+        eventId: effectiveEventId,
+        ...(effectiveEventType ? { eventType: effectiveEventType } : {}),
+      };
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], ...optimisticGuest };
+        return copy;
+      }
+      return [...prev, optimisticGuest];
+    });
+    showFeedback(language === 'kh' ? 'បានរក្សាទុកឈ្មោះក្នុង Database!' : 'Saved to Database!');
+
     setIsSyncingWithCloud(true);
     try {
-      const existing = savedGuests.find(g => g.name.toLowerCase() === nameToSave.toLowerCase());
-      const saved = await saveGuestToFirebase(
+      await saveGuestToFirebase(
         {
           id: existing?.id,
           name: nameToSave,
@@ -393,7 +441,6 @@ export default function AddGuestModal({
           detail: { ownerId: effectiveOwnerId, eventId: effectiveEventId, guests: nextGuests },
         })
       );
-      showFeedback(language === 'kh' ? 'បានរក្សាទុកឈ្មោះក្នុង Database!' : 'Saved to Database!');
     } catch (err) {
       showFeedback(language === 'kh' ? 'បានរក្សាទុកឈ្មោះក្នុង Drop box!' : 'Saved to drop box!');
     } finally {
@@ -410,15 +457,35 @@ export default function AddGuestModal({
 
   // Save inline edit (Syncs to Firebase & server scoped by user + invitation)
   const handleSaveInlineEdit = async (id: string) => {
-    if (!editingGuestName.trim()) return;
-    const catLabels = getCategoryLabel(editingGuestCategory);
+    const trimmedName = editingGuestName.trim();
+    if (!trimmedName) return;
+    const selectedCategory = editingGuestCategory;
+    const catLabels = getCategoryLabel(selectedCategory);
+
+    // Optimistically update UI immediately
+    setEditingGuestId(null);
+    setSavedGuests(prev =>
+      prev.map(g =>
+        g.id === id
+          ? {
+              ...g,
+              name: trimmedName,
+              category: selectedCategory,
+              categoryLabelKh: catLabels.kh,
+              categoryLabelEn: catLabels.en,
+            }
+          : g
+      )
+    );
+    showFeedback(language === 'kh' ? 'បានកែប្រែឈ្មោះដោយជោគជ័យ!' : 'Updated successfully!');
+
     setIsSyncingWithCloud(true);
     try {
-      const updated = await saveGuestToFirebase(
+      await saveGuestToFirebase(
         {
           id,
-          name: editingGuestName.trim(),
-          category: editingGuestCategory,
+          name: trimmedName,
+          category: selectedCategory,
           categoryLabelKh: catLabels.kh,
           categoryLabelEn: catLabels.en,
           eventId: effectiveEventId,
@@ -435,8 +502,6 @@ export default function AddGuestModal({
           detail: { ownerId: effectiveOwnerId, eventId: effectiveEventId, guests: nextGuests },
         })
       );
-      setEditingGuestId(null);
-      showFeedback(language === 'kh' ? 'បានកែប្រែឈ្មោះដោយជោគជ័យ!' : 'Updated successfully!');
     } catch (err) {
       showFeedback(language === 'kh' ? 'បានកែប្រែឈ្មោះភ្ញៀវ' : 'Guest updated');
     } finally {

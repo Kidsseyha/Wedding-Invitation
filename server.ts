@@ -1117,15 +1117,25 @@ app.post('/api/guests', (req, res) => {
   if (dbId && dbId !== GUEST_PUBLIC_SCOPE) {
     ensureUserDatabaseOnDisk({ scopeId: dbId, email: ownerEmail });
     const dbGuests = readUserDbJson<any[]>(dbId, 'guests.json', []);
-    const dbIdx = dbGuests.findIndex((g: any) => g.id === normalizedGuest.id);
-    if (dbIdx >= 0) dbGuests[dbIdx] = normalizedGuest;
+    const dbIdx = dbGuests.findIndex(
+      (g: any) =>
+        g.id === normalizedGuest.id ||
+        (g.name?.toLowerCase?.() === normalizedGuest.name.toLowerCase() &&
+          guestMatchesEventScope(g, dbId, normalizedGuest.eventId))
+    );
+    if (dbIdx >= 0) dbGuests[dbIdx] = { ...dbGuests[dbIdx], ...normalizedGuest, id: dbGuests[dbIdx].id };
     else dbGuests.push(normalizedGuest);
     writeUserDbJson(dbId, 'guests.json', dbGuests);
   } else {
     const guests = getSavedGuests();
-    const existingIdx = guests.findIndex((g: any) => g.id === normalizedGuest.id);
+    const existingIdx = guests.findIndex(
+      (g: any) =>
+        g.id === normalizedGuest.id ||
+        (g.name?.toLowerCase?.() === normalizedGuest.name.toLowerCase() &&
+          guestMatchesEventScope(g, GUEST_PUBLIC_SCOPE, normalizedGuest.eventId))
+    );
     if (existingIdx >= 0) {
-      guests[existingIdx] = normalizedGuest;
+      guests[existingIdx] = { ...guests[existingIdx], ...normalizedGuest, id: guests[existingIdx].id };
     } else {
       guests.push(normalizedGuest);
     }

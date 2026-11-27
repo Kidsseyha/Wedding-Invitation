@@ -470,25 +470,30 @@ export async function seedDefaultGuestsToFirebase(
     // ignore
   }
 
-  if (IS_FIRESTORE_WRITE_DISABLED || (typeof window !== 'undefined' && localStorage.getItem('firestore_quota_exceeded') === 'true')) {
-    return;
-  }
-  try {
-    if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
-      await ensureUserDatabaseInFirebase({ scopeId: effectiveOwner, skipRestApi: true });
-    }
-    await Promise.all(
-      payloads.map(async presetPayload => {
+  if (!IS_FIRESTORE_WRITE_DISABLED && !isFirestoreKnownUnavailable()) {
+    void (async () => {
+      try {
         if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
-          await setDoc(getUserEventGuestDoc(effectiveOwner, effectiveEventId, presetPayload.id), presetPayload, { merge: true });
-          await setDoc(getScopedGuestDoc(effectiveOwner, presetPayload.id), presetPayload, { merge: true });
+          await ensureUserDatabaseInFirebase({ scopeId: effectiveOwner, skipRestApi: true });
         }
-        const docRef = doc(db, GUESTS_COLLECTION, presetPayload.id);
-        await setDoc(docRef, presetPayload, { merge: true });
-      })
-    );
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, GUESTS_COLLECTION);
+        await Promise.all(
+          payloads.map(async presetPayload => {
+            const writes: Promise<unknown>[] = [
+              setDoc(doc(db, GUESTS_COLLECTION, presetPayload.id), presetPayload, { merge: true }),
+            ];
+            if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
+              writes.push(
+                setDoc(getUserEventGuestDoc(effectiveOwner, effectiveEventId, presetPayload.id), presetPayload, { merge: true }),
+                setDoc(getScopedGuestDoc(effectiveOwner, presetPayload.id), presetPayload, { merge: true })
+              );
+            }
+            await Promise.all(writes);
+          })
+        );
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, GUESTS_COLLECTION);
+      }
+    })();
   }
 }
 
@@ -620,7 +625,7 @@ export async function saveGuestToFirebase(
     }
   });
 
-  // Always update scoped local storage
+  // Always update scoped local storage immediately
   try {
     const local = localStorage.getItem(storageKey);
     const parsed = local !== null ? JSON.parse(local) : null;
@@ -633,11 +638,16 @@ export async function saveGuestToFirebase(
           effectiveEventType || undefined
         );
     const targetBaseId = stripGuestIdPrefix(guestId);
+    const targetNameLower = String(payload.name || '').trim().toLowerCase();
     const idx = baseList.findIndex(
-      g => g.id === guestId || stripGuestIdPrefix(g.id) === targetBaseId
+      g =>
+        g.id === guestId ||
+        stripGuestIdPrefix(g.id) === targetBaseId ||
+        (targetNameLower && g.name.trim().toLowerCase() === targetNameLower)
     );
     if (idx >= 0) {
-      baseList[idx] = payload;
+      baseList[idx] = { ...baseList[idx], ...payload, id: baseList[idx].id || guestId };
+      payload.id = baseList[idx].id;
     } else {
       baseList.push(payload);
     }
@@ -657,23 +667,29 @@ export async function saveGuestToFirebase(
     // ignore
   }
 
-  if (IS_FIRESTORE_WRITE_DISABLED || (typeof window !== 'undefined' && localStorage.getItem('firestore_quota_exceeded') === 'true')) {
-    return payload as GuestPreset;
+  // Sync to Firestore asynchronously in background so UI never blocks on Firestore latency
+  if (!IS_FIRESTORE_WRITE_DISABLED && !isFirestoreKnownUnavailable()) {
+    const finalGuestId = payload.id || guestId;
+    void (async () => {
+      try {
+        const writes: Promise<unknown>[] = [
+          setDoc(doc(db, GUESTS_COLLECTION, finalGuestId), payload, { merge: true }),
+        ];
+        if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
+          writes.push(
+            ensureUserDatabaseInFirebase({ scopeId: effectiveOwner, skipRestApi: true }),
+            setDoc(getUserEventGuestDoc(effectiveOwner, effectiveEventId, finalGuestId), payload, { merge: true }),
+            setDoc(getScopedGuestDoc(effectiveOwner, finalGuestId), payload, { merge: true })
+          );
+        }
+        await Promise.all(writes);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, `${GUESTS_COLLECTION}/${finalGuestId}`);
+      }
+    })();
   }
 
-  try {
-    if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
-      await ensureUserDatabaseInFirebase({ scopeId: effectiveOwner, skipRestApi: true });
-      await setDoc(getUserEventGuestDoc(effectiveOwner, effectiveEventId, guestId), payload, { merge: true });
-      await setDoc(getScopedGuestDoc(effectiveOwner, guestId), payload, { merge: true });
-    }
-    const docRef = doc(db, GUESTS_COLLECTION, guestId);
-    await setDoc(docRef, payload, { merge: true });
-    return payload as GuestPreset;
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, `${GUESTS_COLLECTION}/${guestId}`);
-    return payload as GuestPreset;
-  }
+  return payload as GuestPreset;
 }
 
 /**
@@ -754,26 +770,31 @@ export async function saveGuestsBatchToFirebase(
     // ignore
   }
 
-  // 3. Sync to Firestore
-  if (IS_FIRESTORE_WRITE_DISABLED || (typeof window !== 'undefined' && localStorage.getItem('firestore_quota_exceeded') === 'true')) {
-    return payloads;
-  }
-
-  try {
-    if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
-      await ensureUserDatabaseInFirebase({ scopeId: effectiveOwner, skipRestApi: true });
-    }
-    await Promise.all(
-      payloads.map(async item => {
+  // 3. Sync to Firestore asynchronously in background so UI never blocks
+  if (!IS_FIRESTORE_WRITE_DISABLED && !isFirestoreKnownUnavailable()) {
+    void (async () => {
+      try {
         if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
-          await setDoc(getUserEventGuestDoc(effectiveOwner, effectiveEventId, item.id), item, { merge: true });
-          await setDoc(getScopedGuestDoc(effectiveOwner, item.id), item, { merge: true });
+          await ensureUserDatabaseInFirebase({ scopeId: effectiveOwner, skipRestApi: true });
         }
-        await setDoc(doc(db, GUESTS_COLLECTION, item.id), item, { merge: true });
-      })
-    );
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, GUESTS_COLLECTION);
+        await Promise.all(
+          payloads.map(async item => {
+            const writes: Promise<unknown>[] = [
+              setDoc(doc(db, GUESTS_COLLECTION, item.id), item, { merge: true }),
+            ];
+            if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
+              writes.push(
+                setDoc(getUserEventGuestDoc(effectiveOwner, effectiveEventId, item.id), item, { merge: true }),
+                setDoc(getScopedGuestDoc(effectiveOwner, item.id), item, { merge: true })
+              );
+            }
+            await Promise.all(writes);
+          })
+        );
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, GUESTS_COLLECTION);
+      }
+    })();
   }
 
   return payloads;
