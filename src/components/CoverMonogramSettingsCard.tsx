@@ -511,7 +511,6 @@ export default function CoverMonogramSettingsCard({
             {[
               { id: 'all' as const, labelKh: 'ទាំងអស់ (All KH & EN)' },
               { id: 'traditional' as const, labelKh: 'មង្គលការប្រពៃណី (Traditional)' },
-              { id: 'modern' as const, labelKh: 'មង្គលការបែបសម័យ (Modern)' },
             ].map((tab) => {
               const active = styleCategoryFilter === tab.id;
               return (
@@ -582,59 +581,6 @@ export default function CoverMonogramSettingsCard({
               </span>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
                 {traditionalEnPresets.map((font) => renderPresetButton(font, 'en'))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 2. Modern Wedding Reception (អាពាហ៍ពិពាហ៍បែបសម័យ) - KH & EN Styles */}
-        {(styleCategoryFilter === 'all' || styleCategoryFilter === 'modern') && (
-          <div
-            className={`p-3 rounded-xl border space-y-2.5 ${
-              theme === 'light'
-                ? 'bg-rose-50/60 border-rose-200/90'
-                : 'bg-rose-950/15 border-rose-500/25'
-            }`}
-          >
-            <div className="flex flex-wrap items-center justify-between gap-2 pb-1.5 border-b border-rose-500/20">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-rose-500" />
-                <span
-                  className={`text-[11px] font-khmer font-bold ${
-                    theme === 'light' ? 'text-rose-950' : 'text-rose-200'
-                  }`}
-                >
-                  ២. អាពាហ៍ពិពាហ៍បែបសម័យ (Modern Wedding Reception — KH &amp; EN Styles)
-                </span>
-              </div>
-              <span className="text-[10px] font-khmer opacity-75">
-                ម៉ូតអក្សរខ្មែរ ({modernKhPresets.length}) &amp; អង់គ្លេស ({modernEnPresets.length})
-              </span>
-            </div>
-
-            <div className="space-y-1.5">
-              <span
-                className={`block text-[10px] font-khmer font-semibold ${
-                  theme === 'light' ? 'text-rose-900' : 'text-rose-300/90'
-                }`}
-              >
-                • ម៉ូតអក្សរខ្មែរបែបសម័យ (Khmer Modern Reception Styles - {khSampleText}):
-              </span>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
-                {modernKhPresets.map((font) => renderPresetButton(font, 'kh'))}
-              </div>
-            </div>
-
-            <div className="space-y-1.5 pt-1">
-              <span
-                className={`block text-[10px] font-khmer font-semibold ${
-                  theme === 'light' ? 'text-rose-900' : 'text-rose-300/90'
-                }`}
-              >
-                • ម៉ូតអក្សរអង់គ្លេសបែបសម័យ (English Modern Reception Styles - {enSampleText}):
-              </span>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
-                {modernEnPresets.map((font) => renderPresetButton(font, 'en'))}
               </div>
             </div>
           </div>
