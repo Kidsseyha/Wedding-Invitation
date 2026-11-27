@@ -1304,6 +1304,12 @@ export default function AddGuestModal({
                       type="text"
                       value={newGuestQuickName}
                       onChange={e => setNewGuestQuickName(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddNewGuestToDropbox();
+                        }
+                      }}
                       placeholder={language === 'kh' ? 'បញ្ចូលឈ្មោះភ្ញៀវ...' : 'Enter guest name...'}
                       className={`flex-1 px-3 py-1.5 rounded-lg border text-xs font-khmer focus:outline-none ${
                         isLight
@@ -1329,7 +1335,7 @@ export default function AddGuestModal({
                     <button
                       type="button"
                       onClick={handleAddNewGuestToDropbox}
-                      disabled={isSyncingWithCloud || !newGuestQuickName.trim()}
+                      disabled={!newGuestQuickName.trim()}
                       className="px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-amber-950 font-khmer font-bold text-xs shadow transition-all disabled:opacity-50"
                     >
                       {language === 'kh' ? 'បន្ថែម' : 'Add'}
@@ -1364,7 +1370,7 @@ export default function AddGuestModal({
                       <button
                         type="button"
                         onClick={handleSaveAllGuestsToDatabase}
-                        disabled={isSyncingWithCloud || savedGuests.length === 0}
+                        disabled={savedGuests.length === 0}
                         className={`cursor-pointer px-2.5 py-1.5 rounded-lg border text-[10px] sm:text-[11px] font-khmer font-bold flex items-center gap-1.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                           isLight
                             ? 'bg-sky-100 hover:bg-sky-200 border-sky-300 text-sky-900'
@@ -1401,7 +1407,7 @@ export default function AddGuestModal({
                       <button
                         type="button"
                         onClick={handleClearAllGuests}
-                        disabled={isSyncingWithCloud || savedGuests.length === 0}
+                        disabled={savedGuests.length === 0}
                         className={`cursor-pointer px-2.5 py-1.5 rounded-lg border text-[10px] sm:text-[11px] font-khmer font-bold flex items-center gap-1.5 transition-all duration-150 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed group/delbtn ${
                           isLight
                             ? 'bg-rose-100 hover:bg-rose-200 border-rose-300 text-rose-800'
@@ -1409,11 +1415,7 @@ export default function AddGuestModal({
                         }`}
                         title={language === 'kh' ? 'ចុចទីនេះដើម្បីលុបបញ្ជីភ្ញៀវទាំងអស់' : 'Click to delete all guests'}
                       >
-                        {isSyncingWithCloud ? (
-                          <div className="w-3 h-3 border-2 border-rose-500 border-t-transparent rounded-full animate-spin" />
-                        ) : (
-                          <Trash2 className="w-3.5 h-3.5 text-rose-500 group-hover/delbtn:scale-110 transition-transform duration-150" />
-                        )}
+                        <Trash2 className="w-3.5 h-3.5 text-rose-500 group-hover/delbtn:scale-110 transition-transform duration-150" />
                         <span>{language === 'kh' ? '🗑️ លុបទាំងអស់' : 'Delete All'}</span>
                       </button>
                     </div>
@@ -1428,6 +1430,12 @@ export default function AddGuestModal({
                               type="text"
                               value={editingGuestName}
                               onChange={e => setEditingGuestName(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleSaveInlineEdit(g.id);
+                                }
+                              }}
                               className={`flex-1 px-2 py-1 rounded border text-xs font-khmer ${
                                 isLight
                                   ? 'bg-white border-amber-400 text-neutral-900'
@@ -1542,9 +1550,8 @@ export default function AddGuestModal({
                               <button
                                 type="button"
                                 onClick={() => handleDeleteGuest(g.id, g.name)}
-                                disabled={isSyncingWithCloud}
                                 title={language === 'kh' ? 'លុបឈ្មោះភ្ញៀវ និងផ្ទុក Database ឡើងវិញ' : 'Delete guest and reload database'}
-                                className={`p-1 rounded transition-all disabled:opacity-50 ${
+                                className={`p-1 rounded transition-all ${
                                   isLight
                                     ? 'text-neutral-500 hover:text-rose-600 hover:bg-rose-100'
                                     : 'text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10'

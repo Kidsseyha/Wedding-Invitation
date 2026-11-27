@@ -7,6 +7,7 @@ import {
   onSnapshot,
   query,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, IS_FIRESTORE_WRITE_DISABLED, isFirestoreKnownUnavailable } from '../lib/firebase';
 import { getGuestStorageKey, getScopedDefaultGuests, GuestPreset } from '../data/guests';
@@ -22,6 +23,16 @@ import { ensureUserDatabaseInFirebase } from './firebaseServices';
 const GUESTS_COLLECTION = 'guests';
 const EVENTS_COLLECTION = 'events';
 const USER_DATABASES_COLLECTION = 'user_databases';
+
+// On static/serverless Vercel deployments (.vercel.app), /api/guests does not exist on disk.
+// Skipping redundant /api/guests calls on .vercel.app (or after a 404) avoids 404 network latency.
+let isGuestsRestApiUnsupported =
+  typeof window !== 'undefined' &&
+  Boolean(window.location?.hostname?.endsWith('.vercel.app'));
+
+function shouldCallGuestsRestApi(): boolean {
+  return !isGuestsRestApiUnsupported;
+}
 
 function resolveOwnerId(ownerId?: string): string {
   return (ownerId && ownerId.trim()) || resolveUserScope().scopeId;
@@ -191,6 +202,42 @@ function normalizeAndFilterGuests(
   return result;
 }
 
+/**
+ * Merges remote guests with any locally saved guests in localStorage (giving priority to local additions/edits
+ * while respecting deletion tombstones) so background Firestore snapshots never wipe out newly added local guests.
+ */
+function mergeRemoteWithLocalGuests(
+  remoteGuests: GuestPreset[],
+  storageKey: string,
+  effectiveOwner: string,
+  effectiveEventId: string,
+  eventType?: string
+): GuestPreset[] {
+  let localGuests: GuestPreset[] = [];
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(storageKey) : null;
+    if (raw !== null) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        localGuests = parsed;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  // Combine localGuests first so freshly added/edited local records take precedence over stale remote snapshots
+  const combined = [...localGuests, ...remoteGuests];
+  const merged = normalizeAndFilterGuests(combined, effectiveOwner, effectiveEventId, eventType);
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(storageKey, JSON.stringify(merged));
+    }
+  } catch {
+    // ignore
+  }
+  return merged;
+}
+
 function getUserEventGuestsCollection(effectiveOwner: string, effectiveEventId: string) {
   return effectiveOwner && effectiveOwner !== GUEST_PUBLIC_SCOPE
     ? collection(db, USER_DATABASES_COLLECTION, effectiveOwner, EVENTS_COLLECTION, effectiveEventId, GUESTS_COLLECTION)
@@ -243,7 +290,41 @@ function buildGuestsApiUrl(effectiveOwner: string, effectiveEventId: string, ext
 }
 
 /**
- * Fetch all guests for a specific user AND specific invitation from REST API / Firestore / scoped localStorage
+ * Helper to commit a list of guest payloads to Firestore using atomic writeBatch chunks
+ */
+async function commitGuestsBatchToFirestore(
+  payloads: GuestPreset[],
+  effectiveOwner: string,
+  effectiveEventId: string
+): Promise<void> {
+  if (payloads.length === 0 || IS_FIRESTORE_WRITE_DISABLED || isFirestoreKnownUnavailable()) {
+    return;
+  }
+  try {
+    if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
+      await ensureUserDatabaseInFirebase({ scopeId: effectiveOwner, skipRestApi: true });
+    }
+    const CHUNK_SIZE = 120; // Each guest writes up to 3 docs -> max 360 ops per batch (< 500 Firestore limit)
+    for (let i = 0; i < payloads.length; i += CHUNK_SIZE) {
+      const chunk = payloads.slice(i, i + CHUNK_SIZE);
+      const batch = writeBatch(db);
+      for (const item of chunk) {
+        const guestId = item.id;
+        if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
+          batch.set(getUserEventGuestDoc(effectiveOwner, effectiveEventId, guestId), item, { merge: true });
+          batch.set(getScopedGuestDoc(effectiveOwner, guestId), item, { merge: true });
+        }
+        batch.set(doc(db, GUESTS_COLLECTION, guestId), item, { merge: true });
+      }
+      await batch.commit();
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, GUESTS_COLLECTION);
+  }
+}
+
+/**
+ * Fetch all guests for a specific user AND specific invitation from localStorage / REST API / Firestore
  */
 export async function fetchGuestsFromFirebase(
   ownerId?: string,
@@ -254,46 +335,17 @@ export async function fetchGuestsFromFirebase(
   const effectiveEventId = resolveEventId(eventId, effectiveOwner);
   const storageKey = getGuestStorageKey(effectiveOwner, effectiveEventId);
 
-  // 1. Check scoped server API first (strictly filtered by ownerId + eventId + tombstones)
+  // Fast path: if localStorage already has initialized guest state or deletion tombstones, return it immediately
+  // and sync any remote additions in the background so the UI never stalls on Vercel or slow networks.
   try {
-    const res = await fetch(buildGuestsApiUrl(effectiveOwner, effectiveEventId), {
-      cache: 'no-store',
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.success && Array.isArray(data.guests)) {
-        const scopedApiGuests = normalizeAndFilterGuests(
-          data.guests,
-          effectiveOwner,
-          effectiveEventId,
-          eventType
-        );
-        if (scopedApiGuests.length > 0) {
-          try {
-            localStorage.setItem(storageKey, JSON.stringify(scopedApiGuests));
-          } catch {
-            // ignore
-          }
-          return scopedApiGuests;
-        }
-        // If user already has an initialized local guest list or deletion tombstones, return immediately without slow Firestore waterfall!
-        const hasLocalState = typeof localStorage !== 'undefined' && localStorage.getItem(storageKey) !== null;
-        const hasTombstones = readDeletedGuestTokens(effectiveOwner, effectiveEventId).size > 0;
-        if (hasLocalState || hasTombstones) {
-          try {
-            const localRaw = localStorage.getItem(storageKey);
-            if (localRaw !== null) {
-              const parsed = JSON.parse(localRaw);
-              if (Array.isArray(parsed)) {
-                const filteredLocal = normalizeAndFilterGuests(parsed, effectiveOwner, effectiveEventId, eventType);
-                localStorage.setItem(storageKey, JSON.stringify(filteredLocal));
-                return filteredLocal;
-              }
-            }
-          } catch {
-            // ignore
-          }
-          return [];
+    if (typeof localStorage !== 'undefined') {
+      const localRaw = localStorage.getItem(storageKey);
+      if (localRaw !== null) {
+        const parsed = JSON.parse(localRaw);
+        if (Array.isArray(parsed)) {
+          const filteredLocal = normalizeAndFilterGuests(parsed, effectiveOwner, effectiveEventId, eventType);
+          localStorage.setItem(storageKey, JSON.stringify(filteredLocal));
+          return filteredLocal;
         }
       }
     }
@@ -301,125 +353,107 @@ export async function fetchGuestsFromFirebase(
     // ignore
   }
 
-  const skipFs = IS_FIRESTORE_WRITE_DISABLED || isFirestoreKnownUnavailable();
-
-  // 2. Check per-user + per-invitation subcollection `/user_databases/{effectiveOwner}/events/{effectiveEventId}/guests`
-  if (!skipFs && effectiveOwner !== GUEST_PUBLIC_SCOPE) {
+  // 1. Check scoped server API if supported (skipped on static .vercel.app)
+  if (shouldCallGuestsRestApi()) {
     try {
-      const eventGuestsQuery = query(
-        getUserEventGuestsCollection(effectiveOwner, effectiveEventId),
-        where('ownerId', '==', effectiveOwner)
-      );
-      const subSnap = await getDocs(eventGuestsQuery);
-      if (!subSnap.empty) {
-        const rawGuests: GuestPreset[] = [];
-        subSnap.forEach(docSnap => {
-          const rawData = docSnap.data() as GuestPreset;
-          if (guestMatchesEventScope({ ...rawData, eventId: rawData.eventId || effectiveEventId }, effectiveOwner, effectiveEventId)) {
-            rawGuests.push(mapDocToGuest(docSnap.id, rawData, effectiveOwner, effectiveEventId, eventType));
+      const res = await fetch(buildGuestsApiUrl(effectiveOwner, effectiveEventId), {
+        cache: 'no-store',
+      });
+      if (res.status === 404 || res.status === 405) {
+        isGuestsRestApiUnsupported = true;
+      } else if (res.ok) {
+        const data = await res.json();
+        if (data && data.success && Array.isArray(data.guests)) {
+          const scopedApiGuests = normalizeAndFilterGuests(
+            data.guests,
+            effectiveOwner,
+            effectiveEventId,
+            eventType
+          );
+          if (scopedApiGuests.length > 0) {
+            try {
+              localStorage.setItem(storageKey, JSON.stringify(scopedApiGuests));
+            } catch {
+              // ignore
+            }
+            return scopedApiGuests;
           }
-        });
-        const guests = normalizeAndFilterGuests(rawGuests, effectiveOwner, effectiveEventId, eventType);
-        if (guests.length > 0) {
-          try {
-            localStorage.setItem(storageKey, JSON.stringify(guests));
-          } catch {
-            // ignore
-          }
-          return guests;
         }
       }
     } catch {
-      // fallback to per-user /guests subcollection
-    }
-
-    // 3. Fallback to `/user_databases/{effectiveOwner}/guests` filtered by eventId (checking raw data.eventId BEFORE mapping)
-    try {
-      const userGuestsQuery = query(
-        collection(db, USER_DATABASES_COLLECTION, effectiveOwner, GUESTS_COLLECTION),
-        where('ownerId', '==', effectiveOwner)
-      );
-      const userSnap = await getDocs(userGuestsQuery);
-      if (!userSnap.empty) {
-        const rawGuests: GuestPreset[] = [];
-        userSnap.forEach(docSnap => {
-          const rawData = docSnap.data() as GuestPreset;
-          if (guestMatchesEventScope(rawData, effectiveOwner, effectiveEventId)) {
-            rawGuests.push(mapDocToGuest(docSnap.id, rawData, effectiveOwner, effectiveEventId, eventType));
-          }
-        });
-        const guests = normalizeAndFilterGuests(rawGuests, effectiveOwner, effectiveEventId, eventType);
-        if (guests.length > 0) {
-          try {
-            localStorage.setItem(storageKey, JSON.stringify(guests));
-          } catch {
-            // ignore
-          }
-          return guests;
-        }
-      }
-    } catch {
-      // fallback to top-level /guests
+      // ignore
     }
   }
 
-  // 4. Fallback to top-level `/guests` filtered by ownerId & eventId (checking raw data.eventId BEFORE mapping)
+  const skipFs = IS_FIRESTORE_WRITE_DISABLED || isFirestoreKnownUnavailable();
+
+  // 2. Query Firestore collections in parallel when local storage is empty
   if (!skipFs) {
     try {
-      const q = query(collection(db, GUESTS_COLLECTION), where('ownerId', '==', effectiveOwner));
-      const querySnapshot = await getDocs(q);
-      if (!querySnapshot.empty) {
-        const rawGuests: GuestPreset[] = [];
-        querySnapshot.forEach(docSnap => {
-          const rawData = docSnap.data() as GuestPreset;
-          if (guestMatchesEventScope(rawData, effectiveOwner, effectiveEventId)) {
-            rawGuests.push(mapDocToGuest(docSnap.id, rawData, effectiveOwner, effectiveEventId, eventType));
-          }
-        });
-        const guests = normalizeAndFilterGuests(rawGuests, effectiveOwner, effectiveEventId, eventType);
-        if (guests.length > 0) {
-          try {
-            localStorage.setItem(storageKey, JSON.stringify(guests));
-          } catch {
-            // ignore
-          }
-          return guests;
+      const queries =
+        effectiveOwner !== GUEST_PUBLIC_SCOPE
+          ? [
+              getDocs(
+                query(
+                  getUserEventGuestsCollection(effectiveOwner, effectiveEventId),
+                  where('ownerId', '==', effectiveOwner)
+                )
+              ),
+              getDocs(
+                query(
+                  collection(db, USER_DATABASES_COLLECTION, effectiveOwner, GUESTS_COLLECTION),
+                  where('ownerId', '==', effectiveOwner)
+                )
+              ),
+              getDocs(query(collection(db, GUESTS_COLLECTION), where('ownerId', '==', effectiveOwner))),
+            ]
+          : [getDocs(query(collection(db, GUESTS_COLLECTION), where('ownerId', '==', effectiveOwner)))];
+
+      const results = await Promise.allSettled(queries);
+      const rawGuests: GuestPreset[] = [];
+      for (const res of results) {
+        if (res.status === 'fulfilled' && !res.value.empty) {
+          res.value.forEach(docSnap => {
+            const rawData = docSnap.data() as GuestPreset;
+            if (
+              guestMatchesEventScope(
+                { ...rawData, eventId: rawData.eventId || effectiveEventId },
+                effectiveOwner,
+                effectiveEventId
+              )
+            ) {
+              rawGuests.push(mapDocToGuest(docSnap.id, rawData, effectiveOwner, effectiveEventId, eventType));
+            }
+          });
         }
+      }
+      const guests = normalizeAndFilterGuests(rawGuests, effectiveOwner, effectiveEventId, eventType);
+      if (guests.length > 0) {
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(guests));
+        } catch {
+          // ignore
+        }
+        return guests;
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.GET, GUESTS_COLLECTION);
     }
   }
 
-  // 5. Fallback to scoped local storage (preserving explicit empty [] when cleared) or scoped defaults filtered by tombstones
-  try {
-    const local = localStorage.getItem(storageKey);
-    if (local !== null) {
-      const parsed = JSON.parse(local);
-      if (Array.isArray(parsed)) {
-        const filteredLocal = normalizeAndFilterGuests(parsed, effectiveOwner, effectiveEventId, eventType);
-        localStorage.setItem(storageKey, JSON.stringify(filteredLocal));
-        return filteredLocal;
-      }
-    }
-    const defaults = normalizeAndFilterGuests(
-      getScopedDefaultGuests(effectiveOwner, effectiveEventId, eventType),
-      effectiveOwner,
-      effectiveEventId,
-      eventType
-    );
-    localStorage.setItem(storageKey, JSON.stringify(defaults));
-    return defaults;
-  } catch {
-    // ignore
-  }
-
-  return normalizeAndFilterGuests(
+  // 3. Fallback to scoped defaults filtered by tombstones
+  const defaults = normalizeAndFilterGuests(
     getScopedDefaultGuests(effectiveOwner, effectiveEventId, eventType),
     effectiveOwner,
     effectiveEventId,
     eventType
   );
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(defaults));
+  } catch {
+    // ignore
+  }
+  return defaults;
 }
 
 /**
@@ -454,9 +488,9 @@ export async function seedDefaultGuestsToFirebase(
     // ignore
   }
 
-  // Sync batch to REST API
-  try {
-    await fetch('/api/guests/batch', {
+  // Sync batch to REST API in background
+  if (shouldCallGuestsRestApi()) {
+    void fetch('/api/guests/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -465,36 +499,15 @@ export async function seedDefaultGuestsToFirebase(
         eventType,
         guests: payloads,
       }),
-    });
-  } catch {
-    // ignore
+    })
+      .then(res => {
+        if (res.status === 404 || res.status === 405) isGuestsRestApiUnsupported = true;
+      })
+      .catch(() => {});
   }
 
-  if (!IS_FIRESTORE_WRITE_DISABLED && !isFirestoreKnownUnavailable()) {
-    void (async () => {
-      try {
-        if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
-          await ensureUserDatabaseInFirebase({ scopeId: effectiveOwner, skipRestApi: true });
-        }
-        await Promise.all(
-          payloads.map(async presetPayload => {
-            const writes: Promise<unknown>[] = [
-              setDoc(doc(db, GUESTS_COLLECTION, presetPayload.id), presetPayload, { merge: true }),
-            ];
-            if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
-              writes.push(
-                setDoc(getUserEventGuestDoc(effectiveOwner, effectiveEventId, presetPayload.id), presetPayload, { merge: true }),
-                setDoc(getScopedGuestDoc(effectiveOwner, presetPayload.id), presetPayload, { merge: true })
-              );
-            }
-            await Promise.all(writes);
-          })
-        );
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, GUESTS_COLLECTION);
-      }
-    })();
-  }
+  // Sync to Firestore in background using atomic writeBatch
+  void commitGuestsBatchToFirestore(payloads, effectiveOwner, effectiveEventId);
 }
 
 /**
@@ -567,15 +580,16 @@ export function subscribeToGuests(
           }
         });
 
-        const guests = normalizeAndFilterGuests(rawGuests, effectiveOwner, effectiveEventId, eventType);
-
-        if (guests.length > 0) {
-          try {
-            localStorage.setItem(storageKey, JSON.stringify(guests));
-          } catch {
-            // ignore
-          }
-          callback(guests);
+        if (rawGuests.length > 0) {
+          // Merge remote Firestore snapshot with local guests so newly added local guests are never overwritten
+          const merged = mergeRemoteWithLocalGuests(
+            rawGuests,
+            storageKey,
+            effectiveOwner,
+            effectiveEventId,
+            eventType
+          );
+          callback(merged);
         } else {
           fallbackGuests();
         }
@@ -591,7 +605,7 @@ export function subscribeToGuests(
 }
 
 /**
- * Save or update guest scoped to BOTH current user AND current invitation in Firestore, API, and localStorage
+ * Save or update guest scoped to BOTH current user AND current invitation in localStorage (instant), API, and Firestore
  */
 export async function saveGuestToFirebase(
   guest: GuestPreset | Omit<GuestPreset, 'id'>,
@@ -625,7 +639,7 @@ export async function saveGuestToFirebase(
     }
   });
 
-  // Always update scoped local storage immediately
+  // 1. Always update scoped local storage synchronously (0ms)
   try {
     const local = localStorage.getItem(storageKey);
     const parsed = local !== null ? JSON.parse(local) : null;
@@ -656,44 +670,27 @@ export async function saveGuestToFirebase(
     // ignore
   }
 
-  // Always sync with server API
-  try {
-    await fetch('/api/guests', {
+  // 2. Sync with server API asynchronously in background (never blocks UI on Vercel or slow networks)
+  if (shouldCallGuestsRestApi()) {
+    void fetch('/api/guests', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-    });
-  } catch {
-    // ignore
+    })
+      .then(res => {
+        if (res.status === 404 || res.status === 405) isGuestsRestApiUnsupported = true;
+      })
+      .catch(() => {});
   }
 
-  // Sync to Firestore asynchronously in background so UI never blocks on Firestore latency
-  if (!IS_FIRESTORE_WRITE_DISABLED && !isFirestoreKnownUnavailable()) {
-    const finalGuestId = payload.id || guestId;
-    void (async () => {
-      try {
-        const writes: Promise<unknown>[] = [
-          setDoc(doc(db, GUESTS_COLLECTION, finalGuestId), payload, { merge: true }),
-        ];
-        if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
-          writes.push(
-            ensureUserDatabaseInFirebase({ scopeId: effectiveOwner, skipRestApi: true }),
-            setDoc(getUserEventGuestDoc(effectiveOwner, effectiveEventId, finalGuestId), payload, { merge: true }),
-            setDoc(getScopedGuestDoc(effectiveOwner, finalGuestId), payload, { merge: true })
-          );
-        }
-        await Promise.all(writes);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, `${GUESTS_COLLECTION}/${finalGuestId}`);
-      }
-    })();
-  }
+  // 3. Sync to Firestore asynchronously in background using atomic writeBatch
+  void commitGuestsBatchToFirestore([payload as GuestPreset], effectiveOwner, effectiveEventId);
 
   return payload as GuestPreset;
 }
 
 /**
- * Batch save multiple guests scoped to current user AND current invitation (used by Excel/CSV/Sheets imports)
+ * Batch save multiple guests scoped to current user AND current invitation (used by Excel/CSV/Sheets imports & Save All)
  */
 export async function saveGuestsBatchToFirebase(
   guests: Array<GuestPreset | Omit<GuestPreset, 'id'>>,
@@ -723,7 +720,7 @@ export async function saveGuestsBatchToFirebase(
     };
   });
 
-  // 1. Update scoped localStorage
+  // 1. Update scoped localStorage synchronously (0ms)
   try {
     const local = localStorage.getItem(storageKey);
     const parsed = local !== null ? JSON.parse(local) : null;
@@ -744,7 +741,8 @@ export async function saveGuestsBatchToFirebase(
           g.name.toLowerCase() === item.name.toLowerCase()
       );
       if (idx >= 0) {
-        list[idx] = { ...list[idx], ...item, id: item.id };
+        list[idx] = { ...list[idx], ...item, id: list[idx].id || item.id };
+        item.id = list[idx].id;
       } else {
         list.push(item);
       }
@@ -754,9 +752,9 @@ export async function saveGuestsBatchToFirebase(
     // ignore
   }
 
-  // 2. Sync batch to server API
-  try {
-    await fetch('/api/guests/batch', {
+  // 2. Sync batch to server API asynchronously in background
+  if (shouldCallGuestsRestApi()) {
+    void fetch('/api/guests/batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -765,37 +763,15 @@ export async function saveGuestsBatchToFirebase(
         eventType: effectiveEventType,
         guests: payloads,
       }),
-    });
-  } catch {
-    // ignore
+    })
+      .then(res => {
+        if (res.status === 404 || res.status === 405) isGuestsRestApiUnsupported = true;
+      })
+      .catch(() => {});
   }
 
-  // 3. Sync to Firestore asynchronously in background so UI never blocks
-  if (!IS_FIRESTORE_WRITE_DISABLED && !isFirestoreKnownUnavailable()) {
-    void (async () => {
-      try {
-        if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
-          await ensureUserDatabaseInFirebase({ scopeId: effectiveOwner, skipRestApi: true });
-        }
-        await Promise.all(
-          payloads.map(async item => {
-            const writes: Promise<unknown>[] = [
-              setDoc(doc(db, GUESTS_COLLECTION, item.id), item, { merge: true }),
-            ];
-            if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
-              writes.push(
-                setDoc(getUserEventGuestDoc(effectiveOwner, effectiveEventId, item.id), item, { merge: true }),
-                setDoc(getScopedGuestDoc(effectiveOwner, item.id), item, { merge: true })
-              );
-            }
-            await Promise.all(writes);
-          })
-        );
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, GUESTS_COLLECTION);
-      }
-    })();
-  }
+  // 3. Sync to Firestore asynchronously in background using atomic writeBatch
+  void commitGuestsBatchToFirestore(payloads, effectiveOwner, effectiveEventId);
 
   return payloads;
 }
@@ -851,9 +827,9 @@ export async function deleteGuestFromFirebase(
     addDeletedGuestTokens(effectiveOwner, effectiveEventId, id, resolvedName);
   }
 
-  // Delete from server API immediately (single fast local HTTP request)
-  try {
-    const res = await fetch(
+  // Delete from server API in background so UI never waits on Vercel / network latency
+  if (shouldCallGuestsRestApi()) {
+    void fetch(
       buildGuestsApiUrl(effectiveOwner, effectiveEventId, {
         id,
         ...(resolvedName ? { name: resolvedName } : {}),
@@ -862,63 +838,48 @@ export async function deleteGuestFromFirebase(
         method: 'DELETE',
         cache: 'no-store',
       }
-    );
-    if (res.ok) {
-      const data = await res.json().catch(() => null);
-      if (data && Array.isArray(data.guests) && data.guests.length > 0) {
-        remainingGuests = normalizeAndFilterGuests(
-          data.guests,
-          effectiveOwner,
-          effectiveEventId,
-          eventType
-        );
-        localStorage.setItem(storageKey, JSON.stringify(remainingGuests));
-      } else if (hadUnseededDefaults && remainingGuests.length > 0) {
-        // Persist remaining defaults in background without blocking UI
-        void fetch('/api/guests/batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ownerId: effectiveOwner,
-            eventId: effectiveEventId,
-            ...(eventType ? { eventType } : {}),
-            guests: remainingGuests,
-          }),
-        }).catch(() => {});
-      }
-    }
-  } catch {
-    // ignore
+    )
+      .then(async res => {
+        if (res.status === 404 || res.status === 405) {
+          isGuestsRestApiUnsupported = true;
+          return;
+        }
+        if (res.ok && hadUnseededDefaults && remainingGuests.length > 0) {
+          await fetch('/api/guests/batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ownerId: effectiveOwner,
+              eventId: effectiveEventId,
+              ...(eventType ? { eventType } : {}),
+              guests: remainingGuests,
+            }),
+          }).catch(() => {});
+        }
+      })
+      .catch(() => {});
   }
 
   if (IS_FIRESTORE_WRITE_DISABLED || isFirestoreKnownUnavailable()) {
     return remainingGuests;
   }
 
-  // Run Firestore candidate document cleanup asynchronously in the background so UI never stalls
-  void Promise.all(
-    candidateIds.map(async cid => {
-      if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
-        try {
-          await deleteDoc(getUserEventGuestDoc(effectiveOwner, effectiveEventId, cid));
-        } catch {
-          // ignore
+  // Run Firestore candidate document cleanup asynchronously in the background using atomic writeBatch
+  void (async () => {
+    try {
+      const batch = writeBatch(db);
+      for (const cid of candidateIds) {
+        if (effectiveOwner !== GUEST_PUBLIC_SCOPE) {
+          batch.delete(getUserEventGuestDoc(effectiveOwner, effectiveEventId, cid));
+          batch.delete(getScopedGuestDoc(effectiveOwner, cid));
         }
-        try {
-          await deleteDoc(getScopedGuestDoc(effectiveOwner, cid));
-        } catch {
-          // ignore
-        }
+        batch.delete(doc(db, GUESTS_COLLECTION, cid));
       }
-      try {
-        await deleteDoc(doc(db, GUESTS_COLLECTION, cid));
-      } catch {
-        // ignore
-      }
-    })
-  ).catch(error => {
-    handleFirestoreError(error, OperationType.DELETE, `${GUESTS_COLLECTION}/${id}`);
-  });
+      await batch.commit();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `${GUESTS_COLLECTION}/${id}`);
+    }
+  })();
 
   return remainingGuests;
 }
@@ -941,13 +902,15 @@ export async function clearAllGuestsFromFirebase(ownerId?: string, eventId?: str
     // ignore
   }
 
-  try {
-    await fetch(buildGuestsApiUrl(effectiveOwner, effectiveEventId, { all: '1' }), {
+  if (shouldCallGuestsRestApi()) {
+    void fetch(buildGuestsApiUrl(effectiveOwner, effectiveEventId, { all: '1' }), {
       method: 'DELETE',
       cache: 'no-store',
-    });
-  } catch {
-    // ignore
+    })
+      .then(res => {
+        if (res.status === 404 || res.status === 405) isGuestsRestApiUnsupported = true;
+      })
+      .catch(() => {});
   }
 
   if (IS_FIRESTORE_WRITE_DISABLED || isFirestoreKnownUnavailable()) {
