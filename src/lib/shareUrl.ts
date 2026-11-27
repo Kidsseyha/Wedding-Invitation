@@ -22,7 +22,7 @@ export const KHMER_SHARE_FONTS: KhmerShareFontOption[] = [
     slug: 'moul',
     labelKh: 'អក្សរមូល (Moul)',
     labelEn: 'Khmer Moul (Royal)',
-    fontFamily: "'Moul', 'Moulpali', 'Khmer OS Moul', 'Khmer OS Muol Light', serif",
+    fontFamily: "'Moul', 'Khmer OS Moul', 'Khmer OS Muol Light', 'Noto Serif Khmer', serif",
     sampleKh: 'ភ្ញៀវកិត្តិយស',
   },
   {
@@ -36,7 +36,7 @@ export const KHMER_SHARE_FONTS: KhmerShareFontOption[] = [
     slug: 'kbach',
     labelKh: 'ក្បាច់បុរាណ (Kbach / Moul)',
     labelEn: 'Khmer Royal Kbach',
-    fontFamily: "'Moul', 'Moulpali', 'AKbalthom Kbach', serif",
+    fontFamily: "'AKbalthom Kbach', 'AKbalthom-Kbach', 'Moul', 'Moulpali', serif",
     sampleKh: 'ភ្ញៀវកិត្តិយស',
   },
   {
@@ -132,6 +132,32 @@ export const KHMER_SHARE_FONTS: KhmerShareFontOption[] = [
   },
 ];
 
+function matchSingleFontTokenToSlug(token: string): string | null {
+  const clean = token.replace(/['"]/g, '').trim().toLowerCase();
+  if (!clean) return null;
+
+  const exactBySlug = KHMER_SHARE_FONTS.find((f) => f.slug === clean);
+  if (exactBySlug) return exactBySlug.slug;
+
+  if (clean.includes('moulpali')) return 'moulpali';
+  if (clean.includes('akbalthom') || clean.includes('kbach')) return 'kbach';
+  if (clean.includes('konkhmer') || clean.includes('sleokchher')) return 'konkhmer';
+  if (clean.includes('noto serif')) return 'noto-serif';
+  if (clean.includes('noto sans')) return 'noto-sans';
+  if (clean.includes('taprom')) return 'taprom';
+  if (clean.includes('dangrek')) return 'dangrek';
+  if (clean.includes('fasthand')) return 'fasthand';
+  if (clean.includes('freehand')) return 'freehand';
+  if (clean.includes('siemreap')) return 'siemreap';
+  if (clean.includes('battambang')) return 'battambang';
+  if (clean.includes('kantumruy')) return 'kantumruy';
+  if (clean.includes('angkor')) return 'angkor';
+  if (clean.includes('bokor')) return 'bokor';
+  if (clean.includes('content')) return 'content';
+  if (clean.includes('moul') || clean.includes('muol')) return 'moul';
+  return null;
+}
+
 /**
  * Resolves any CSS font-family string or font slug into a canonical short slug
  * for embedding in Vercel share URLs (`?font=<slug>`).
@@ -141,27 +167,19 @@ export function resolveKhmerFontSlug(fontFamilyOrSlug?: string | null): string {
   const raw = fontFamilyOrSlug.trim().toLowerCase();
   if (!raw) return 'moul';
 
-  const exactBySlug = KHMER_SHARE_FONTS.find((f) => f.slug === raw);
-  if (exactBySlug) return exactBySlug.slug;
+  const exactBySlugOrFamily = KHMER_SHARE_FONTS.find(
+    (f) => f.slug === raw || f.fontFamily.toLowerCase() === raw
+  );
+  if (exactBySlugOrFamily) return exactBySlugOrFamily.slug;
 
-  if (raw.includes('moulpali')) return 'moulpali';
-  if (raw.includes('akbalthom') || raw.includes('kbach')) return 'kbach';
-  if (raw.includes('bokor')) return 'bokor';
-  if (raw.includes('angkor')) return 'angkor';
-  if (raw.includes('kantumruy')) return 'kantumruy';
-  if (raw.includes('battambang')) return 'battambang';
-  if (raw.includes('siemreap')) return 'siemreap';
-  if (raw.includes('freehand')) return 'freehand';
-  if (raw.includes('fasthand')) return 'fasthand';
-  if (raw.includes('taprom')) return 'taprom';
-  if (raw.includes('dangrek')) return 'dangrek';
-  if (raw.includes('noto serif')) return 'noto-serif';
-  if (raw.includes('noto sans')) return 'noto-sans';
-  if (raw.includes('konkhmer') || raw.includes('sleokchher')) return 'konkhmer';
-  if (raw.includes('content')) return 'content';
-  if (raw.includes('moul') || raw.includes('muol')) return 'moul';
+  // Match the primary (first) font in the CSS font-family list first so fallback fonts never hijack resolution
+  const tokens = raw.split(',');
+  for (const token of tokens) {
+    const matchedSlug = matchSingleFontTokenToSlug(token);
+    if (matchedSlug) return matchedSlug;
+  }
 
-  return 'moul';
+  return matchSingleFontTokenToSlug(raw) || 'moul';
 }
 
 /**
@@ -173,19 +191,19 @@ export function resolveKhmerFontFamily(fontFamilyOrSlug?: string | null): string
   const trimmed = fontFamilyOrSlug.trim();
   if (!trimmed) return null;
 
-  const slug = resolveKhmerFontSlug(trimmed);
-  const matched = KHMER_SHARE_FONTS.find((f) => f.slug === slug);
-  if (matched) {
-    const lower = trimmed.toLowerCase();
-    const isKnownKhmerOrSlug =
-      KHMER_SHARE_FONTS.some((f) => f.slug === lower) ||
-      /(moul|muol|moulpali|kbach|akbalthom|bokor|angkor|kantumruy|battambang|siemreap|freehand|fasthand|taprom|dangrek|noto|konkhmer|sleokchher|content|khmer)/i.test(
-        trimmed
-      );
-    if (isKnownKhmerOrSlug) {
-      return matched.fontFamily;
-    }
+  const lower = trimmed.toLowerCase();
+  const directMatch = KHMER_SHARE_FONTS.find(
+    (f) => f.slug === lower || f.fontFamily.toLowerCase() === lower
+  );
+  if (directMatch) return directMatch.fontFamily;
+
+  const primaryToken = lower.split(',')[0] || lower;
+  const primarySlug = matchSingleFontTokenToSlug(primaryToken);
+  if (primarySlug) {
+    const matched = KHMER_SHARE_FONTS.find((f) => f.slug === primarySlug);
+    if (matched) return matched.fontFamily;
   }
+
   return trimmed;
 }
 

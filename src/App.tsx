@@ -1640,6 +1640,23 @@ export default function App() {
     }
     return null;
   });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onKhmerFontChange = (e: Event) => {
+      const customEvt = e as CustomEvent<{ slug?: string; fontFamily?: string }>;
+      const nextFont =
+        resolveKhmerFontFamily(customEvt.detail?.fontFamily || customEvt.detail?.slug) ||
+        customEvt.detail?.fontFamily ||
+        null;
+      if (nextFont) {
+        setUrlKhmerFont(nextFont);
+      }
+    };
+    window.addEventListener('wedding:khmer-font-change', onKhmerFontChange);
+    return () => window.removeEventListener('wedding:khmer-font-change', onKhmerFontChange);
+  }, []);
+
   const hasSavedLocallyRef = useRef(false);
   const lastSavedAtRef = useRef<number>(0);
 
@@ -2336,6 +2353,13 @@ export default function App() {
     };
 
     setEvent(preparedEvent);
+    if (preparedEvent.config?.guest_name_font_family !== undefined) {
+      setUrlKhmerFont(
+        resolveKhmerFontFamily(preparedEvent.config.guest_name_font_family) ||
+          preparedEvent.config.guest_name_font_family ||
+          null
+      );
+    }
     if (refreshEnvelope) {
       setHasOpenedEnvelope(false);
       setShowEnvelopeModal(true);
@@ -2873,7 +2897,6 @@ export default function App() {
           <motion.button
             id="share-btn"
             onClick={() => {
-              handleSaveEvent(event, false).catch(() => {});
               setShowShareModal(true);
             }}
             whileHover={{ scale: 1.05, y: -2 }}
@@ -3385,7 +3408,11 @@ export default function App() {
                     <span
                       className="text-[14px] font-bold tracking-wide truncate max-w-[280px] mt-0.5 drop-shadow-md"
                       style={{
-                        fontFamily: config.guest_name_font_family || "'Moul', serif",
+                        fontFamily:
+                          resolveKhmerFontFamily(config.guest_name_font_family) ||
+                          urlKhmerFont ||
+                          config.guest_name_font_family ||
+                          "'Moul', serif",
                         fontSize: '14px',
                         lineHeight: '35px',
                         color: config.guestNameColor || '#172554',
@@ -3407,14 +3434,28 @@ export default function App() {
                       : (textContent.subtitle && textContent.subtitle.trim() ? textContent.subtitle : 'Cordially Invites')}
                   </span>
                   <div
-                    className="text-[14px] font-moul tracking-wide text-[#582607] flex items-center justify-center gap-2 drop-shadow-sm"
+                    className="text-[14px] tracking-wide text-[#582607] flex items-center justify-center gap-2 drop-shadow-sm"
                     style={{
-                      fontFamily: config.guest_name_font_family || "'Moul', serif",
+                      fontFamily:
+                        resolveKhmerFontFamily(config.guest_name_font_family) ||
+                        urlKhmerFont ||
+                        config.guest_name_font_family ||
+                        "'Moul', serif",
                       color: config.guestNameColor || '#172554',
                       fontSize: '14px',
                     }}
                   >
-                    <span className="text-[14px]" style={{ fontSize: '14px' }}>
+                    <span
+                      className="text-[14px]"
+                      style={{
+                        fontFamily:
+                          resolveKhmerFontFamily(config.guest_name_font_family) ||
+                          urlKhmerFont ||
+                          config.guest_name_font_family ||
+                          "'Moul', serif",
+                        fontSize: '14px',
+                      }}
+                    >
                       {guestName && guestName !== 'Your Name'
                         ? guestName
                         : language === 'kh'

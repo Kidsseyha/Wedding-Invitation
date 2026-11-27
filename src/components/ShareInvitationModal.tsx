@@ -253,11 +253,21 @@ export default function ShareInvitationModal({
   const [selectedKhmerFontSlug, setSelectedKhmerFontSlug] = useState<string>(() =>
     resolveKhmerFontSlug(selectedEventData?.config?.guest_name_font_family)
   );
+  const userSelectedFontByTemplateRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
+    if (!isOpen) {
+      userSelectedFontByTemplateRef.current = {};
+      return;
+    }
+    const pinnedSlug = userSelectedFontByTemplateRef.current[selectedTemplate.templateId];
+    if (pinnedSlug) {
+      setSelectedKhmerFontSlug(pinnedSlug);
+      return;
+    }
     const nextSlug = resolveKhmerFontSlug(selectedEventData?.config?.guest_name_font_family);
     setSelectedKhmerFontSlug(nextSlug);
-  }, [selectedTemplate.templateId, selectedEventData?.config?.guest_name_font_family]);
+  }, [isOpen, selectedTemplate.templateId, selectedEventData?.config?.guest_name_font_family]);
 
   const activeKhmerFontOption = useMemo(
     () => KHMER_SHARE_FONTS.find((f) => f.slug === selectedKhmerFontSlug) || KHMER_SHARE_FONTS[0],
@@ -268,29 +278,61 @@ export default function ShareInvitationModal({
 
   const handleSelectKhmerFont = (slug: string) => {
     const fontOpt = KHMER_SHARE_FONTS.find((f) => f.slug === slug) || KHMER_SHARE_FONTS[0];
+    userSelectedFontByTemplateRef.current[selectedTemplate.templateId] = fontOpt.slug;
     setSelectedKhmerFontSlug(fontOpt.slug);
     const scopedId = getScopedEventId(selectedTemplate.eventId, effectiveScope);
+    const strippedId = stripScopedEventId(scopedId);
+    const updatedConfig = {
+      ...(selectedEventData?.config || {}),
+      guest_name_font_family: fontOpt.fontFamily,
+    } as WeddingEvent['config'];
     const updatedEventData: WeddingEvent = {
       ...(selectedEventData as WeddingEvent),
       id: scopedId,
       templateId: (selectedEventData as WeddingEvent)?.templateId || selectedTemplate.templateId,
       eventType: selectedCategory,
       ...(effectiveScope !== 'guest_public' ? { ownerId: effectiveScope } : {}),
-      config: {
-        ...(selectedEventData?.config || {}),
-        guest_name_font_family: fontOpt.fontFamily,
-      } as WeddingEvent['config'],
+      config: updatedConfig,
       updatedAt: new Date().toISOString(),
     };
     try {
       const serialized = JSON.stringify(updatedEventData);
       localStorage.setItem(getUserStorageKey(`wedding_template_saved_${scopedId}`, effectiveScope), serialized);
+      if (strippedId) {
+        localStorage.setItem(getUserStorageKey(`wedding_template_saved_${strippedId}`, effectiveScope), serialized);
+      }
+      if (selectedTemplate.templateId) {
+        localStorage.setItem(
+          getUserStorageKey(`wedding_template_saved_${selectedTemplate.templateId}`, effectiveScope),
+          serialized
+        );
+      }
       localStorage.setItem(
-        getUserStorageKey(`wedding_template_saved_${stripScopedEventId(scopedId)}`, effectiveScope),
+        getUserStorageKey(`wedding_template_type_${selectedCategory}`, effectiveScope),
         serialized
       );
       localStorage.setItem(getUserStorageKey('wedding_custom_event_data', effectiveScope), serialized);
+      localStorage.setItem(
+        getUserStorageKey('wedding_last_custom_design_config', effectiveScope),
+        JSON.stringify(updatedConfig)
+      );
     } catch {}
+    setCloudSyncVersion((v) => v + 1);
+    if (typeof window !== 'undefined') {
+      try {
+        const currentUrl = new URL(window.location.href);
+        if (currentUrl.searchParams.has('font') || currentUrl.searchParams.has('khFont')) {
+          currentUrl.searchParams.set('font', fontOpt.slug);
+          currentUrl.searchParams.delete('khFont');
+          window.history.replaceState({}, '', currentUrl.toString());
+        }
+      } catch {}
+      window.dispatchEvent(
+        new CustomEvent('wedding:khmer-font-change', {
+          detail: { slug: fontOpt.slug, fontFamily: fontOpt.fontFamily },
+        })
+      );
+    }
     if (onSelectTemplate) {
       const saveResult = onSelectTemplate(updatedEventData, selectedCategory);
       if (saveResult && typeof (saveResult as Promise<unknown>).then === 'function') {
@@ -307,7 +349,8 @@ export default function ShareInvitationModal({
   const handleTemplateSelect = (opt: ShareTemplateOption) => {
     hasUserSelectedTemplateRef.current = true;
     setSelectedTemplateId(opt.templateId);
-    setSelectedKhmerFontSlug(resolveKhmerFontSlug(opt.event?.config?.guest_name_font_family));
+    const pinnedSlug = userSelectedFontByTemplateRef.current[opt.templateId];
+    setSelectedKhmerFontSlug(pinnedSlug || resolveKhmerFontSlug(opt.event?.config?.guest_name_font_family));
     const scopedId = getScopedEventId(opt.eventId, effectiveScope);
     try {
       localStorage.setItem(getUserStorageKey('wedding_last_active_preset_id', effectiveScope), opt.templateId);
@@ -1211,7 +1254,7 @@ Your presence will make our day truly special! 🙏✨`;
 
                   {/* Pre-written Khmer Wedding Message Preview */}
                   <div className={`p-3.5 rounded-2xl ${isLight ? 'bg-amber-50/50 border-amber-300' : 'bg-black/50 border-amber-500/25'} border space-y-2.5`}>
-                    {/* Khmer Font Selector for Vercel Viewer Sharing */}
+                    {/* Khmer Font Selector for Guest Cover Invitation & Vercel Viewer Sharing */}
                     <div
                       className={`p-2.5 rounded-xl border space-y-2 ${
                         isLight
@@ -1229,8 +1272,8 @@ Your presence will make our day truly special! 🙏✨`;
                           <Type className="w-3.5 h-3.5 text-amber-500 shrink-0" />
                           <span>
                             {language === 'kh'
-                              ? 'ម៉ូតអក្សរខ្មែរសម្រាប់ភ្ញៀវមើលលើ Vercel (Khmer Font Support):'
-                              : 'Khmer Font Support for Vercel Viewer:'}
+                              ? 'ម៉ូតអក្សរខ្មែរសម្រាប់ភ្ញៀវមើលលើ Cover Invitation (Khmer Font Style):'
+                              : 'Khmer Font Style for Guest Cover Invitation:'}
                           </span>
                         </label>
                         <span
@@ -1240,7 +1283,7 @@ Your presence will make our day truly special! 🙏✨`;
                               : 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
                           }`}
                         >
-                          ✓ Webfont Preloaded (&amp;font={selectedKhmerFontSlug})
+                          ✓ Cover &amp; Link (&amp;font={selectedKhmerFontSlug})
                         </span>
                       </div>
 
@@ -1284,9 +1327,9 @@ Your presence will make our day truly special! 🙏✨`;
                         </div>
                       </div>
 
-                      {/* Quick Khmer Font Preset Chips */}
-                      <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
-                        {KHMER_SHARE_FONTS.slice(0, 8).map((f) => {
+                      {/* Quick Khmer Font Preset Chips (All 16 Khmer Fonts) */}
+                      <div className="flex flex-wrap items-center gap-1.5 max-h-24 overflow-y-auto pr-0.5 pb-0.5">
+                        {KHMER_SHARE_FONTS.map((f) => {
                           const isSelectedFont = f.slug === selectedKhmerFontSlug;
                           return (
                             <button
@@ -1294,17 +1337,18 @@ Your presence will make our day truly special! 🙏✨`;
                               type="button"
                               onClick={() => handleSelectKhmerFont(f.slug)}
                               style={{ fontFamily: f.fontFamily }}
-                              className={`px-2.5 py-1 rounded-lg text-[11px] border whitespace-nowrap transition-all cursor-pointer shrink-0 ${
+                              className={`px-2.5 py-1 rounded-lg text-[11px] border whitespace-nowrap transition-all cursor-pointer shrink-0 flex items-center gap-1 ${
                                 isSelectedFont
                                   ? isLight
-                                    ? 'bg-amber-500 text-neutral-950 border-amber-600 font-bold shadow-xs'
-                                    : 'bg-amber-500/30 text-amber-200 border-amber-400 font-bold shadow-xs'
+                                    ? 'bg-amber-500 text-neutral-950 border-amber-600 font-bold shadow-xs ring-2 ring-amber-400/50'
+                                    : 'bg-amber-500/35 text-amber-100 border-amber-400 font-bold shadow-xs ring-2 ring-amber-400/40'
                                   : isLight
                                   ? 'bg-white hover:bg-amber-50 text-neutral-700 border-amber-200'
                                   : 'bg-black/50 hover:bg-white/10 text-neutral-300 border-white/10'
                               }`}
                             >
-                              {f.labelKh}
+                              {isSelectedFont && <Check className="w-3 h-3 shrink-0" />}
+                              <span>{f.labelKh}</span>
                             </button>
                           );
                         })}

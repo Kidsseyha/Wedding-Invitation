@@ -751,18 +751,13 @@ export default function KhmerStoryAnniversaryCover({
                 className="w-full mt-0.5 text-center hover:opacity-80 transition-opacity cursor-pointer"
               >
                 <span
-                  className={`block truncate leading-relaxed text-[14px] ${
-                    containsKhmerScript(displayGuest)
-                      ? 'font-moul tracking-normal'
-                      : 'font-bold tracking-wide'
-                  }`}
+                  className="block truncate leading-relaxed text-[14px] font-bold tracking-wide"
                   style={{
                     fontFamily:
-                      guestNameFontFamily && containsKhmerScript(displayGuest)
-                        ? guestNameFontFamily
-                        : containsKhmerScript(displayGuest)
+                      guestNameFontFamily ||
+                      (containsKhmerScript(displayGuest)
                         ? "'Moul', serif"
-                        : "'Playfair Display', serif",
+                        : "'Playfair Display', serif"),
                     fontSize: '14px',
                     color: crimsonInk,
                   }}
@@ -772,18 +767,13 @@ export default function KhmerStoryAnniversaryCover({
               </button>
             ) : (
               <span
-                className={`block truncate leading-relaxed mt-0.5 text-[14px] ${
-                  containsKhmerScript(displayGuest)
-                    ? 'font-moul tracking-normal'
-                    : 'font-bold tracking-wide'
-                }`}
+                className="block truncate leading-relaxed mt-0.5 text-[14px] font-bold tracking-wide"
                 style={{
                   fontFamily:
-                    guestNameFontFamily && containsKhmerScript(displayGuest)
-                      ? guestNameFontFamily
-                      : containsKhmerScript(displayGuest)
+                    guestNameFontFamily ||
+                    (containsKhmerScript(displayGuest)
                       ? "'Moul', serif"
-                      : "'Playfair Display', serif",
+                      : "'Playfair Display', serif"),
                   fontSize: '14px',
                   color: crimsonInk,
                 }}

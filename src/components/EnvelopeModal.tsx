@@ -1530,7 +1530,7 @@ export default function EnvelopeModal({
                         <span className="block text-[11px] sm:text-xs md:text-sm font-khmer font-semibold text-[#854d0e] mb-1 tracking-wide">
                           {ribbonLabel}
                         </span>
-                        <div className="text-[14px] font-moul text-[#172554] tracking-wide flex items-center justify-center">
+                        <div className="text-[14px] text-[#172554] tracking-wide flex items-center justify-center">
                           <span
                             className="truncate max-w-[230px] sm:max-w-[280px] text-[14px]"
                             style={{
