@@ -1263,8 +1263,7 @@ Your presence will make our day truly special! 🙏✨`;
                       }`}
                     >
                       <div className="flex items-center justify-between flex-wrap gap-1.5">
-                        <label
-                          htmlFor="vercel-khmer-font-select"
+                        <div
                           className={`text-[11px] font-bold font-khmer flex items-center gap-1.5 ${
                             isLight ? 'text-amber-950' : 'text-amber-300'
                           }`}
@@ -1275,7 +1274,7 @@ Your presence will make our day truly special! 🙏✨`;
                               ? 'ម៉ូតអក្សរខ្មែរសម្រាប់ភ្ញៀវមើលលើ Cover Invitation (Khmer Font Style):'
                               : 'Khmer Font Style for Guest Cover Invitation:'}
                           </span>
-                        </label>
+                        </div>
                         <span
                           className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
                             isLight
@@ -1287,31 +1286,10 @@ Your presence will make our day truly special! 🙏✨`;
                         </span>
                       </div>
 
-                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                        <select
-                          id="vercel-khmer-font-select"
-                          value={selectedKhmerFontSlug}
-                          onChange={(e) => handleSelectKhmerFont(e.target.value)}
-                          className={`flex-1 px-2.5 py-1.5 rounded-lg border text-xs font-khmer cursor-pointer focus:outline-none ${
-                            isLight
-                              ? 'bg-amber-50/70 border-amber-300 text-neutral-900 focus:border-amber-500'
-                              : 'bg-neutral-900 border-amber-500/40 text-amber-100 focus:border-amber-400'
-                          }`}
-                        >
-                          {KHMER_SHARE_FONTS.map((f) => (
-                            <option
-                              key={f.slug}
-                              value={f.slug}
-                              className={isLight ? 'bg-white text-neutral-900' : 'bg-neutral-900 text-amber-100'}
-                            >
-                              {language === 'kh' ? `${f.labelKh} — ${f.sampleKh}` : `${f.labelEn} (${f.labelKh})`}
-                            </option>
-                          ))}
-                        </select>
-
+                      <div className="flex items-center">
                         {/* Live Guest Name Khmer Font Preview Pill */}
                         <div
-                          className={`px-3 py-1.5 rounded-lg border text-center shrink-0 min-w-[140px] ${
+                          className={`w-full px-3 py-1.5 rounded-lg border text-center ${
                             isLight
                               ? 'bg-amber-100/70 border-amber-300 text-amber-950'
                               : 'bg-amber-500/15 border-amber-400/40 text-amber-200'
