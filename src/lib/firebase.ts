@@ -59,6 +59,17 @@ export function markFirestoreUnavailable(ttlMs = 45_000): void {
 
 export function markFirestoreAvailable(): void {
   firestoreUnavailableUntil = 0;
+  if (isNetworkDisabled) {
+    isNetworkDisabled = false;
+    enableNetwork(db).catch(() => {});
+  }
+}
+
+export async function ensureFirestoreNetwork(): Promise<void> {
+  if (isNetworkDisabled) {
+    isNetworkDisabled = false;
+    await enableNetwork(db).catch(() => {});
+  }
 }
 
 export interface FirestoreConnectionStatus {
@@ -71,7 +82,7 @@ export interface FirestoreConnectionStatus {
 }
 
 // Test connection on boot and on manual database checks
-export async function testFirestoreConnection(timeoutMs = 800): Promise<FirestoreConnectionStatus> {
+export async function testFirestoreConnection(timeoutMs = 2500): Promise<FirestoreConnectionStatus> {
   const startedAt = Date.now();
   let reconnected = false;
 
@@ -136,7 +147,17 @@ export async function testFirestoreConnection(timeoutMs = 800): Promise<Firestor
       };
     }
 
-    markFirestoreUnavailable(45_000);
+    // Only disable Firestore network when the database is missing or quota is exhausted;
+    // transient cold-start timeouts must never lock out subsequent writes.
+    if (
+      code === 'not-found' ||
+      code.includes('not-found') ||
+      message.includes('does not exist') ||
+      code === 'resource-exhausted' ||
+      code.includes('resource-exhausted')
+    ) {
+      markFirestoreUnavailable(45_000);
+    }
 
     return {
       connected: false,

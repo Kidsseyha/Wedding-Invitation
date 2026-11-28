@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { Language, TemplateConfig } from '../types';
 import { FRAME_PRESETS } from '../data/framePresets';
+import { getCategoryCoverImage } from '../data/eventTemplates';
 import { ThemeMode } from './ThemeToggle';
 import CoverMonogramSettingsCard from './CoverMonogramSettingsCard';
 import bgGold from '../assets/images/khmer_bg_gold_1789308973579.jpg';
@@ -1357,9 +1358,9 @@ export default function DesignSettingsSection({
       <DesignFilePicker
         label="រូបថតគូស្នេហ៍ចម្បង (Main Couple Portrait)"
         previewUrl={
-          [eventImage, config.image, config.main_background].find(
-            (u) => typeof u === 'string' && !['', 'none', 'null', 'undefined'].includes(u.trim().toLowerCase())
-          )
+          [eventImage, config.image].find(
+            (u) => typeof u === 'string' && !['', 'none', 'null', 'undefined', 'false'].includes(u.trim().toLowerCase())
+          ) || getCategoryCoverImage(currentCategory || 'wedding')
         }
         onFileSelected={(url) => onUpdateEventImage(url)}
         aspectClass="aspect-[3/4] w-48 mx-auto"

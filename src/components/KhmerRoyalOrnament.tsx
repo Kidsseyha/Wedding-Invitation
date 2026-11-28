@@ -3919,6 +3919,8 @@ export function KhmerRoyalModernWeddingCover({
   coverMonogramFontFamilyEn,
   coverMonogramColor,
   coverMonogramFontSize,
+  coverBackground,
+  eventImage,
   onOpenInvitation,
   isOpening = false,
   isAdmin = false,
@@ -3946,6 +3948,8 @@ export function KhmerRoyalModernWeddingCover({
   coverMonogramFontFamilyEn?: string;
   coverMonogramColor?: string;
   coverMonogramFontSize?: string;
+  coverBackground?: string;
+  eventImage?: string;
   onOpenInvitation?: () => void;
   isOpening?: boolean;
   isAdmin?: boolean;
@@ -3999,14 +4003,29 @@ export function KhmerRoyalModernWeddingCover({
         color: '#701a2b',
       }}
     >
-      {/* Subtle White Colonnade & Floral Background Texture */}
-      <img
-        src="/assets/images/white_arch_columns_wedding_cover_1790394461049.jpg"
-        alt=""
-        aria-hidden="true"
-        draggable={false}
-        className="pointer-events-none absolute inset-0 z-0 w-full h-full object-cover opacity-20"
-      />
+      {/* Subtle Colonnade / Couple Portrait Background Texture */}
+      {(() => {
+        const isValid = (u?: string) =>
+          Boolean(u) &&
+          !['', 'none', 'null', 'undefined', 'false'].includes(String(u).trim().toLowerCase()) &&
+          !String(u).includes('free-background') &&
+          !String(u).includes('white_arch_columns');
+        const customModernBg = isValid(eventImage)
+          ? eventImage!
+          : isValid(coverBackground)
+          ? coverBackground!
+          : '/assets/images/white_arch_columns_wedding_cover_1790394461049.jpg';
+        return (
+          <img
+            src={customModernBg}
+            alt=""
+            aria-hidden="true"
+            draggable={false}
+            referrerPolicy="no-referrer"
+            className="pointer-events-none absolute inset-0 z-0 w-full h-full object-cover opacity-20"
+          />
+        );
+      })()}
 
       {/* Crystal Rococo Arch Frame & Hanging Rose Garlands */}
       <ModernWeddingFullCrystalRococoFrame />

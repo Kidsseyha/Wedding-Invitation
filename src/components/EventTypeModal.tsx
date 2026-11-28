@@ -369,11 +369,13 @@ export default function EventTypeModal({
       templateId: preset.id,
       eventType: preset.type,
       image: categoryCover,
+      cover_image: categoryCover,
       singlePerson: preset.type === 'birthday' ? true : false,
       config: {
         ...preset.sampleEvent.config,
-        cover_background: categoryCover,
-        details_background: categoryCover,
+        image: categoryCover,
+        cover_background: preset.sampleEvent.config?.cover_background || categoryCover,
+        details_background: preset.sampleEvent.config?.details_background || categoryCover,
       },
     };
   };
@@ -413,11 +415,13 @@ export default function EventTypeModal({
           templateId: preset.id,
           eventType: preset.type,
           image: categoryCover,
+          cover_image: categoryCover,
           singlePerson: preset.type === 'birthday' ? true : false,
           config: {
             ...preset.sampleEvent.config,
-            cover_background: categoryCover,
-            details_background: categoryCover,
+            image: categoryCover,
+            cover_background: preset.sampleEvent.config?.cover_background || categoryCover,
+            details_background: preset.sampleEvent.config?.details_background || categoryCover,
           },
           updatedAt: new Date().toISOString(),
         };

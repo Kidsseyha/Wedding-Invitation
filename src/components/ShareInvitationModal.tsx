@@ -43,7 +43,7 @@ import {
   resolveKhmerFontFamily,
 } from '../lib/shareUrl';
 import { fetchGuestsFromFirebase, deleteGuestFromFirebase } from '../lib/firebaseGuests';
-import { fetchUserTemplatesFromFirebase } from '../lib/firebaseServices';
+import { fetchUserTemplatesFromFirebase, saveEventReliable } from '../lib/firebaseServices';
 import { isFirestoreKnownUnavailable } from '../lib/firebase';
 import { GuestPreset } from '../data/guests';
 import { EVENT_PRESETS, getCategoryCoverImage } from '../data/eventTemplates';
@@ -144,11 +144,14 @@ export default function ShareInvitationModal({
     let cancelled = false;
     fetchUserTemplatesFromFirebase(effectiveScope)
       .then((cloudEvents) => {
-        if (cancelled || !Array.isArray(cloudEvents) || cloudEvents.length === 0) return;
+        if (cancelled) return;
+        const safeCloud = Array.isArray(cloudEvents) ? cloudEvents : [];
         let updatedAny = false;
-        for (const rawEvt of cloudEvents) {
+        const cloudById = new Map<string, WeddingEvent>();
+        for (const rawEvt of safeCloud) {
           const evt = rehydrateEventPortraitFields(rawEvt);
           if (!evt || typeof evt !== 'object' || !evt.id) continue;
+          cloudById.set(evt.id, evt);
           const scopedKey = getUserStorageKey(`wedding_template_saved_${evt.id}`, effectiveScope);
           const strippedId = stripScopedEventId(evt.id);
           const strippedKey = strippedId
@@ -179,12 +182,45 @@ export default function ShareInvitationModal({
         if (updatedAny && !cancelled) {
           setCloudSyncVersion((v) => v + 1);
         }
+
+        // Push any locally customized templates that are newer or not yet saved in Firestore
+        // so Vercel /api/og, /api/og-image, and viewer pages serve the latest Main Couple Portrait.
+        if (isAdmin) {
+          const snapshot = readShareTemplatesStorageState(effectiveScope);
+          const localCandidates = [
+            ...(fallbackCurrentEvent ? [fallbackCurrentEvent] : []),
+            ...Object.values(snapshot.savedEventsById),
+          ];
+          const pushedIds = new Set<string>();
+          for (const rawLocal of localCandidates) {
+            if (!rawLocal || typeof rawLocal !== 'object' || !rawLocal.id) continue;
+            const scopedId = getScopedEventId(rawLocal.id, effectiveScope);
+            if (pushedIds.has(scopedId)) continue;
+            pushedIds.add(scopedId);
+            const localMs = getEventTimestampMs(rawLocal);
+            const cloudMatch = cloudById.get(scopedId) || cloudById.get(rawLocal.id);
+            const cloudMs = cloudMatch ? getEventTimestampMs(cloudMatch) : 0;
+            const cloudImg = cloudMatch ? (cloudMatch.image || cloudMatch.cover_image || cloudMatch.config?.image || '') : '';
+            const localImg = rawLocal.image || rawLocal.cover_image || rawLocal.config?.image || '';
+            const needsSync = !cloudMatch || localMs > cloudMs || (Boolean(localImg) && localImg !== cloudImg);
+            if (needsSync && (localMs > 0 || Boolean(rawLocal.updatedAt))) {
+              void saveEventReliable(
+                {
+                  ...(rawLocal as WeddingEvent),
+                  id: scopedId,
+                  ownerId: effectiveScope,
+                },
+                { skipRestApi: true, writeTimeoutMs: 7000 }
+              ).catch(() => {});
+            }
+          }
+        }
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [isOpen, effectiveScope]);
+  }, [isOpen, effectiveScope, isAdmin, fallbackCurrentEvent]);
 
   const storageSnapshot = useMemo(() => {
     return readShareTemplatesStorageState(effectiveScope);
@@ -431,8 +467,7 @@ export default function ShareInvitationModal({
   const selStrippedId = selectedTemplate.eventId ? stripScopedEventId(selectedTemplate.eventId) : '';
   const isSameTemplateAsCurrent = Boolean(
     fallbackCurrentEvent &&
-      (selectedTemplate.templateId === initialTemplateId ||
-        (curStrippedId && selStrippedId && curStrippedId === selStrippedId) ||
+      ((curStrippedId && selStrippedId && curStrippedId === selStrippedId) ||
         (fallbackCurrentEvent.templateId &&
           (fallbackCurrentEvent.templateId === selectedTemplate.templateId ||
             stripScopedEventId(fallbackCurrentEvent.templateId) === selStrippedId)))

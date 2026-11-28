@@ -51,6 +51,7 @@ interface KhmerNatureHousewarmingCoverProps {
   eventTime?: string;
   eventLocation?: string;
   coverBackground?: string;
+  eventImage?: string;
   primaryColor?: string;
   coverEnNameColor?: string;
   coverEnFontFamily?: string;
@@ -97,6 +98,7 @@ export default function KhmerNatureHousewarmingCover({
   eventTime,
   eventLocation,
   coverBackground,
+  eventImage,
   coverEnNameColor,
   coverEnFontFamily,
   guestNameFontFamily,
@@ -149,6 +151,15 @@ export default function KhmerNatureHousewarmingCover({
       ? coverBackground!
       : khmerNatureBg
     : '';
+
+  const hasCustomPortrait =
+    Boolean(eventImage) &&
+    !['', 'none', 'null', 'undefined', 'false'].includes(String(eventImage).trim().toLowerCase()) &&
+    !eventImage!.includes('khmer_housewarming_villa_emblem') &&
+    !eventImage!.includes('khmer_nature_housewarming_bg') &&
+    !eventImage!.includes('free-background') &&
+    !eventImage!.includes('white_arch_columns');
+  const emblemSrc = hasCustomPortrait ? eventImage! : khmerVillaEmblem;
 
   const handleSaveInlineGuest = (e: FormEvent) => {
     e.preventDefault();
@@ -417,14 +428,20 @@ export default function KhmerNatureHousewarmingCover({
           >
             {!emblemFailed ? (
               <img
-                src={khmerVillaEmblem}
+                src={emblemSrc}
                 alt={
                   language === 'kh'
-                    ? 'រូបភាពគេហដ្ឋានប្រពៃណីខ្មែរ និងធម្មជាតិស្រស់បំព្រង'
-                    : 'Traditional Khmer home nestled in lush lotus nature garden'
+                    ? 'រូបភាពម្ចាស់កម្មវិធី ឡើងគេហដ្ឋានថ្មី'
+                    : 'Housewarming Host Portrait'
                 }
                 referrerPolicy="no-referrer"
-                onError={() => setEmblemFailed(true)}
+                onError={() => {
+                  if (emblemSrc !== khmerVillaEmblem) {
+                    setEmblemFailed(false);
+                  } else {
+                    setEmblemFailed(true);
+                  }
+                }}
                 className="w-full h-full object-cover scale-105"
               />
             ) : (

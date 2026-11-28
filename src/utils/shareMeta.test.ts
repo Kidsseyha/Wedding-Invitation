@@ -410,6 +410,111 @@ test('buildAllShareTemplates keeps Main Couple Portraits isolated per template a
   assert.ok(ogMeta.image.includes('id=u_alice__modern-wedding-mw001'));
 });
 
+test('Traditional Wedding never inherits Modern Wedding portrait from savedEventsByType.wedding when Modern preset is deleted', () => {
+  const tradPortrait = 'https://cdn.example.com/trad-couple-only.jpg';
+  const modernPortrait = 'https://cdn.example.com/modern-couple-stale.jpg';
+  const tradPreset = EVENT_PRESETS.find((p) => p.id === 'preset-wedding')!;
+  const modernPreset = EVENT_PRESETS.find((p) => p.id === 'preset-modern-wedding')!;
+
+  const options = buildAllShareTemplates({
+    presets: EVENT_PRESETS,
+    deletedPresetIds: ['preset-modern-wedding'],
+    savedEventsById: {
+      cmgrawhnk0003le0434762j7n: {
+        ...tradPreset.sampleEvent,
+        id: 'u_alice__cmgrawhnk0003le0434762j7n',
+        templateId: 'preset-wedding',
+        ownerId: 'u_alice',
+        image: tradPortrait,
+        updatedAt: '2026-11-27T09:00:00.000Z',
+      },
+    },
+    savedEventsByType: {
+      wedding: {
+        ...modernPreset.sampleEvent,
+        id: 'u_alice__modern-wedding-mw001',
+        templateId: 'preset-modern-wedding',
+        ownerId: 'u_alice',
+        eventType: 'wedding',
+        image: modernPortrait,
+        updatedAt: '2026-11-27T12:00:00.000Z',
+      },
+    },
+    currentEvent: {
+      ...tradPreset.sampleEvent,
+      id: 'u_alice__cmgrawhnk0003le0434762j7n',
+      templateId: 'preset-wedding',
+      ownerId: 'u_alice',
+      image: tradPortrait,
+      updatedAt: '2026-11-27T10:00:00.000Z',
+    },
+  });
+
+  const tradOpt = options.find((o) => o.templateId === 'preset-wedding');
+  assert.ok(tradOpt);
+  assert.equal(tradOpt.coverImage, tradPortrait);
+  assert.equal(tradOpt.event.image, tradPortrait);
+
+  const selectedId = resolveSelectedShareTemplateId({
+    options,
+    currentEvent: tradOpt.event,
+    lastActivePresetId: 'preset-wedding',
+  });
+  assert.equal(selectedId, 'preset-wedding');
+});
+
+test('Birthday, Housewarming, Anniversary, and Engagement custom Main Couple Portraits resolve for HTTP URLs and /api/og-image data URLs', () => {
+  const origin = 'https://wedding-invitation-inky-kappa.vercel.app';
+  const categories = ['birthday', 'housewarming', 'anniversary', 'engagement'] as const;
+
+  for (const cat of categories) {
+    const preset = EVENT_PRESETS.find((p) => p.type === cat)!;
+    assert.ok(preset, `Preset should exist for ${cat}`);
+
+    const httpPortrait = `https://cdn.example.com/${cat}-portrait.jpg`;
+    const resolvedHttp = resolveEventCoverImage(
+      {
+        ...preset.sampleEvent,
+        image: httpPortrait,
+        config: {
+          ...preset.sampleEvent.config,
+          image: httpPortrait,
+          envelope_header_image: `https://cdn.example.com/${cat}-envelope.jpg`,
+        },
+      },
+      cat
+    );
+    assert.equal(resolvedHttp, httpPortrait);
+
+    const dataMeta = buildInvitationMeta({
+      event: {
+        ...preset.sampleEvent,
+        id: `u_alice__${preset.sampleEvent.id}`,
+        templateId: preset.id,
+        ownerId: 'u_alice',
+        eventType: cat,
+        image: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/',
+        config: {
+          ...preset.sampleEvent.config,
+          image: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/',
+        },
+        updatedAt: '2026-11-27T12:34:56.000Z',
+      },
+      guestName: 'លោក សុខ',
+      queryType: cat,
+      eventId: `u_alice__${preset.sampleEvent.id}`,
+      origin,
+    });
+
+    assert.ok(dataMeta.image.startsWith(`${origin}/api/og-image?`));
+    assert.ok(dataMeta.image.includes(`id=u_alice__${preset.sampleEvent.id}`));
+    assert.ok(dataMeta.image.includes('ownerId=u_alice'));
+    assert.ok(dataMeta.image.includes(`tpl=${preset.id}`));
+    assert.ok(dataMeta.image.includes('v='));
+  }
+});
+
+
 
 
 

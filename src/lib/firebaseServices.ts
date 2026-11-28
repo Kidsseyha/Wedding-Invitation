@@ -834,9 +834,8 @@ export async function fetchEventFromFirebase(
 
   const readDocFast = async (ref: ReturnType<typeof doc>): Promise<WeddingEvent | null> => {
     if (isFirestoreKnownUnavailable()) return null;
-    const effectiveFsTimeout = Math.min(branchTimeoutMs, 650);
+    const effectiveFsTimeout = Math.min(branchTimeoutMs, options?.forceServer ? 2500 : 1800);
     if (options?.forceServer) {
-      let failed = false;
       const serverRes = await raceWithTimeout(
         getDocFromServer(ref)
           .then((snap) => {
@@ -844,20 +843,11 @@ export async function fetchEventFromFirebase(
             markFirestoreAvailable();
             return snap.exists() ? (rehydrateEventPortraitFields(snap.data() as WeddingEvent) as WeddingEvent) : null;
           })
-          .catch(() => {
-            failed = true;
-            return null;
-          }),
+          .catch(() => null),
         effectiveFsTimeout,
         null as WeddingEvent | null
       );
-      if (!serverRes.timedOut && !failed) {
-        return serverRes.value;
-      }
-      if (serverRes.timedOut || failed) {
-        markFirestoreUnavailable(45_000);
-      }
-      return null;
+      return serverRes.value;
     }
 
     const res = await raceWithTimeout(
@@ -871,9 +861,6 @@ export async function fetchEventFromFirebase(
       effectiveFsTimeout,
       null as WeddingEvent | null
     );
-    if (res.timedOut) {
-      markFirestoreUnavailable(45_000);
-    }
     return res.value;
   };
 
@@ -1073,7 +1060,7 @@ export async function fetchUserTemplatesFromFirebase(
   })();
 
   const skipFsTemplates = IS_FIRESTORE_WRITE_DISABLED || isFirestoreKnownUnavailable();
-  const fsTemplateTimeoutMs = Math.min(timeoutMs, 600);
+  const fsTemplateTimeoutMs = Math.min(Math.max(timeoutMs, 1800), 3000);
 
   const subFsPromise: Promise<WeddingEvent[]> =
     !skipFsTemplates && targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE
@@ -1092,10 +1079,7 @@ export async function fetchUserTemplatesFromFirebase(
             .catch(() => [] as WeddingEvent[]),
           fsTemplateTimeoutMs,
           [] as WeddingEvent[]
-        ).then((r) => {
-          if (r.timedOut) markFirestoreUnavailable(45_000);
-          return r.value;
-        })
+        ).then((r) => r.value)
       : Promise.resolve([]);
 
   const topFsPromise: Promise<WeddingEvent[]> = !skipFsTemplates
@@ -1114,10 +1098,7 @@ export async function fetchUserTemplatesFromFirebase(
           .catch(() => [] as WeddingEvent[]),
         fsTemplateTimeoutMs,
         [] as WeddingEvent[]
-      ).then((r) => {
-        if (r.timedOut) markFirestoreUnavailable(45_000);
-        return r.value;
-      })
+      ).then((r) => r.value)
     : Promise.resolve([]);
 
   const [restList, subList, topList] = await Promise.all([restPromise, subFsPromise, topFsPromise]);
@@ -1210,10 +1191,11 @@ export async function saveEventReliable(
     : Promise.resolve();
 
   const firestorePromise: Promise<void> =
-    !IS_FIRESTORE_WRITE_DISABLED && !isFirestoreKnownUnavailable()
+    !IS_FIRESTORE_WRITE_DISABLED
       ? (async () => {
           const writeWork = async () => {
             try {
+              markFirestoreAvailable();
               const scopedOwner = targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE ? targetDbId : undefined;
               const firestorePayload = await prepareFirestorePayload(serverPayload, scopedOwner);
 
@@ -1276,11 +1258,8 @@ export async function saveEventReliable(
             }
           };
 
-          const timeoutMs = options?.writeTimeoutMs ?? 5500;
-          const raceRes = await raceWithTimeout(writeWork(), timeoutMs, undefined);
-          if (raceRes.timedOut) {
-            markFirestoreUnavailable(45_000);
-          }
+          const timeoutMs = options?.writeTimeoutMs ?? 7000;
+          await raceWithTimeout(writeWork(), timeoutMs, undefined);
         })()
       : Promise.resolve();
 

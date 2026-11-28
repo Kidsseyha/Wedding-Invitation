@@ -226,7 +226,12 @@ export function buildAllShareTemplates(params: {
     if (exactPreset) {
       matchedCurrentPresetId = exactPreset.id;
     } else if (!String(curBaseId || curId || '').startsWith('custom-event-')) {
-      const byCategory = availablePresets.find((p) => p.type === curCat);
+      const curIsModern = curCat === 'wedding' && isModernWeddingEvent(currentEvent);
+      const byCategory = availablePresets.find(
+        (p) =>
+          p.type === curCat &&
+          (p.type !== 'wedding' || (p.id === 'preset-modern-wedding') === curIsModern)
+      );
       if (byCategory) {
         matchedCurrentPresetId = byCategory.id;
       }
@@ -313,8 +318,12 @@ export function buildAllShareTemplates(params: {
     const byPresetId = savedEventsById[p.id];
     const byTypeRaw = savedEventsByType[p.type];
     const byTypeBaseId = byTypeRaw?.id ? stripScopedEventId(byTypeRaw.id) : '';
+    const pIsModern = p.id === 'preset-modern-wedding';
+    const byTypeMatchesWeddingVariant =
+      p.type !== 'wedding' || isModernWeddingEvent(byTypeRaw) === pIsModern;
     const canUseByType =
       Boolean(byTypeRaw) &&
+      byTypeMatchesWeddingVariant &&
       (typeCounts[p.type] === 1 ||
         byTypeRaw.templateId === p.id ||
         byTypeRaw.id === p.sampleEvent.id ||
@@ -878,7 +887,7 @@ export async function fetchEventFromFirestoreRest(options: {
   apiKey?: string;
   timeoutMs?: number;
 }): Promise<Record<string, any> | null> {
-  const { projectId, databaseId = '(default)', eventId, ownerId, ownerEmail, apiKey, timeoutMs = 1200 } = options;
+  const { projectId, databaseId = '(default)', eventId, ownerId, ownerEmail, apiKey, timeoutMs = 2500 } = options;
   if (!projectId || !eventId) return null;
 
   const dbSegment = databaseId || '(default)';
@@ -959,7 +968,7 @@ export async function fetchShortLinkFromFirestoreRest(options: {
   apiKey?: string;
   timeoutMs?: number;
 }): Promise<{ code: string; url: string; lang?: string; createdAt?: string } | null> {
-  const { projectId, databaseId = '(default)', code, apiKey, timeoutMs = 1200 } = options;
+  const { projectId, databaseId = '(default)', code, apiKey, timeoutMs = 2500 } = options;
   if (!projectId || !code || !/^[a-zA-Z0-9_-]{1,128}$/.test(code)) return null;
   const dbSegment = databaseId || '(default)';
   if (isFirestoreRestTemporarilyMissing(projectId, dbSegment)) return null;

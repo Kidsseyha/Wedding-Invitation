@@ -197,8 +197,21 @@ export default function KhmerStoryAnniversaryCover({
     !coverBackground!.includes('white_arch_columns');
   const backdropImage = !bgFailed ? (hasCustomCover ? coverBackground! : khmerAnnivSilkBg) : '';
 
+  const eventPortrait = [eventData?.image, eventData?.config?.image, eventData?.cover_image].find(
+    (u) => typeof u === 'string' && !['', 'none', 'null', 'undefined', 'false'].includes(u.trim().toLowerCase())
+  );
+  const hasCustomEventPortrait =
+    Boolean(eventPortrait) &&
+    !eventPortrait!.includes('khmer_anniversary_story_emblem') &&
+    !eventPortrait!.includes('khmer_anniversary_silk_bg') &&
+    !eventPortrait!.includes('free-background') &&
+    !eventPortrait!.includes('white_arch_columns');
   const customMedallionUrl =
-    envelopeHeaderImage && envelopeHeaderImage !== 'none' ? envelopeHeaderImage : '';
+    envelopeHeaderImage && envelopeHeaderImage !== 'none'
+      ? envelopeHeaderImage
+      : hasCustomEventPortrait
+      ? eventPortrait!
+      : '';
   const medallionSrc = !emblemFailed && customMedallionUrl ? customMedallionUrl : khmerAnnivStoryEmblem;
 
   const handleSaveInlineGuest = (e: FormEvent) => {

@@ -697,10 +697,11 @@ export async function shortenUrl(longUrl: string, customOrigin?: string): Promis
       if (isQuotaBlocked) throw new Error('Firestore quota blocked');
 
       const { doc, setDoc } = await import('firebase/firestore');
-      const { db, IS_FIRESTORE_WRITE_DISABLED, isFirestoreKnownUnavailable } = await import('./firebase');
-      if (IS_FIRESTORE_WRITE_DISABLED || isFirestoreKnownUnavailable()) {
-        throw new Error('Firestore write disabled or unavailable');
+      const { db, IS_FIRESTORE_WRITE_DISABLED, ensureFirestoreNetwork } = await import('./firebase');
+      if (IS_FIRESTORE_WRITE_DISABLED) {
+        throw new Error('Firestore write disabled');
       }
+      await ensureFirestoreNetwork().catch(() => {});
 
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
       await Promise.race([
@@ -711,7 +712,7 @@ export async function shortenUrl(longUrl: string, customOrigin?: string): Promis
           createdAt: new Date().toISOString(),
         }),
         new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(() => reject(new Error('Short link Firestore write timed out')), 1800);
+          timeoutId = setTimeout(() => reject(new Error('Short link Firestore write timed out')), 3500);
         }),
       ]).finally(() => {
         if (timeoutId !== undefined) clearTimeout(timeoutId);
@@ -721,7 +722,9 @@ export async function shortenUrl(longUrl: string, customOrigin?: string): Promis
     };
 
     try {
-      const resolvedShortUrl = await Promise.any([tryServerApi(), tryClientFirestore()]);
+      const fsWritePromise = tryClientFirestore();
+      void fsWritePromise.catch(() => {});
+      const resolvedShortUrl = await Promise.any([tryServerApi(), fsWritePromise]);
       persistShortUrlToCache(cacheKey, resolvedShortUrl);
       return resolvedShortUrl;
     } catch {

@@ -54,7 +54,7 @@ import {
 import { WEDDING_EVENT } from './data/weddingData';
 import { sanitizeWeddingEvent, VERIFIED_WEDDING_COVER } from './utils/sanitizeEvent';
 import { findTemplatePreset, getCategoryCoverImage, VERIFIED_CATEGORY_COVERS, EVENT_PRESETS } from './data/eventTemplates';
-import { buildInvitationMeta, normalizeCategoryString, resolveCategoryFromHints, resolveEventCoverImage } from './utils/shareMeta';
+import { buildInvitationMeta, isModernWeddingEvent, normalizeCategoryString, resolveCategoryFromHints, resolveEventCoverImage } from './utils/shareMeta';
 import {
   PUBLIC_APP_URL,
   detectLanguageFromUrl,
@@ -290,7 +290,10 @@ export default function App() {
         if (storedTemplate) {
           const parsed = sanitizeWeddingEvent(JSON.parse(storedTemplate));
           const parsedCat = normalizeCategoryString(parsed.eventType || parsed.id || parsed.name);
-          if (!explicitCat || !parsedCat || parsedCat === explicitCat) {
+          const urlTargetModern = isModernWeddingEvent({ id: targetId });
+          const hasExplicitWeddingVariant = urlId && parsedCat === 'wedding';
+          const weddingVariantMatches = !hasExplicitWeddingVariant || isModernWeddingEvent(parsed) === urlTargetModern;
+          if ((!explicitCat || !parsedCat || parsedCat === explicitCat) && weddingVariantMatches) {
             return parsed;
           }
         }
@@ -1857,7 +1860,9 @@ export default function App() {
         if (localScopedRaw) {
           try {
             const parsedLocal = sanitizeWeddingEvent(JSON.parse(localScopedRaw));
-            if (!parsedLocal.ownerId || parsedLocal.ownerId === scopeId || parsedLocal.ownerId === authUser?.uid) {
+            const targetIsModern = isModernWeddingEvent({ id: candidateId, name: urlTypeParam || '' });
+            const sameVariant = parsedLocal.eventType !== 'wedding' || isModernWeddingEvent(parsedLocal) === targetIsModern || !urlIdParam;
+            if (sameVariant && (!parsedLocal.ownerId || parsedLocal.ownerId === scopeId || parsedLocal.ownerId === authUser?.uid)) {
               setEvent({
                 ...parsedLocal,
                 id: parsedLocal.id || fetchId,
@@ -2048,13 +2053,20 @@ export default function App() {
       if (preset) {
         let templateEvent = preset.sampleEvent;
         if (!effectiveShareMode) {
-          const storedTemplate =
+          const byIdRaw =
             localStorage.getItem(getUserStorageKey(`wedding_template_saved_${fetchId}`, scopeId)) ||
-            localStorage.getItem(getUserStorageKey(`wedding_template_saved_${preset.sampleEvent.id}`, scopeId)) ||
-            localStorage.getItem(getUserStorageKey(`wedding_template_type_${preset.type}`, scopeId));
+            localStorage.getItem(getUserStorageKey(`wedding_template_saved_${preset.sampleEvent.id}`, scopeId));
+          const byTypeRaw = localStorage.getItem(getUserStorageKey(`wedding_template_type_${preset.type}`, scopeId));
+          const storedTemplate = byIdRaw || byTypeRaw;
           if (storedTemplate) {
             try {
-              templateEvent = JSON.parse(storedTemplate);
+              const parsedFallback = JSON.parse(storedTemplate);
+              const variantMatches =
+                preset.type !== 'wedding' ||
+                isModernWeddingEvent(parsedFallback) === isModernWeddingEvent(preset.sampleEvent);
+              if (variantMatches) {
+                templateEvent = parsedFallback;
+              }
             } catch {}
           }
         }
@@ -2430,7 +2442,7 @@ export default function App() {
     persistLocalCaches(preparedEvent);
 
     // 2. Persist simultaneously to Firebase Firestore and Server API with exact verification
-    const saveServerApi = async (): Promise<{ ok: boolean; event?: WeddingEvent; error?: string }> => {
+    const saveServerApi = async (): Promise<{ ok: boolean; persisted: boolean; event?: WeddingEvent; error?: string }> => {
       const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
       const timerId = controller ? setTimeout(() => controller.abort(), 7000) : null;
       try {
@@ -2442,26 +2454,27 @@ export default function App() {
         });
         if (!response.ok) {
           console.error('Server responded with error:', response.status);
-          return { ok: false, error: `HTTP ${response.status}` };
+          return { ok: false, persisted: false, error: `HTTP ${response.status}` };
         }
         const json = await response.json().catch(() => null);
         if (json?.success) {
           return {
             ok: true,
+            persisted: json.storage !== 'firestore',
             event: json.event && typeof json.event === 'object' ? (json.event as WeddingEvent) : preparedEvent,
           };
         }
-        return { ok: false, error: json?.error || 'Server rejected event save' };
+        return { ok: false, persisted: false, error: json?.error || 'Server rejected event save' };
       } catch (err) {
         console.error('Failed to sync event with server:', err);
-        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        return { ok: false, persisted: false, error: err instanceof Error ? err.message : String(err) };
       } finally {
         if (timerId !== null) clearTimeout(timerId);
       }
     };
 
     const [firestoreResult, serverResult] = await Promise.all([
-      saveEventReliable(preparedEvent, { skipRestApi: true, writeTimeoutMs: 5500 }).catch((err) => ({
+      saveEventReliable(preparedEvent, { skipRestApi: true, writeTimeoutMs: 7000 }).catch((err) => ({
         event: preparedEvent,
         serverOk: false,
         firestoreOk: false,
@@ -2470,8 +2483,8 @@ export default function App() {
       saveServerApi(),
     ]);
 
-    if (!serverResult.ok && !firestoreResult.firestoreOk) {
-      throw new Error(serverResult.error || firestoreResult.error || 'Failed to save to Database and Server');
+    if (!serverResult.persisted && !firestoreResult.firestoreOk) {
+      throw new Error(firestoreResult.error || serverResult.error || 'Failed to save to Database');
     }
 
     // 3. Use directly confirmed database payload without redundant read-back round-trip
@@ -2751,6 +2764,7 @@ export default function App() {
         language={language}
         isAdmin={!isViewer}
         coverBackground={config.hide_cover_background ? '' : (config.cover_background || 'https://focuz-staging-space.sgp1.cdn.digitaloceanspaces.com/plan-essential/template/free/template-1/free-background.jpg')}
+        eventImage={resolveEventCoverImage(event, normalizeCategoryString(event.eventType || event.id) || 'wedding')}
         primaryColor={config.primaryColor || '#f5b80f'}
         textColor={config.textColor || '#f5b80f'}
         envelopeFrame={config.envelope_frame}
@@ -4038,8 +4052,14 @@ export default function App() {
                 localStorage.getItem(getUserStorageKey(`wedding_template_saved_${scopedId}`, scopeId)) ||
                 localStorage.getItem(getUserStorageKey(`wedding_template_saved_${matchedPreset.sampleEvent.id}`, scopeId));
               const savedByType = localStorage.getItem(getUserStorageKey(`wedding_template_type_${cat}`, scopeId));
-              if (savedById) nextEvent = JSON.parse(savedById);
-              else if (savedByType) nextEvent = JSON.parse(savedByType);
+              if (savedById) {
+                nextEvent = JSON.parse(savedById);
+              } else if (savedByType) {
+                const parsedByType = JSON.parse(savedByType);
+                if (cat !== 'wedding' || isModernWeddingEvent(parsedByType) === isModernWeddingEvent(matchedPreset.sampleEvent)) {
+                  nextEvent = parsedByType;
+                }
+              }
             } catch {}
             handleSaveEvent(nextEvent, false);
           }

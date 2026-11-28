@@ -102,6 +102,7 @@ interface EnvelopeModalProps {
   language: Language;
   isAdmin?: boolean;
   coverBackground?: string;
+  eventImage?: string;
   primaryColor?: string;
   textColor?: string;
   envelopeFrame?: string;
@@ -177,6 +178,7 @@ export default function EnvelopeModal({
   language,
   isAdmin = false,
   coverBackground,
+  eventImage,
   primaryColor = '#f5b80f',
   textColor = '#f5b80f',
   envelopeFrame,
@@ -381,14 +383,35 @@ export default function EnvelopeModal({
         ? (invitationSubtitleEn?.trim() || invitationTitleEn?.trim() || (isBirthday ? 'Cordially Invited to Birthday Party' : 'Cordially Invited to Housewarming Blessing'))
         : (invitationSubtitleEn?.trim() || 'Cordially Invited'));
 
+  const resolvedPortraitCandidate = [eventImage, eventData?.image, eventData?.config?.image, eventData?.cover_image].find(
+    (u) => typeof u === 'string' && !['', 'none', 'null', 'undefined', 'false'].includes(u.trim().toLowerCase())
+  ) || '';
+  const hasCustomMainPortrait =
+    Boolean(resolvedPortraitCandidate) &&
+    !resolvedPortraitCandidate.includes('free-background') &&
+    !resolvedPortraitCandidate.includes('default') &&
+    !resolvedPortraitCandidate.includes('white_arch_columns') &&
+    !resolvedPortraitCandidate.includes('photo-1513151233558') &&
+    !resolvedPortraitCandidate.includes('photo-1519741497674') &&
+    !resolvedPortraitCandidate.includes('image_6e49a03a.png') &&
+    !resolvedPortraitCandidate.includes('khmer_housewarming_villa_emblem') &&
+    !resolvedPortraitCandidate.includes('khmer_anniversary_story_emblem');
+
+  const hasExplicitCoverBg =
+    Boolean(coverBackground) &&
+    !coverBackground!.includes('free-background') &&
+    !coverBackground!.includes('default') &&
+    !coverBackground!.includes('white_arch_columns') &&
+    !coverBackground!.includes('image_6e49a03a.png');
+
   const activeCoverBg = isAnniversary
-    ? (coverBackground && !coverBackground.includes('unsplash.com') && !coverBackground.includes('free-background') && !coverBackground.includes('default') ? coverBackground : khmerAnnivSilkBg)
+    ? (coverBackground && !coverBackground.includes('unsplash.com') && !coverBackground.includes('free-background') && !coverBackground.includes('default') ? coverBackground : (hasCustomMainPortrait ? resolvedPortraitCandidate : khmerAnnivSilkBg))
     : isHousewarming
-    ? (coverBackground && !coverBackground.includes('free-background') && !coverBackground.includes('default') && !coverBackground.includes('white_arch_columns') ? coverBackground : khmerNatureBg)
+    ? (hasExplicitCoverBg ? coverBackground! : (hasCustomMainPortrait ? resolvedPortraitCandidate : khmerNatureBg))
     : isEngagement
-    ? (coverBackground && !coverBackground.includes('free-background') && !coverBackground.includes('default') && !coverBackground.includes('white_arch_columns') ? coverBackground : '/assets/aistudio/image_6e49a03a.png')
+    ? (hasCustomMainPortrait ? resolvedPortraitCandidate : (hasExplicitCoverBg ? coverBackground! : '/assets/aistudio/image_6e49a03a.png'))
     : isWeddingStyle
-    ? (coverBackground && !coverBackground.includes('free-background') && !coverBackground.includes('default') ? coverBackground : (isModernWedding ? 'https://focuz-staging-space.sgp1.cdn.digitaloceanspaces.com/plan-essential/template/free/template-1/free-background.jpg' : '/assets/template15/opening-background.webp'))
+    ? (coverBackground && !coverBackground.includes('free-background') && !coverBackground.includes('default') ? coverBackground : (hasCustomMainPortrait ? resolvedPortraitCandidate : (isModernWedding ? 'https://focuz-staging-space.sgp1.cdn.digitaloceanspaces.com/plan-essential/template/free/template-1/free-background.jpg' : '/assets/template15/opening-background.webp')))
     : (coverBackground || khmerRoyalGoldWeddingCover);
 
   const headerImageInputRef = useRef<HTMLInputElement>(null);
@@ -950,6 +973,8 @@ export default function EnvelopeModal({
                         coverMonogramFontFamilyEn={coverMonogramFontFamilyEn}
                         coverMonogramColor={coverMonogramColor}
                         coverMonogramFontSize={coverMonogramFontSize}
+                        coverBackground={coverBackground}
+                        eventImage={resolvedPortraitCandidate}
                         onOpenInvitation={handleOpenInvitation}
                         isOpening={isOpening}
                         isAdmin={isAdmin}
@@ -1365,18 +1390,19 @@ export default function EnvelopeModal({
                       </div>
                     </div>
 
-                    {/* Real Birthday Cake Image with Golden Glow Border */}
+                    {/* Main Couple / Celebrant Portrait or Birthday Cake Image */}
                     <div className="relative z-10 my-1 flex justify-center">
                       <div className="relative group p-1 rounded-2xl bg-gradient-to-tr from-[#2dd4bf]/50 via-[#fde047]/40 to-[#0d9488]/60 shadow-[0_8px_25px_rgba(0,0,0,0.5)]">
                         <img
-                          src="/assets/images/real_birthday_cake.jpg"
-                          alt="Birthday Celebration Cake"
+                          src={hasCustomMainPortrait ? resolvedPortraitCandidate : '/assets/images/real_birthday_cake.jpg'}
+                          alt={hasCustomMainPortrait ? (singlePerson ? groom : `${groom} Portrait`) : 'Birthday Celebration Cake'}
+                          referrerPolicy="no-referrer"
                           onError={(e) => {
-                            // Fallback to secondary asset or high-res cake image if needed
                             const target = e.currentTarget;
-                            if (!target.src.includes('real_birthday_cake_1790740588590')) {
-                              target.src = '/src/assets/images/real_birthday_cake_1790740588590.jpg';
+                            if (!target.src.includes('real_birthday_cake')) {
+                              target.src = '/assets/images/real_birthday_cake.jpg';
                             } else {
+                              target.onerror = null;
                               target.src = 'https://images.unsplash.com/photo-1535141192574-5d4897c13136?q=80&w=600&auto=format&fit=crop';
                             }
                           }}
@@ -1482,6 +1508,7 @@ export default function EnvelopeModal({
                     eventTime={eventTime}
                     eventLocation={eventLocation}
                     coverBackground={coverBackground}
+                    eventImage={resolvedPortraitCandidate}
                     primaryColor={primaryColor}
                     coverEnNameColor={coverEnNameColor}
                     coverEnFontFamily={coverEnFontFamily}

@@ -1964,12 +1964,17 @@ app.get('/api/og-image', async (req, res) => {
     const qStr = (val: unknown) => (Array.isArray(val) ? String(val[0] || '') : typeof val === 'string' ? val : '').trim();
     const eventId = qStr(req.query.id);
     const ownerId = qStr(req.query.ownerId);
+    const tplHint = qStr(req.query.tpl);
     const rawType = qStr(req.query.type || req.query.category);
-    const targetEvent = await resolveTargetEvent({
+    let targetEvent = await resolveTargetEvent({
       eventId: eventId || undefined,
       eventType: rawType || undefined,
       ownerId: ownerId || undefined,
     });
+    if (!targetEvent && tplHint) {
+      const tplPreset = findTemplatePreset(stripScopedEventId(tplHint));
+      if (tplPreset) targetEvent = tplPreset.sampleEvent;
+    }
 
     const category = resolveCategoryFromHints({
       queryType: rawType || null,
