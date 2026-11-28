@@ -495,15 +495,50 @@ export default function ShareInvitationModal({
     return '';
   })();
   const canSwitchToLiveOrigin = Boolean(liveAppOrigin && liveAppOrigin !== runtimeVercelOrigin);
-  const hasUploadedLocalPortrait =
-    typeof effectiveCoverImage === 'string' && effectiveCoverImage.trim().startsWith('data:image/');
+  const [isLiveOriginReachable, setIsLiveOriginReachable] = useState<boolean>(() => {
+    if (typeof window === 'undefined' || !liveAppOrigin) return false;
+    return window.location.origin === liveAppOrigin;
+  });
+
+  useEffect(() => {
+    if (!isOpen || !canSwitchToLiveOrigin || !liveAppOrigin) {
+      setIsLiveOriginReachable(false);
+      return;
+    }
+    if (typeof window !== 'undefined' && window.location.origin === liveAppOrigin) {
+      setIsLiveOriginReachable(true);
+      return;
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1800);
+    fetch(`${liveAppOrigin}/api/health`, { method: 'GET', signal: controller.signal })
+      .then((res) => {
+        const contentType = res.headers.get('content-type') || '';
+        if (!cancelled) {
+          setIsLiveOriginReachable(res.ok && contentType.includes('application/json'));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setIsLiveOriginReachable(false);
+        }
+      })
+      .finally(() => {
+        clearTimeout(timer);
+      });
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [isOpen, canSwitchToLiveOrigin, liveAppOrigin]);
+
   const [shareDomainMode, setShareDomainMode] = useState<'auto' | 'preview' | 'vercel'>('auto');
   const resolvedShareDomain: 'preview' | 'vercel' =
-    shareDomainMode === 'auto'
-      ? canSwitchToLiveOrigin && hasUploadedLocalPortrait && isFirestoreKnownUnavailable()
-        ? 'preview'
-        : 'vercel'
-      : shareDomainMode;
+    shareDomainMode === 'preview' && isLiveOriginReachable
+      ? 'preview'
+      : 'vercel';
   const selectedDomainOrigin =
     resolvedShareDomain === 'preview' && liveAppOrigin ? liveAppOrigin : runtimeVercelOrigin;
   const targetShareLang = 'kh';
@@ -516,11 +551,14 @@ export default function ShareInvitationModal({
   });
 
   const cachedShortUrl = getCachedShortUrl(fullUrl, selectedDomainOrigin);
-  const instantShortUrl = isOpen ? getInstantShareUrl(fullUrl, selectedDomainOrigin) : cachedShortUrl;
-  const shortUrl =
-    (shortUrlState && shortUrlState.targetUrl === fullUrl ? shortUrlState.shortUrl : '') ||
-    cachedShortUrl ||
-    instantShortUrl;
+  const resolvedShortUrl =
+    shortUrlState &&
+    shortUrlState.targetUrl === fullUrl &&
+    shortUrlState.shortUrl !== fullUrl &&
+    /\/s\/[a-zA-Z0-9_-]+(?:\?|$)/.test(shortUrlState.shortUrl)
+      ? shortUrlState.shortUrl
+      : '';
+  const shortUrl = resolvedShortUrl || cachedShortUrl || '';
 
   // Persist short URL in background immediately whenever fullUrl changes
   useEffect(() => {
@@ -1194,7 +1232,7 @@ Your presence will make our day truly special! 🙏✨`;
                         <span>{language === 'kh' ? 'គំរូផ្ទាំងសំបុត្រ និងរូបភាពក្របសម្រាប់ភ្ញៀវមើល (Viewer Invitation Card):' : 'Viewer Invitation Card Preview:'}</span>
                       </span>
                       <div className="flex items-center gap-2">
-                        {canSwitchToLiveOrigin && (
+                        {canSwitchToLiveOrigin && isLiveOriginReachable && (
                           <div className={`inline-flex items-center rounded-lg p-0.5 border text-[10px] font-khmer ${
                             isLight ? 'bg-white/90 border-amber-300' : 'bg-black/60 border-amber-500/30'
                           }`}>

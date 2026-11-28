@@ -11,6 +11,7 @@ import {
   KHMER_SHARE_FONTS,
   decodeKhmerQueryValue,
   detectLanguageFromUrl,
+  getInstantShareUrl,
   shortenUrl,
   getDefaultShareDomain,
   VERCEL_APP_URL,
@@ -242,6 +243,9 @@ test('shortenUrl falls back to self-contained full share URL when short-link per
     assert.equal(isSharedInvitationSearch(parsed.search), true);
     assert.equal(extractGuestNameFromSearch(parsed.search), 'លោក សុខ ដារ៉ា');
     assert.ok(resolved.startsWith(`${VERCEL_APP_URL}/?name=លោក+សុខ+ដារ៉ា&id=u_owner__modern-wedding-mw001`));
+
+    const instantUncached = getInstantShareUrl(longUrl, VERCEL_APP_URL);
+    assert.equal(instantUncached, resolved);
   } finally {
     globalThis.fetch = originalFetch;
   }

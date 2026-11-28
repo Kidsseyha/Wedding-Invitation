@@ -2338,7 +2338,40 @@ app.post('/api/shorten', async (req, res) => {
     const existingLinks = getShortLinks();
     for (const [existingCode, targetUrl] of Object.entries(existingLinks)) {
       if (targetUrl === cleanUrl) {
-        // Sync to Firestore in background without blocking the response
+        if (isRemoteOrigin) {
+          const [persistedRemoteFs, remoteCached] = await Promise.all([
+            saveShortLinkToFirestoreRest({
+              projectId: rawFirebaseConfig.projectId,
+              databaseId: (rawFirebaseConfig as any).firestoreDatabaseId || '(default)',
+              code: existingCode,
+              url: cleanUrl,
+              lang: targetLang,
+              apiKey: rawFirebaseConfig.apiKey,
+              timeoutMs: 1500,
+            }),
+            tryRemoteShorten(),
+          ]);
+          if (!persistedRemoteFs && !remoteCached) {
+            return res.status(503).json({
+              success: false,
+              persisted: false,
+              fallbackUrl: cleanUrl,
+              error: 'Remote short link persistence unavailable',
+            });
+          }
+          const remoteShortUrl = remoteCached?.shortUrl || `${baseOrigin}/s/${existingCode}`;
+          return res.json({
+            success: true,
+            persisted: true,
+            shortUrl: remoteShortUrl,
+            internalShortUrl: remoteShortUrl,
+            code: remoteCached?.code || existingCode,
+            lang: targetLang,
+            provider: remoteCached ? 'remote' : 'firestore',
+          });
+        }
+
+        // Sync same-origin links to Firestore in background without blocking
         void saveShortLinkToFirestoreRest({
           projectId: rawFirebaseConfig.projectId,
           databaseId: (rawFirebaseConfig as any).firestoreDatabaseId || '(default)',
@@ -2347,10 +2380,6 @@ app.post('/api/shorten', async (req, res) => {
           lang: targetLang,
           apiKey: rawFirebaseConfig.apiKey,
           timeoutMs: 1500,
-        }).then((persisted) => {
-          if (isRemoteOrigin && !persisted) {
-            void tryRemoteShorten();
-          }
         });
         const cachedShortUrl = `${baseOrigin}/s/${existingCode}`;
         return res.json({
@@ -2374,7 +2403,6 @@ app.post('/api/shorten', async (req, res) => {
       suffixIdx += 1;
     }
 
-    saveShortLink(code, cleanUrl);
     const persistedToFirestore = await saveShortLinkToFirestoreRest({
       projectId: rawFirebaseConfig.projectId,
       databaseId: (rawFirebaseConfig as any).firestoreDatabaseId || '(default)',
@@ -2395,6 +2423,7 @@ app.post('/api/shorten', async (req, res) => {
           error: 'Remote short link persistence unavailable',
         });
       }
+      saveShortLink(remote.code || code, cleanUrl);
       return res.json({
         success: true,
         persisted: true,
@@ -2406,6 +2435,7 @@ app.post('/api/shorten', async (req, res) => {
       });
     }
 
+    saveShortLink(code, cleanUrl);
     const internalShortUrl = `${baseOrigin}/s/${code}`;
 
     return res.json({

@@ -469,7 +469,7 @@ export function getPublicShareUrl(
   return normalizeShareUrlEncoding(url.toString());
 }
 
-const SHORT_URL_CACHE_STORAGE_KEY = 'wedding_short_url_cache_v2';
+const SHORT_URL_CACHE_STORAGE_KEY = 'wedding_short_url_cache_v3';
 
 /**
  * In-memory cache for shortened URLs (hydrated from localStorage) so repeated requests are 0ms instantaneous
@@ -480,6 +480,11 @@ const inFlightShortenRequests = new Map<string, Promise<string>>();
 function hydrateShortUrlCache(): void {
   if (typeof window === 'undefined' || typeof localStorage === 'undefined') return;
   try {
+    try {
+      localStorage.removeItem('wedding_short_url_cache_v2');
+    } catch {
+      // ignore
+    }
     const raw = localStorage.getItem(SHORT_URL_CACHE_STORAGE_KEY);
     if (!raw) return;
     const parsed = JSON.parse(raw);
@@ -614,28 +619,19 @@ export function getCachedShortUrl(longUrl: string, customOrigin?: string): strin
 }
 
 /**
- * Synchronously returns the deterministic `/s/:code` short URL in 0ms while immediately
- * triggering background persistence to `/api/shorten` and Firestore `short_links/{code}`.
+ * Synchronously returns a confirmed persisted `/s/:code` URL if already cached,
+ * or the self-contained working full share URL immediately while triggering
+ * background persistence to `/api/shorten` and Firestore `short_links/{code}`.
  */
 export function getInstantShareUrl(longUrl: string, customOrigin?: string): string {
   if (!longUrl) return '';
-  const { fallbackOrigin, cleanedUrl, cacheKey, code } = prepareShortenTarget(longUrl, customOrigin);
+  const { cleanedUrl, cacheKey } = prepareShortenTarget(longUrl, customOrigin);
   const existing = shortUrlCache.get(cacheKey);
   if (existing) return existing;
 
-  // Kick off background persistence immediately
+  // Kick off background persistence immediately without handing out an unpersisted /s/:code
   void shortenUrl(longUrl, customOrigin);
-
-  const isQuotaBlocked =
-    typeof window !== 'undefined' &&
-    typeof localStorage !== 'undefined' &&
-    localStorage.getItem('firestore_quota_exceeded') === 'true';
-
-  if (isQuotaBlocked) {
-    return cleanedUrl;
-  }
-
-  return `${fallbackOrigin}/s/${code}`;
+  return cleanedUrl;
 }
 
 /**
