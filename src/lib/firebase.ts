@@ -200,10 +200,21 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     return { error: message, operationType, path, authInfo: {} };
   }
 
+  // Handle missing Firestore database / offline states gracefully without repeated stall loops
+  if (
+    code === 'not-found' ||
+    code.includes('not-found') ||
+    message.includes('does not exist') ||
+    message.includes('NOT_FOUND')
+  ) {
+    markFirestoreUnavailable(60_000);
+    return { error: message, operationType, path, authInfo: {} };
+  }
+
   // Handle temporary offline network states gracefully
   if (message.includes('client is offline') || message.includes('offline') || code === 'unavailable') {
     console.warn(`Firestore network offline (${operationType} at ${path}):`, message);
-    enableNetwork(db).catch(() => {});
+    markFirestoreUnavailable(30_000);
     return { error: message, operationType, path, authInfo: {} };
   }
 

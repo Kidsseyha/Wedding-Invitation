@@ -381,9 +381,16 @@ export default function EventEditorModal({
     prevInitialTabRef.current = initialTab;
   }, [isOpen, initialTab, activeTabStorageKey]);
 
-  // Synchronize event changes into formData without ever disrupting the current active tab
+  // Synchronize event changes into formData without ever disrupting the current active tab or overwriting fresher local uploads
   useEffect(() => {
     if (isOpen) {
+      const incomingMs = getEventTimestampMs(event);
+      const localMs = getEventTimestampMs(latestFormDataRef.current);
+      if (incomingMs > 0 && localMs > incomingMs && event.id === latestFormDataRef.current.id) {
+        return;
+      }
+      latestFormDataRef.current = event;
+      latestConfigRef.current = event.config;
       setFormData(event);
     }
   }, [event, isOpen]);
@@ -410,12 +417,15 @@ export default function EventEditorModal({
         if (cancelled || !dbEvent) return;
         const dbMs = getEventTimestampMs(dbEvent);
         const propMs = getEventTimestampMs(event);
-        if (dbMs > propMs) {
+        const currentLocalMs = getEventTimestampMs(latestFormDataRef.current);
+        if (dbMs > propMs && dbMs > currentLocalMs) {
           const normalized = sanitizeWeddingEvent({
             ...dbEvent,
             id: dbEvent.id || idToFetch,
             ...(effectiveScope !== 'guest_public' ? { ownerId: dbEvent.ownerId || effectiveScope } : {}),
           });
+          latestFormDataRef.current = normalized;
+          latestConfigRef.current = normalized.config;
           setFormData(normalized);
           setSavedRetrievedInfo(normalized);
           if (normalized.updatedAt) {
@@ -541,6 +551,8 @@ export default function EventEditorModal({
     });
   };
 
+  const latestFormDataRef = useRef(formData);
+  latestFormDataRef.current = formData;
   const latestConfigRef = useRef(formData.config);
   latestConfigRef.current = formData.config;
 
@@ -554,12 +566,22 @@ export default function EventEditorModal({
     };
     latestConfigRef.current = newConfig;
 
+    const updatedTimestamp = new Date().toISOString();
+    const nextEvent: WeddingEvent = {
+      ...latestFormDataRef.current,
+      config: newConfig,
+      eventType: currentTemplateType,
+      updatedAt: updatedTimestamp,
+    };
+    latestFormDataRef.current = nextEvent;
+
     setFormData(prev => ({
       ...prev,
       config: {
         ...prev.config,
         [key]: value,
       },
+      updatedAt: updatedTimestamp,
     }));
 
     // Automatic save for image-related, background, and cover monogram style config changes
@@ -588,12 +610,7 @@ export default function EventEditorModal({
       'cover_monogram_bride',
     ];
     if (autoSaveKeys.includes(key as string)) {
-      await onSave({
-        ...formData,
-        config: newConfig,
-        eventType: currentTemplateType,
-        updatedAt: new Date().toISOString(),
-      }, false);
+      await onSave(nextEvent, false);
     }
   };
 
@@ -1925,19 +1942,23 @@ export default function EventEditorModal({
                     onUpdateConfig={handleUpdateConfig}
                     eventImage={formData.image}
                     onUpdateEventImage={async (url) => {
+                      const baseEvent = latestFormDataRef.current;
+                      const baseConfig = latestConfigRef.current;
                       const updatedEvent: WeddingEvent = sanitizeWeddingEvent({
-                        ...formData,
-                        id: getScopedEventId(formData.id || 'cmgrawhnk0003le0434762j7n', effectiveScope),
+                        ...baseEvent,
+                        id: getScopedEventId(baseEvent.id || 'cmgrawhnk0003le0434762j7n', effectiveScope),
                         ...(effectiveScope !== 'guest_public' ? { ownerId: effectiveScope } : {}),
                         image: url,
                         cover_image: url,
                         config: {
-                          ...formData.config,
+                          ...baseConfig,
                           image: url,
                         },
                         eventType: currentTemplateType,
                         updatedAt: new Date().toISOString(),
                       });
+                      latestFormDataRef.current = updatedEvent;
+                      latestConfigRef.current = updatedEvent.config;
                       setFormData(updatedEvent);
                       await onSave(updatedEvent, false);
                     }}

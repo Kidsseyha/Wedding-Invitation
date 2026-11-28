@@ -138,11 +138,13 @@ export default async function handler(req: VercelReq, res: VercelRes) {
     const cover = resolveEventCoverImage(targetEvent, category);
 
     if (cover.startsWith('data:image/')) {
-      const match = cover.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+      const match = cover.match(/^data:(image\/[a-zA-Z0-9.+-]+)(?:;[^,]*)?;base64,([\s\S]+)$/i);
       if (match && match[1] && match[2]) {
-        const mimeType = match[1];
-        const buffer = Buffer.from(match[2], 'base64');
+        const mimeType = match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase();
+        const buffer = Buffer.from(match[2].replace(/\s+/g, ''), 'base64');
         res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Length', String(buffer.length));
+        res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300');
         return res.status(200).send(buffer);
       }

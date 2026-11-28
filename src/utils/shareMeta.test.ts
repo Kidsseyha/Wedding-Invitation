@@ -275,7 +275,49 @@ test('Main Couple Portrait takes priority over envelope_header_image and serves 
   assert.ok(dataUrlMeta.image.startsWith(`${origin}/api/og-image?`));
   assert.ok(dataUrlMeta.image.includes('id=u_alice__cmgrawhnk0003le0434762j7n'));
   assert.ok(dataUrlMeta.image.includes('ownerId=u_alice'));
+
+  const liveUploadedPortrait = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/';
+  const optionsWithUploadedPortrait = buildAllShareTemplates({
+    presets: EVENT_PRESETS,
+    savedEventsById: {
+      cmgrawhnk0003le0434762j7n: {
+        ...EVENT_PRESETS[0].sampleEvent,
+        id: 'u_alice__cmgrawhnk0003le0434762j7n',
+        ownerId: 'u_alice',
+        image: 'https://cdn.example.com/old-stale-cover.jpg',
+        cover_image: 'https://cdn.example.com/old-stale-cover.jpg',
+        updatedAt: '2026-11-27T08:00:00.000Z',
+      },
+    },
+    currentEvent: {
+      ...EVENT_PRESETS[0].sampleEvent,
+      id: 'u_alice__cmgrawhnk0003le0434762j7n',
+      templateId: 'cmgrawhnk0003le0434762j7n',
+      ownerId: 'u_alice',
+      image: liveUploadedPortrait,
+      cover_image: liveUploadedPortrait,
+      config: {
+        ...EVENT_PRESETS[0].sampleEvent.config,
+        image: liveUploadedPortrait,
+        envelope_header_image: 'https://cdn.example.com/wax-seal.jpg',
+      },
+      updatedAt: '2026-11-27T11:00:00.000Z',
+    },
+  });
+
+  const weddingOpt = optionsWithUploadedPortrait.find((o) => o.templateId === 'preset-wedding');
+  assert.ok(weddingOpt);
+  assert.equal(weddingOpt.coverImage, liveUploadedPortrait);
+  assert.equal(weddingOpt.event.image, liveUploadedPortrait);
+
+  const injectedHtml = injectMetaIntoHtml(
+    '<!doctype html><html><head><title>Old</title></head><body></body></html>',
+    dataUrlMeta
+  );
+  assert.ok(injectedHtml.includes(`<meta property="og:image" content="${dataUrlMeta.image.replace(/&/g, '&amp;')}" />`));
+  assert.ok(injectedHtml.includes(`<meta name="twitter:image" content="${dataUrlMeta.image.replace(/&/g, '&amp;')}" />`));
 });
+
 
 
 

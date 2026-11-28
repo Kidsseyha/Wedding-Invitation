@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Sparkles, RefreshCw, Check, Save, Languages } from 'lucide-react';
 import { Language, TemplateConfig } from '../types';
 import { ThemeMode } from './ThemeToggle';
@@ -63,29 +62,38 @@ export default function CoverMonogramSettingsCard({
     isLatinPreview
   );
 
-  const [styleCategoryFilter, setStyleCategoryFilter] = useState<'all' | 'traditional' | 'modern'>('all');
 
   const selectedKhFont =
-    config.cover_monogram_font_family &&
+    config.cover_monogram_font_family !== undefined &&
     MONOGRAM_FONT_PRESETS_KH.some((p) => p.fontFamily === config.cover_monogram_font_family)
       ? config.cover_monogram_font_family
-      : '';
+      : null;
   const selectedEnFont =
-    config.cover_monogram_font_family_en ??
-    (config.cover_monogram_font_family &&
-    MONOGRAM_FONT_PRESETS_EN.some((p) => p.fontFamily === config.cover_monogram_font_family)
+    config.cover_monogram_font_family_en !== undefined &&
+    MONOGRAM_FONT_PRESETS_EN.some((p) => p.fontFamily === config.cover_monogram_font_family_en)
+      ? config.cover_monogram_font_family_en
+      : config.cover_monogram_font_family !== undefined &&
+        MONOGRAM_FONT_PRESETS_EN.some((p) => p.fontFamily === config.cover_monogram_font_family)
       ? config.cover_monogram_font_family
-      : '');
+      : null;
 
   const khSampleText = singlePerson ? autoGroomKh : `${autoGroomKh} & ${autoBrideKh}`;
   const enSampleText = singlePerson ? autoGroomEn : `${autoGroomEn} & ${autoBrideEn}`;
 
   const handleSelectKhStyle = (font: MonogramFontPreset) => {
+    if (isKhmer && selectedKhFont === font.fontFamily) {
+      onUpdateConfig('cover_monogram_font_family', undefined);
+      return;
+    }
     onUpdateConfig('cover_monogram_lang', 'kh');
     onUpdateConfig('cover_monogram_font_family', font.fontFamily);
   };
 
   const handleSelectEnStyle = (font: MonogramFontPreset) => {
+    if (!isKhmer && selectedEnFont === font.fontFamily) {
+      onUpdateConfig('cover_monogram_font_family_en', undefined);
+      return;
+    }
     onUpdateConfig('cover_monogram_lang', 'en');
     onUpdateConfig('cover_monogram_font_family_en', font.fontFamily);
   };
@@ -106,9 +114,6 @@ export default function CoverMonogramSettingsCard({
           isActiveLangAndFont
             ? 'border-amber-400 ring-2 ring-amber-400/50 font-bold bg-amber-400/20 ' +
               (theme === 'light' ? 'text-amber-950 shadow-sm' : 'text-amber-200 shadow-sm')
-            : isSelectedFont
-            ? 'border-amber-400/60 bg-amber-400/10 ' +
-              (theme === 'light' ? 'text-amber-950' : 'text-amber-200')
             : theme === 'light'
             ? 'bg-white border-amber-200 text-neutral-800 hover:border-amber-400 hover:bg-amber-50/50'
             : 'bg-black/40 border-white/10 text-amber-100 hover:border-amber-400/40'
@@ -506,36 +511,10 @@ export default function CoverMonogramSettingsCard({
               ចុចជ្រើសរើសម៉ូតអក្សរខ្មែរ (KH) ឬ អង់គ្លេស (EN) សម្រាប់មង្គលការបែបប្រពៃណី និងអាពាហ៍ពិពាហ៍បែបសម័យ
             </p>
           </div>
-
-          <div className="flex items-center gap-1 flex-wrap">
-            {[
-              { id: 'all' as const, labelKh: 'ទាំងអស់ (All KH & EN)' },
-              { id: 'traditional' as const, labelKh: 'មង្គលការប្រពៃណី (Traditional)' },
-            ].map((tab) => {
-              const active = styleCategoryFilter === tab.id;
-              return (
-                <button
-                  key={`mono-style-tab-${tab.id}`}
-                  type="button"
-                  onClick={() => setStyleCategoryFilter(tab.id)}
-                  className={`px-2.5 py-1 rounded-lg text-[10px] font-khmer font-bold border transition-all cursor-pointer ${
-                    active
-                      ? 'bg-amber-400 text-amber-950 border-amber-300 shadow-xs'
-                      : theme === 'light'
-                      ? 'bg-white text-amber-950 border-amber-200 hover:bg-amber-100/70'
-                      : 'bg-black/40 text-amber-200 border-amber-500/30 hover:bg-amber-500/15'
-                  }`}
-                >
-                  {tab.labelKh}
-                </button>
-              );
-            })}
-          </div>
         </div>
 
         {/* 1. Khmer Traditional Wedding (មង្គលការបែបប្រពៃណី) - KH & EN Styles */}
-        {(styleCategoryFilter === 'all' || styleCategoryFilter === 'traditional') && (
-          <div
+        <div
             className={`p-3 rounded-xl border space-y-2.5 ${
               theme === 'light'
                 ? 'bg-amber-100/40 border-amber-300/80'
@@ -584,7 +563,6 @@ export default function CoverMonogramSettingsCard({
               </div>
             </div>
           </div>
-        )}
       </div>
     </div>
   );

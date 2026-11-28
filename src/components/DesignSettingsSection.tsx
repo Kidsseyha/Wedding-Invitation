@@ -61,7 +61,7 @@ interface DesignSettingsSectionProps {
   config: TemplateConfig;
   onUpdateConfig: <K extends keyof TemplateConfig>(key: K, value: TemplateConfig[K]) => void;
   eventImage: string;
-  onUpdateEventImage: (url: string) => void;
+  onUpdateEventImage: (url: string) => Promise<void> | void;
   theme?: ThemeMode;
   onSave?: () => Promise<void> | void;
   isSaving?: boolean;
@@ -369,7 +369,7 @@ function compressImage(file: File, maxWidth = 800, maxHeight = 800, quality = 0.
 interface FilePickerProps {
   label: string;
   previewUrl: string;
-  onFileSelected: (url: string) => void;
+  onFileSelected: (url: string) => Promise<void> | void;
   aspectClass?: string;
   defaultFilename?: string;
   helpText?: string;
@@ -389,18 +389,32 @@ function DesignFilePicker({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [fileName, setFileName] = useState<string>('No file chosen');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleFile = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (!file) return;
+
+    if (savedTimerRef.current) {
+      clearTimeout(savedTimerRef.current);
+      savedTimerRef.current = null;
+    }
 
     setFileName(file.name);
     setIsProcessing(true);
+    setSaveState('saving');
     try {
       const dataUrl = await compressImage(file);
-      onFileSelected(dataUrl);
+      await onFileSelected(dataUrl);
+      setSaveState('saved');
+      savedTimerRef.current = setTimeout(() => {
+        setSaveState('idle');
+      }, 3500);
     } catch (err) {
-      console.error('Error reading image file:', err);
+      console.error('Error reading or saving image file:', err);
+      setSaveState('error');
     } finally {
       setIsProcessing(false);
     }
@@ -412,15 +426,34 @@ function DesignFilePicker({
         ? 'bg-amber-50/50 border-amber-200/80 shadow-sm'
         : 'bg-black/40 border-amber-500/20'
     }`}>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <label className={`block text-xs font-semibold ${theme === 'light' ? 'text-amber-950' : 'text-amber-200'} font-khmer`}>
           {label}
         </label>
-        {helpText && (
-          <span className={`text-[10px] ${theme === 'light' ? 'text-neutral-600' : 'text-amber-300/70'} font-khmer`}>
-            {helpText}
-          </span>
-        )}
+        <div className="flex items-center gap-1.5">
+          {saveState === 'saving' && (
+            <span className="text-[10px] font-khmer font-semibold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-400/30 flex items-center gap-1">
+              <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+              កំពុងរក្សាទុក...
+            </span>
+          )}
+          {saveState === 'saved' && (
+            <span className="text-[10px] font-khmer font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-500 border border-emerald-500/35 flex items-center gap-1">
+              <Check className="w-2.5 h-2.5" />
+              បានរក្សាទុកស្វ័យប្រវត្តិ
+            </span>
+          )}
+          {saveState === 'error' && (
+            <span className="text-[10px] font-khmer font-semibold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/35">
+              រក្សាទុកមិនបានសម្រេច
+            </span>
+          )}
+          {helpText && (
+            <span className={`text-[10px] ${theme === 'light' ? 'text-neutral-600' : 'text-amber-300/70'} font-khmer`}>
+              {helpText}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Preview Section */}
@@ -431,6 +464,7 @@ function DesignFilePicker({
         } flex items-center justify-center`}>
           {previewUrl && previewUrl !== 'none' ? (
             <img
+              key={previewUrl}
               src={previewUrl}
               alt="Preview"
               className="w-full h-full object-cover object-center"
@@ -449,7 +483,7 @@ function DesignFilePicker({
 
           {isProcessing && (
             <div className="absolute inset-0 bg-black/70 flex items-center justify-center text-amber-300 text-xs font-khmer">
-              <RefreshCw className="w-4 h-4 animate-spin mr-1.5" /> កំពុងបញ្ចូល...
+              <RefreshCw className="w-4 h-4 animate-spin mr-1.5" /> កំពុងរក្សាទុក...
             </div>
           )}
         </div>
@@ -476,7 +510,8 @@ function DesignFilePicker({
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-amber-950 font-khmer text-xs font-bold shadow-md flex items-center gap-1.5 transition-all shrink-0 active:scale-95"
+          disabled={isProcessing}
+          className="px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 disabled:opacity-60 text-amber-950 font-khmer text-xs font-bold shadow-md flex items-center gap-1.5 transition-all shrink-0 active:scale-95"
         >
           <Upload className="w-3.5 h-3.5" />
           <span>ដាក់រូបភាព</span>
@@ -1321,7 +1356,7 @@ export default function DesignSettingsSection({
       {/* 3. រូបថតគូស្នេហ៍ចម្បង (Hero Portrait Photo) */}
       <DesignFilePicker
         label="រូបថតគូស្នេហ៍ចម្បង (Main Couple Portrait)"
-        previewUrl={eventImage || config.main_background}
+        previewUrl={eventImage || config.image || config.main_background}
         onFileSelected={(url) => onUpdateEventImage(url)}
         aspectClass="aspect-[3/4] w-48 mx-auto"
         helpText="រូបថតបង្ហាញនៅចំកណ្តាលលិខិតអញ្ជើញ (Shown in the middle of the invitation)"

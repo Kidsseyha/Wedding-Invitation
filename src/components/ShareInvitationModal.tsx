@@ -44,6 +44,7 @@ import {
 } from '../lib/shareUrl';
 import { fetchGuestsFromFirebase, deleteGuestFromFirebase } from '../lib/firebaseGuests';
 import { fetchUserTemplatesFromFirebase } from '../lib/firebaseServices';
+import { isFirestoreKnownUnavailable } from '../lib/firebase';
 import { GuestPreset } from '../data/guests';
 import { EVENT_PRESETS, getCategoryCoverImage } from '../data/eventTemplates';
 import {
@@ -156,7 +157,7 @@ export default function ShareInvitationModal({
             const existingEvt = existingRaw ? JSON.parse(existingRaw) : null;
             const incomingMs = getEventTimestampMs(evt);
             const existingMs = getEventTimestampMs(existingEvt);
-            if (!existingEvt || incomingMs >= existingMs) {
+            if (!existingEvt || incomingMs > existingMs) {
               const serialized = JSON.stringify(evt);
               localStorage.setItem(scopedKey, serialized);
               if (strippedKey) {
@@ -287,6 +288,7 @@ export default function ShareInvitationModal({
     const updatedConfig = {
       ...(selectedEventData?.config || {}),
       guest_name_font_family: fontOpt.fontFamily,
+      ...(!isInvalidCoverValue(mainCouplePortrait) ? { image: mainCouplePortrait } : {}),
     } as WeddingEvent['config'];
     const updatedEventData: WeddingEvent = {
       ...(selectedEventData as WeddingEvent),
@@ -294,6 +296,9 @@ export default function ShareInvitationModal({
       templateId: (selectedEventData as WeddingEvent)?.templateId || selectedTemplate.templateId,
       eventType: selectedCategory,
       ...(effectiveScope !== 'guest_public' ? { ownerId: effectiveScope } : {}),
+      ...(!isInvalidCoverValue(mainCouplePortrait)
+        ? { image: mainCouplePortrait, cover_image: mainCouplePortrait }
+        : {}),
       config: updatedConfig,
       updatedAt: new Date().toISOString(),
     };
@@ -402,11 +407,16 @@ export default function ShareInvitationModal({
       : 'Honored Guest';
 
   // Information retrieval from the selected template in All Templates
-  const isSameTemplateAsCurrent =
-    selectedTemplate.templateId === initialTemplateId &&
-    (!fallbackCurrentEvent?.templateId ||
-      fallbackCurrentEvent.templateId === selectedTemplate.templateId ||
-      stripScopedEventId(fallbackCurrentEvent.templateId) === stripScopedEventId(selectedTemplate.eventId));
+  const curStrippedId = fallbackCurrentEvent?.id ? stripScopedEventId(fallbackCurrentEvent.id) : '';
+  const selStrippedId = selectedTemplate.eventId ? stripScopedEventId(selectedTemplate.eventId) : '';
+  const isSameTemplateAsCurrent = Boolean(
+    fallbackCurrentEvent &&
+      (selectedTemplate.templateId === initialTemplateId ||
+        (curStrippedId && selStrippedId && curStrippedId === selStrippedId) ||
+        (fallbackCurrentEvent.templateId &&
+          (fallbackCurrentEvent.templateId === selectedTemplate.templateId ||
+            stripScopedEventId(fallbackCurrentEvent.templateId) === selStrippedId)))
+  );
   const rawActiveEventId =
     isSameTemplateAsCurrent && fallbackCurrentEvent?.id
       ? fallbackCurrentEvent.id
@@ -448,8 +458,54 @@ export default function ShareInvitationModal({
     };
   }, [isOpen, effectiveScope, activeEventId, selectedCategory]);
 
+  // Retrieve full event information from the selected All Templates entry (prioritizing Main Couple Portrait)
+  const fallbackCategoryCover = getCategoryCoverImage(
+    selectedTemplate.templateId === 'preset-modern-wedding' ||
+      String(selectedTemplate.eventId || '').toLowerCase().includes('modern')
+      ? 'preset-modern-wedding'
+      : selectedCategory
+  );
+  const liveCurrentPortrait =
+    isSameTemplateAsCurrent && fallbackCurrentEvent
+      ? (!isInvalidCoverValue(fallbackCurrentEvent.image) ? fallbackCurrentEvent.image : undefined) ||
+        (!isInvalidCoverValue(currentEvent?.config?.image) ? currentEvent?.config?.image : undefined) ||
+        (!isInvalidCoverValue(fallbackCurrentEvent.cover_image) ? fallbackCurrentEvent.cover_image : undefined) ||
+        (!isInvalidCoverValue(coverImage) ? coverImage : undefined)
+      : undefined;
+  const mainCouplePortrait =
+    liveCurrentPortrait ||
+    (!isInvalidCoverValue(selectedEventData?.image) ? selectedEventData?.image : undefined) ||
+    (!isInvalidCoverValue(selectedEventData?.config?.image) ? selectedEventData?.config?.image : undefined) ||
+    (!isInvalidCoverValue(selectedEventData?.cover_image) ? selectedEventData?.cover_image : undefined) ||
+    selectedTemplate.coverImage;
+  const effectiveCoverImage = !isInvalidCoverValue(mainCouplePortrait)
+    ? mainCouplePortrait
+    : fallbackCategoryCover;
+
   const runtimeVercelOrigin = getPreferredVercelOrigin();
-  const selectedDomainOrigin = runtimeVercelOrigin;
+  const liveAppOrigin = (() => {
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      const winOrigin = window.location.origin;
+      if (!winOrigin.includes('localhost') && !winOrigin.includes('127.0.0.1')) {
+        return winOrigin.includes('ais-dev-')
+          ? winOrigin.replace('ais-dev-', 'ais-pre-')
+          : winOrigin;
+      }
+    }
+    return '';
+  })();
+  const canSwitchToLiveOrigin = Boolean(liveAppOrigin && liveAppOrigin !== runtimeVercelOrigin);
+  const hasUploadedLocalPortrait =
+    typeof effectiveCoverImage === 'string' && effectiveCoverImage.trim().startsWith('data:image/');
+  const [shareDomainMode, setShareDomainMode] = useState<'auto' | 'preview' | 'vercel'>('auto');
+  const resolvedShareDomain: 'preview' | 'vercel' =
+    shareDomainMode === 'auto'
+      ? canSwitchToLiveOrigin && hasUploadedLocalPortrait && isFirestoreKnownUnavailable()
+        ? 'preview'
+        : 'vercel'
+      : shareDomainMode;
+  const selectedDomainOrigin =
+    resolvedShareDomain === 'preview' && liveAppOrigin ? liveAppOrigin : runtimeVercelOrigin;
   const targetShareLang = 'kh';
 
   const fullUrl = getPublicShareUrl(currentShareGuest, activeEventId, selectedCategory, {
@@ -570,28 +626,7 @@ export default function ShareInvitationModal({
     }
   };
 
-  // Retrieve full event information from the selected All Templates entry
-  const fallbackCategoryCover = getCategoryCoverImage(
-    selectedTemplate.templateId === 'preset-modern-wedding' ||
-      String(selectedTemplate.eventId || '').toLowerCase().includes('modern')
-      ? 'preset-modern-wedding'
-      : selectedCategory
-  );
-  const liveCurrentPortrait =
-    isSameTemplateAsCurrent && fallbackCurrentEvent
-      ? (!isInvalidCoverValue(fallbackCurrentEvent.image) ? fallbackCurrentEvent.image : undefined) ||
-        (!isInvalidCoverValue(currentEvent?.config?.image) ? currentEvent?.config?.image : undefined) ||
-        (!isInvalidCoverValue(fallbackCurrentEvent.cover_image) ? fallbackCurrentEvent.cover_image : undefined)
-      : undefined;
-  const mainCouplePortrait =
-    liveCurrentPortrait ||
-    (!isInvalidCoverValue(selectedEventData?.image) ? selectedEventData?.image : undefined) ||
-    (!isInvalidCoverValue(selectedEventData?.config?.image) ? selectedEventData?.config?.image : undefined) ||
-    (!isInvalidCoverValue(selectedEventData?.cover_image) ? selectedEventData?.cover_image : undefined) ||
-    selectedTemplate.coverImage;
-  const effectiveCoverImage = !isInvalidCoverValue(mainCouplePortrait)
-    ? mainCouplePortrait
-    : fallbackCategoryCover;
+  // Selected event names for display in header/messages
   const selectedGroom = (selectedEventData?.groom || '').trim();
   const selectedBride = (selectedEventData?.bride || '').trim();
   const selectedSinglePerson = Boolean(selectedEventData?.singlePerson || selectedCategory === 'birthday');
@@ -652,19 +687,26 @@ export default function ShareInvitationModal({
     if (!isOpen || typeof document === 'undefined') return;
 
     const origin =
-      typeof window !== 'undefined' &&
+      selectedDomainOrigin ||
+      (typeof window !== 'undefined' &&
       window.location.origin &&
       !window.location.origin.includes('localhost') &&
       !window.location.origin.includes('127.0.0.1')
         ? window.location.origin.replace('ais-dev-', 'ais-pre-')
-        : PUBLIC_APP_URL;
+        : PUBLIC_APP_URL);
 
     const meta = buildInvitationMeta({
       event: {
         ...selectedEventData,
         id: activeEventId,
+        ownerId: effectiveScope !== 'guest_public' ? effectiveScope : selectedEventData?.ownerId,
         eventType: selectedCategory,
+        image: effectiveCoverImage,
         cover_image: effectiveCoverImage,
+        config: {
+          ...(selectedEventData?.config || {}),
+          image: effectiveCoverImage,
+        },
       },
       guestName: currentShareGuest,
       queryType: selectedCategory,
@@ -1146,34 +1188,73 @@ Your presence will make our day truly special! 🙏✨`;
                       ? 'bg-gradient-to-b from-amber-50/80 to-amber-100/40 border-amber-300'
                       : 'bg-gradient-to-b from-amber-950/40 via-black/70 to-black/90 border-amber-500/35'
                   }`}>
-                    <div className="flex items-center justify-between flex-wrap gap-1">
+                    <div className="flex items-center justify-between flex-wrap gap-1.5">
                       <span className={`text-xs font-semibold ${isLight ? 'text-amber-900' : 'text-amber-300'} font-khmer flex items-center gap-1.5`}>
                         <Sparkles className="w-3.5 h-3.5 text-amber-500 shrink-0 animate-pulse" />
                         <span>{language === 'kh' ? 'គំរូផ្ទាំងសំបុត្រ និងរូបភាពក្របសម្រាប់ភ្ញៀវមើល (Viewer Invitation Card):' : 'Viewer Invitation Card Preview:'}</span>
                       </span>
-                      <a
-                        href={activeShareLink}
-                        onClick={(e) => openPendingAwareLink(e, activeShareLink)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className={`text-[11px] ${isLight ? 'text-amber-800 hover:text-amber-950 font-semibold' : 'text-amber-400 hover:text-amber-200'} font-khmer flex items-center gap-1 hover:underline`}
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        <span>{language === 'kh' ? 'មើលសាកល្បង' : 'Preview'}</span>
-                      </a>
+                      <div className="flex items-center gap-2">
+                        {canSwitchToLiveOrigin && (
+                          <div className={`inline-flex items-center rounded-lg p-0.5 border text-[10px] font-khmer ${
+                            isLight ? 'bg-white/90 border-amber-300' : 'bg-black/60 border-amber-500/30'
+                          }`}>
+                            <button
+                              type="button"
+                              onClick={() => setShareDomainMode('preview')}
+                              className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
+                                resolvedShareDomain === 'preview'
+                                  ? 'bg-amber-400 text-amber-950 font-bold'
+                                  : isLight
+                                  ? 'text-neutral-600 hover:text-neutral-900'
+                                  : 'text-neutral-400 hover:text-amber-200'
+                              }`}
+                              title="Live preview origin (serves uploaded local portraits via /api/og-image)"
+                            >
+                              Live
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setShareDomainMode('vercel')}
+                              className={`px-2 py-0.5 rounded-md transition-colors cursor-pointer ${
+                                resolvedShareDomain === 'vercel'
+                                  ? 'bg-amber-400 text-amber-950 font-bold'
+                                  : isLight
+                                  ? 'text-neutral-600 hover:text-neutral-900'
+                                  : 'text-neutral-400 hover:text-amber-200'
+                              }`}
+                              title="Vercel deployment origin"
+                            >
+                              Vercel
+                            </button>
+                          </div>
+                        )}
+                        <a
+                          href={activeShareLink}
+                          onClick={(e) => openPendingAwareLink(e, activeShareLink)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={`text-[11px] ${isLight ? 'text-amber-800 hover:text-amber-950 font-semibold' : 'text-amber-400 hover:text-amber-200'} font-khmer flex items-center gap-1 hover:underline`}
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>{language === 'kh' ? 'មើលសាកល្បង' : 'Preview'}</span>
+                        </a>
+                      </div>
                     </div>
 
                     {/* Visual Telegram/Facebook Style Link Card with Cover Image */}
                     <div className={`rounded-xl overflow-hidden border ${isLight ? 'border-amber-300 bg-white shadow-md' : 'border-amber-500/30 bg-black/70 shadow-lg'} group transition-all duration-300`}>
                       <div className="relative aspect-[16/9] w-full overflow-hidden bg-neutral-900">
                         <img
+                          key={effectiveCoverImage}
                           src={effectiveCoverImage}
                           alt="Invitation Cover"
                           referrerPolicy="no-referrer"
                           className="w-full h-full object-cover object-[50%_22%] group-hover:scale-105 transition-transform duration-700"
                           onError={(e) => {
                             e.currentTarget.onerror = null;
-                            e.currentTarget.src = fallbackCategoryCover;
+                            if (e.currentTarget.src !== fallbackCategoryCover) {
+                              e.currentTarget.src = fallbackCategoryCover;
+                            }
                           }}
                         />
                         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent flex flex-col justify-end p-3.5">
@@ -1401,12 +1482,15 @@ Your presence will make our day truly special! 🙏✨`;
                   <div className="space-y-1.5">
                     <div className="inline-flex items-center gap-2 px-3 py-1 rounded-xl border border-amber-500/25 bg-amber-500/5 max-w-full">
                       <img
+                        key={effectiveCoverImage}
                         src={effectiveCoverImage}
                         alt={displayHeaderKh}
                         className="w-6 h-6 rounded-md object-cover shrink-0 border border-amber-400/40"
                         onError={(e) => {
                           e.currentTarget.onerror = null;
-                          e.currentTarget.src = fallbackCategoryCover;
+                          if (e.currentTarget.src !== fallbackCategoryCover) {
+                            e.currentTarget.src = fallbackCategoryCover;
+                          }
                         }}
                       />
                       <span className={`text-xs font-khmer font-semibold truncate ${isLight ? 'text-amber-900' : 'text-amber-200'}`}>
@@ -1564,12 +1648,15 @@ Your presence will make our day truly special! 🙏✨`;
                           </div>
                           <div className={`flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl border ${isLight ? 'bg-white/90 border-amber-300/80' : 'bg-black/50 border-amber-500/25'}`}>
                             <img
+                              key={effectiveCoverImage}
                               src={effectiveCoverImage}
                               alt={displayHeaderKh}
                               className="w-9 h-9 rounded-lg object-cover shrink-0 border border-amber-400/40"
                               onError={(e) => {
                                 e.currentTarget.onerror = null;
-                                e.currentTarget.src = fallbackCategoryCover;
+                                if (e.currentTarget.src !== fallbackCategoryCover) {
+                                  e.currentTarget.src = fallbackCategoryCover;
+                                }
                               }}
                             />
                             <div className="min-w-0 flex-1">

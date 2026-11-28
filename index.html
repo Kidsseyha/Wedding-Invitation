@@ -225,9 +225,16 @@
             else if (storedEvent.groom && storedEvent.bride && !storedEvent.singlePerson) baseTitle = 'អាពាហ៍ពិពាហ៍ ' + storedEvent.groom + ' & ' + storedEvent.bride;
             else if (storedEvent.name) baseTitle = storedEvent.name;
 
-            var candidateImg = storedEvent.cover_image || storedEvent.image || (storedEvent.config && storedEvent.config.image);
-            if (candidateImg && candidateImg.indexOf('data:') !== 0 && !(cat !== 'wedding' && isWeddingCoverUrl(candidateImg))) {
-              img = candidateImg;
+            var candidateImg = storedEvent.image || (storedEvent.config && storedEvent.config.image) || storedEvent.cover_image;
+            if (candidateImg && !(cat !== 'wedding' && isWeddingCoverUrl(candidateImg))) {
+              if (candidateImg.indexOf('data:image/') === 0) {
+                var ogId = storedEvent.id || id || '';
+                if (ogId) {
+                  img = '/api/og-image?id=' + encodeURIComponent(ogId) + '&type=' + encodeURIComponent(cat);
+                }
+              } else if (candidateImg.indexOf('data:') !== 0) {
+                img = candidateImg;
+              }
             }
           }
 

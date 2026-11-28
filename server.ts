@@ -631,6 +631,10 @@ function getRequestPublicOrigin(req: express.Request): string {
   const host = (req.headers['x-forwarded-host'] as string) || req.get('host') || '';
   const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
   if (!host || host.includes('localhost') || host.includes('127.0.0.1')) {
+    const envAppUrl = (process.env.APP_URL || '').trim().replace(/\/+$/, '');
+    if (envAppUrl && envAppUrl !== 'MY_APP_URL' && envAppUrl.startsWith('http')) {
+      return envAppUrl.includes('ais-dev-') ? envAppUrl.replace('ais-dev-', 'ais-pre-') : envAppUrl;
+    }
     return PUBLIC_APP_URL;
   }
   const cleanHost = host.split(',')[0].trim();
@@ -1976,10 +1980,13 @@ app.get('/api/og-image', async (req, res) => {
 
     const cover = resolveEventCoverImage(targetEvent, category);
     if (cover.startsWith('data:image/')) {
-      const match = cover.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+      const match = cover.match(/^data:(image\/[a-zA-Z0-9.+-]+)(?:;[^,]*)?;base64,([\s\S]+)$/i);
       if (match && match[1] && match[2]) {
-        const buffer = Buffer.from(match[2], 'base64');
-        res.setHeader('Content-Type', match[1]);
+        const mimeType = match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase();
+        const buffer = Buffer.from(match[2].replace(/\s+/g, ''), 'base64');
+        res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Length', String(buffer.length));
+        res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=300');
         return res.status(200).send(buffer);
       }

@@ -2355,25 +2355,61 @@ export default function App() {
     lastSavedAtRef.current = getEventTimestampMs(preparedEvent) || Date.now();
 
     const persistLocalCaches = (targetEvt: WeddingEvent) => {
-      try {
-        localStorage.setItem(getUserStorageKey('wedding_custom_event_data', scopeId), JSON.stringify(targetEvt));
-        if (targetEvt.id) {
-          localStorage.setItem(getUserStorageKey(`wedding_template_saved_${targetEvt.id}`, scopeId), JSON.stringify(targetEvt));
-          localStorage.setItem(getUserStorageKey(`wedding_template_saved_${rawBaseId}`, scopeId), JSON.stringify(targetEvt));
+      const serializedEvent = JSON.stringify(targetEvt);
+      const setItemResilient = (storageKey: string, val: string) => {
+        try {
+          localStorage.setItem(storageKey, val);
+          return true;
+        } catch {
+          try {
+            const activeKeys = new Set([
+              getUserStorageKey('wedding_custom_event_data', scopeId),
+              targetEvt.id ? getUserStorageKey(`wedding_template_saved_${targetEvt.id}`, scopeId) : '',
+              getUserStorageKey(`wedding_template_saved_${rawBaseId}`, scopeId),
+            ]);
+            for (let i = localStorage.length - 1; i >= 0; i--) {
+              const k = localStorage.key(i);
+              if (
+                k &&
+                !activeKeys.has(k) &&
+                (k.startsWith('wedding_template_saved_') ||
+                  k.startsWith('wedding_template_type_') ||
+                  k.startsWith('wedding_last_custom_design_config'))
+              ) {
+                localStorage.removeItem(k);
+              }
+            }
+            localStorage.setItem(storageKey, val);
+            return true;
+          } catch (retryErr) {
+            console.warn(`Failed to save local cache key ${storageKey}:`, retryErr);
+            return false;
+          }
+        }
+      };
+
+      setItemResilient(getUserStorageKey('wedding_custom_event_data', scopeId), serializedEvent);
+      if (targetEvt.id) {
+        setItemResilient(getUserStorageKey(`wedding_template_saved_${targetEvt.id}`, scopeId), serializedEvent);
+        setItemResilient(getUserStorageKey(`wedding_template_saved_${rawBaseId}`, scopeId), serializedEvent);
+        try {
           localStorage.setItem(getUserStorageKey('wedding_last_active_template_id', scopeId), targetEvt.id);
-        }
-        if (targetEvt.templateId) {
+        } catch {}
+      }
+      if (targetEvt.templateId) {
+        setItemResilient(getUserStorageKey(`wedding_template_saved_${targetEvt.templateId}`, scopeId), serializedEvent);
+        try {
           localStorage.setItem(getUserStorageKey('wedding_last_active_preset_id', scopeId), targetEvt.templateId);
-        }
-        if (validatedType) {
-          localStorage.setItem(getUserStorageKey(`wedding_template_type_${validatedType}`, scopeId), JSON.stringify(targetEvt));
+        } catch {}
+      }
+      if (validatedType) {
+        setItemResilient(getUserStorageKey(`wedding_template_type_${validatedType}`, scopeId), serializedEvent);
+        try {
           localStorage.setItem(getUserStorageKey('wedding_last_template_type', scopeId), validatedType);
-        }
-        if (targetEvt.config) {
-          localStorage.setItem(getUserStorageKey('wedding_last_custom_design_config', scopeId), JSON.stringify(targetEvt.config));
-        }
-      } catch (e) {
-        console.warn('Failed to save local event data:', e);
+        } catch {}
+      }
+      if (targetEvt.config) {
+        setItemResilient(getUserStorageKey('wedding_last_custom_design_config', scopeId), JSON.stringify(targetEvt.config));
       }
     };
 

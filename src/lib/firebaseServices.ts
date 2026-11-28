@@ -107,7 +107,7 @@ export async function ensureUserDatabaseInFirebase(account: {
     }
   }
 
-  if (!IS_FIRESTORE_WRITE_DISABLED && (!provisionedDbIds.has(dbId) || account.forceSync)) {
+  if (!IS_FIRESTORE_WRITE_DISABLED && !isFirestoreKnownUnavailable() && (!provisionedDbIds.has(dbId) || account.forceSync)) {
     try {
       const dbRef = doc(db, USER_DATABASES_COLLECTION, dbId);
       const firestorePayload: Record<string, any> = {
@@ -125,7 +125,11 @@ export async function ensureUserDatabaseInFirebase(account: {
       }
       await setDoc(dbRef, firestorePayload, { merge: true });
       provisionedDbIds.add(dbId);
-    } catch (error) {
+    } catch (error: any) {
+      const errMsg = String(error?.message || error?.code || '');
+      if (errMsg.includes('does not exist') || errMsg.includes('not-found') || errMsg.includes('NOT_FOUND')) {
+        markFirestoreUnavailable(60_000);
+      }
       console.warn(`Firestore user_databases write notice (${dbId}):`, error);
     }
   } else {
@@ -1179,76 +1183,80 @@ export async function saveEventReliable(
       })()
     : Promise.resolve();
 
-  const firestorePromise: Promise<void> = !IS_FIRESTORE_WRITE_DISABLED
-    ? (async () => {
-        const writeWork = async () => {
-          try {
-            const scopedOwner = targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE ? targetDbId : undefined;
-            const firestorePayload = await prepareFirestorePayload(serverPayload, scopedOwner);
+  const firestorePromise: Promise<void> =
+    !IS_FIRESTORE_WRITE_DISABLED && !isFirestoreKnownUnavailable()
+      ? (async () => {
+          const writeWork = async () => {
+            try {
+              const scopedOwner = targetDbId && targetDbId !== GUEST_PUBLIC_SCOPE ? targetDbId : undefined;
+              const firestorePayload = await prepareFirestorePayload(serverPayload, scopedOwner);
 
-            const writePromises: Promise<boolean>[] = [];
+              const writePromises: Promise<boolean>[] = [];
 
-            if (scopedOwner) {
-              if (!provisionedDbIds.has(scopedOwner)) {
-                await ensureUserDatabaseInFirebase({
-                  scopeId: scopedOwner,
-                  email: serverPayload.ownerEmail,
-                  skipRestApi: true,
-                });
-              }
+              if (scopedOwner) {
+                if (!provisionedDbIds.has(scopedOwner)) {
+                  await ensureUserDatabaseInFirebase({
+                    scopeId: scopedOwner,
+                    email: serverPayload.ownerEmail,
+                    skipRestApi: true,
+                  });
+                }
 
-              const scopedRef = doc(db, USER_DATABASES_COLLECTION, scopedOwner, 'events', safeEventId);
-              const writeScoped = async () => {
-                try {
-                  await setDoc(scopedRef, firestorePayload);
-                  return true;
-                } catch (err: any) {
-                  // Self-heal if user_databases root doc was missing or not yet provisioned in Firestore
-                  const msg = String(err?.message || err?.code || '');
-                  if (msg.includes('permission-denied') || msg.includes('Missing or insufficient permissions')) {
-                    provisionedDbIds.delete(scopedOwner);
-                    await ensureUserDatabaseInFirebase({
-                      scopeId: scopedOwner,
-                      email: serverPayload.ownerEmail,
-                      forceSync: true,
-                      skipRestApi: true,
-                    });
+                const scopedRef = doc(db, USER_DATABASES_COLLECTION, scopedOwner, 'events', safeEventId);
+                const writeScoped = async () => {
+                  try {
                     await setDoc(scopedRef, firestorePayload);
                     return true;
+                  } catch (err: any) {
+                    // Self-heal if user_databases root doc was missing or not yet provisioned in Firestore
+                    const msg = String(err?.message || err?.code || '');
+                    if (msg.includes('permission-denied') || msg.includes('Missing or insufficient permissions')) {
+                      provisionedDbIds.delete(scopedOwner);
+                      await ensureUserDatabaseInFirebase({
+                        scopeId: scopedOwner,
+                        email: serverPayload.ownerEmail,
+                        forceSync: true,
+                        skipRestApi: true,
+                      });
+                      await setDoc(scopedRef, firestorePayload);
+                      return true;
+                    }
+                    throw err;
                   }
-                  throw err;
-                }
-              };
-              writePromises.push(writeScoped());
-            }
+                };
+                writePromises.push(writeScoped());
+              }
 
-            if (!scopedOwner || !isGlobalSharedPresetId(safeEventId)) {
-              const docRef = doc(db, 'events', safeEventId);
-              writePromises.push(
-                setDoc(docRef, firestorePayload)
-                  .then(() => true)
-                  .catch((err) => {
-                    // Only treat top-level write failure as fatal when there is no scoped DB target
-                    if (!scopedOwner) throw err;
-                    console.warn('Firestore top-level mirror notice:', err);
-                    return false;
-                  })
-              );
-            }
+              if (!scopedOwner || !isGlobalSharedPresetId(safeEventId)) {
+                const docRef = doc(db, 'events', safeEventId);
+                writePromises.push(
+                  setDoc(docRef, firestorePayload)
+                    .then(() => true)
+                    .catch((err) => {
+                      // Only treat top-level write failure as fatal when there is no scoped DB target
+                      if (!scopedOwner) throw err;
+                      console.warn('Firestore top-level mirror notice:', err);
+                      return false;
+                    })
+                );
+              }
 
-            const results = await Promise.all(writePromises);
-            firestoreOk = results.some(Boolean);
-          } catch (error) {
-            lastError = error instanceof Error ? error.message : String(error);
-            console.warn('Firestore write event error (handled defensively):', error);
-            handleFirestoreError(error, OperationType.WRITE, `events/${safeEventId}`);
+              const results = await Promise.all(writePromises);
+              firestoreOk = results.some(Boolean);
+            } catch (error) {
+              lastError = error instanceof Error ? error.message : String(error);
+              console.warn('Firestore write event error (handled defensively):', error);
+              handleFirestoreError(error, OperationType.WRITE, `events/${safeEventId}`);
+            }
+          };
+
+          const timeoutMs = options?.writeTimeoutMs ?? 5500;
+          const raceRes = await raceWithTimeout(writeWork(), timeoutMs, undefined);
+          if (raceRes.timedOut) {
+            markFirestoreUnavailable(45_000);
           }
-        };
-
-        const timeoutMs = options?.writeTimeoutMs ?? 5500;
-        await raceWithTimeout(writeWork(), timeoutMs, undefined);
-      })()
-    : Promise.resolve();
+        })()
+      : Promise.resolve();
 
   await Promise.all([serverPromise, firestorePromise]);
 
