@@ -308,13 +308,28 @@ export default function EventTypeModal({
         : {};
 
     // 1. Check if THIS user has explicitly saved customizations for this preset
-    const saved = getSavedTemplateData(preset.sampleEvent.id);
+    const saved = getSavedTemplateData(preset.sampleEvent.id) || getSavedTemplateData(preset.id);
     if (saved) {
+      const savedImg =
+        saved.image && !['none', 'null', 'undefined'].includes(String(saved.image).trim().toLowerCase())
+          ? saved.image
+          : saved.config?.image && !['none', 'null', 'undefined'].includes(String(saved.config.image).trim().toLowerCase())
+          ? saved.config.image
+          : saved.cover_image && !['none', 'null', 'undefined'].includes(String(saved.cover_image).trim().toLowerCase())
+          ? saved.cover_image
+          : preset.coverImage || preset.sampleEvent.image;
       return {
         ...saved,
         id: scopedId,
+        templateId: saved.templateId || preset.id,
         ...ownerFields,
         eventType: preset.type,
+        image: savedImg,
+        cover_image: savedImg,
+        config: {
+          ...(saved.config || preset.sampleEvent.config),
+          image: savedImg,
+        },
         singlePerson: preset.type === 'birthday' ? true : (saved.singlePerson ?? false),
       };
     }

@@ -335,11 +335,31 @@ export default function EventEditorModal({
   const [savedRetrievedInfo, setSavedRetrievedInfo] = useState<WeddingEvent | null>(() => {
     try {
       const scopedEvId = getScopedEventId(event.id, effectiveScope);
-      const cached = localStorage.getItem(getUserStorageKey(`wedding_template_saved_${scopedEvId}`, effectiveScope)) ||
-                     localStorage.getItem(getUserStorageKey(`wedding_template_saved_${event.id}`, effectiveScope)) ||
-                     (event.eventType ? localStorage.getItem(getUserStorageKey(`wedding_template_type_${event.eventType}`, effectiveScope)) : null) ||
-                     localStorage.getItem(getUserStorageKey('wedding_custom_event_data', effectiveScope));
-      return cached ? JSON.parse(cached) : event;
+      const isTargetModern =
+        String(event.id || '').toLowerCase().includes('modern') ||
+        String(event.templateId || '').toLowerCase().includes('modern') ||
+        String(event.name || '').includes('សម័យ');
+      const byId =
+        localStorage.getItem(getUserStorageKey(`wedding_template_saved_${scopedEvId}`, effectiveScope)) ||
+        localStorage.getItem(getUserStorageKey(`wedding_template_saved_${event.id}`, effectiveScope)) ||
+        (event.templateId ? localStorage.getItem(getUserStorageKey(`wedding_template_saved_${event.templateId}`, effectiveScope)) : null);
+      if (byId) return JSON.parse(byId);
+
+      const byTypeRaw = event.eventType
+        ? localStorage.getItem(getUserStorageKey(`wedding_template_type_${event.eventType}`, effectiveScope))
+        : null;
+      if (byTypeRaw) {
+        const parsedByType = JSON.parse(byTypeRaw);
+        const isParsedModern =
+          String(parsedByType?.id || '').toLowerCase().includes('modern') ||
+          String(parsedByType?.templateId || '').toLowerCase().includes('modern') ||
+          String(parsedByType?.name || '').includes('សម័យ');
+        if (event.eventType !== 'wedding' || isTargetModern === isParsedModern) {
+          return parsedByType;
+        }
+      }
+      const fallbackCustom = localStorage.getItem(getUserStorageKey('wedding_custom_event_data', effectiveScope));
+      return fallbackCustom ? JSON.parse(fallbackCustom) : event;
     } catch {
       return event;
     }
@@ -1136,20 +1156,35 @@ export default function EventEditorModal({
   // Helper to load template information directly from the selected template type scoped to user
   const loadPresetWithSavedSettings = (p: typeof EVENT_PRESETS[0]) => {
     const scopedId = getScopedEventId(p.sampleEvent.id, effectiveScope);
-    // 1. Check if THIS user previously saved custom edits for this specific template
+    // 1. Check if THIS user previously saved custom edits for this specific template (without cross-bleeding Wedding vs Modern Wedding)
     try {
-      const stored =
+      let stored =
         localStorage.getItem(getUserStorageKey(`wedding_template_saved_${scopedId}`, effectiveScope)) ||
         localStorage.getItem(getUserStorageKey(`wedding_template_saved_${p.sampleEvent.id}`, effectiveScope)) ||
-        localStorage.getItem(getUserStorageKey(`wedding_template_type_${p.type}`, effectiveScope));
+        localStorage.getItem(getUserStorageKey(`wedding_template_saved_${p.id}`, effectiveScope));
+      if (!stored) {
+        const byTypeRaw = localStorage.getItem(getUserStorageKey(`wedding_template_type_${p.type}`, effectiveScope));
+        if (byTypeRaw) {
+          const parsedByType = JSON.parse(byTypeRaw);
+          const isTargetModern = p.id === 'preset-modern-wedding' || p.sampleEvent.id.toLowerCase().includes('modern');
+          const isStoredModern =
+            String(parsedByType?.id || '').toLowerCase().includes('modern') ||
+            String(parsedByType?.templateId || '').toLowerCase().includes('modern') ||
+            String(parsedByType?.name || '').includes('សម័យ');
+          if (p.type !== 'wedding' || isTargetModern === isStoredModern) {
+            stored = byTypeRaw;
+          }
+        }
+      }
       if (stored) {
-        const parsed = JSON.parse(stored);
-        setFormData({
-          ...parsed,
+        const parsed = sanitizeWeddingEvent({
+          ...JSON.parse(stored),
           id: scopedId,
           templateId: p.id,
+          eventType: p.type,
           ...(effectiveScope !== 'guest_public' ? { ownerId: effectiveScope } : {}),
         });
+        setFormData(parsed);
         setSyncFeedback(`បានទាញយកទិន្នន័យពីប្រភេទគំរូ ${p.titleKh}!`);
         setTimeout(() => setSyncFeedback(null), 3000);
         return;
@@ -1158,6 +1193,7 @@ export default function EventEditorModal({
 
     // 2. Load complete information directly from this type of template
     const templateSample = JSON.parse(JSON.stringify(p.sampleEvent)) as WeddingEvent;
+    const resolvedPortrait = p.coverImage || p.sampleEvent.image;
 
     const updatedEvent: WeddingEvent = {
       ...templateSample,
@@ -1176,10 +1212,12 @@ export default function EventEditorModal({
       locationEn: p.sampleEvent.locationEn,
       eating_time: p.sampleEvent.eating_time,
       startTime: p.sampleEvent.startTime,
-      image: p.coverImage || p.sampleEvent.image,
+      image: resolvedPortrait,
+      cover_image: resolvedPortrait,
       schedules: templateSample.schedules || [],
       config: {
         ...templateSample.config,
+        image: resolvedPortrait,
         cover_background: p.coverImage || templateSample.config?.cover_background,
         // Preserve user's existing customized bank/KHQR credentials if already present
         bankInfo: formData.config.bankInfo?.accountNumber || formData.config.bankInfo?.accountName
@@ -1242,10 +1280,26 @@ export default function EventEditorModal({
       }
 
       // 2. Fallback to user-scoped localStorage only when no database record exists yet
-      const localSpecific = localStorage.getItem(getUserStorageKey(`wedding_template_saved_${idToFetch}`, effectiveScope)) ||
-                            localStorage.getItem(getUserStorageKey(`wedding_template_saved_${rawId}`, effectiveScope)) ||
-                            localStorage.getItem(getUserStorageKey(`wedding_template_type_${typeToFetch}`, effectiveScope)) ||
-                            localStorage.getItem(getUserStorageKey('wedding_custom_event_data', effectiveScope));
+      let localSpecific =
+        localStorage.getItem(getUserStorageKey(`wedding_template_saved_${idToFetch}`, effectiveScope)) ||
+        localStorage.getItem(getUserStorageKey(`wedding_template_saved_${rawId}`, effectiveScope));
+      if (!localSpecific && typeToFetch) {
+        const byTypeRaw = localStorage.getItem(getUserStorageKey(`wedding_template_type_${typeToFetch}`, effectiveScope));
+        if (byTypeRaw) {
+          const parsedByType = JSON.parse(byTypeRaw);
+          const isTargetModern = stripScopedEventId(rawId).toLowerCase().includes('modern');
+          const isStoredModern =
+            String(parsedByType?.id || '').toLowerCase().includes('modern') ||
+            String(parsedByType?.templateId || '').toLowerCase().includes('modern') ||
+            String(parsedByType?.name || '').includes('សម័យ');
+          if (typeToFetch !== 'wedding' || isTargetModern === isStoredModern) {
+            localSpecific = byTypeRaw;
+          }
+        }
+      }
+      if (!localSpecific) {
+        localSpecific = localStorage.getItem(getUserStorageKey('wedding_custom_event_data', effectiveScope));
+      }
       if (localSpecific) {
         const parsed = sanitizeWeddingEvent(JSON.parse(localSpecific));
         setFormData(parsed);

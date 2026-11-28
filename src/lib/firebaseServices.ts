@@ -35,6 +35,7 @@ import {
   getUtf8ByteLength,
   enforceFirestoreEventBounds,
 } from '../utils/saveHelpers';
+import { rehydrateEventPortraitFields } from '../utils/shareMeta';
 
 const USER_DATABASES_COLLECTION = 'user_databases';
 const provisionedDbIds = new Set<string>();
@@ -263,6 +264,31 @@ async function prepareFirestorePayload(
     forcedOwnerId
   );
 
+  // Ensure canonical Main Couple Portrait lives in safeEvent.image and deduplicate 3x base64 copies
+  const isInvalidImg = (val: unknown): boolean => {
+    if (typeof val !== 'string') return true;
+    const t = val.trim().toLowerCase();
+    return !t || t === 'none' || t === 'null' || t === 'undefined';
+  };
+  if (isInvalidImg(safeEvent.image)) {
+    if (!isInvalidImg(safeEvent.config?.image)) {
+      safeEvent.image = String(safeEvent.config!.image).trim();
+    } else if (!isInvalidImg((safeEvent as any).cover_image)) {
+      safeEvent.image = String((safeEvent as any).cover_image).trim();
+    }
+  }
+  if (typeof safeEvent.image === 'string' && safeEvent.image.startsWith('data:image/')) {
+    if (typeof (safeEvent as any).cover_image === 'string' && (safeEvent as any).cover_image.startsWith('data:image/')) {
+      delete (safeEvent as any).cover_image;
+    }
+    if (safeEvent.config && typeof safeEvent.config.image === 'string' && safeEvent.config.image.startsWith('data:image/')) {
+      delete safeEvent.config.image;
+    }
+    if (!shouldSkipImageRecompression(safeEvent.image, 110_000)) {
+      safeEvent.image = await downsampleBase64Image(safeEvent.image, 760, 960, 0.7);
+    }
+  }
+
   // Strip oversized inline video data URLs (> 180KB) from single Firestore doc
   if (Array.isArray(safeEvent.config?.galleryPhotos)) {
     safeEvent.config.galleryPhotos = safeEvent.config.galleryPhotos.filter(
@@ -271,7 +297,7 @@ async function prepareFirestorePayload(
   }
 
   // Fast path: check actual UTF-8 byte length (Khmer text is 3 bytes/char)
-  if (!needsFirestoreCompaction(getUtf8ByteLength(JSON.stringify(safeEvent)), 500_000)) {
+  if (!needsFirestoreCompaction(getUtf8ByteLength(JSON.stringify(safeEvent)), 450_000)) {
     return safeEvent;
   }
 
@@ -279,7 +305,7 @@ async function prepareFirestorePayload(
   const tasks: Promise<void>[] = [];
   if (safeEvent.image && !shouldSkipImageRecompression(safeEvent.image)) {
     tasks.push(
-      downsampleBase64Image(safeEvent.image, 600, 600, 0.58).then((res) => {
+      downsampleBase64Image(safeEvent.image, 620, 760, 0.6).then((res) => {
         safeEvent.image = res;
       })
     );
@@ -816,7 +842,7 @@ export async function fetchEventFromFirebase(
           .then((snap) => {
             firestoreResponded = true;
             markFirestoreAvailable();
-            return snap.exists() ? (snap.data() as WeddingEvent) : null;
+            return snap.exists() ? (rehydrateEventPortraitFields(snap.data() as WeddingEvent) as WeddingEvent) : null;
           })
           .catch(() => {
             failed = true;
@@ -839,7 +865,7 @@ export async function fetchEventFromFirebase(
         .then((snap) => {
           firestoreResponded = true;
           markFirestoreAvailable();
-          return snap.exists() ? (snap.data() as WeddingEvent) : null;
+          return snap.exists() ? (rehydrateEventPortraitFields(snap.data() as WeddingEvent) as WeddingEvent) : null;
         })
         .catch(() => null),
       effectiveFsTimeout,
@@ -1056,7 +1082,7 @@ export async function fetchUserTemplatesFromFirebase(
             .then((subSnap) => {
               const list: WeddingEvent[] = [];
               subSnap.forEach((docSnap) => {
-                const evt = docSnap.data() as WeddingEvent;
+                const evt = rehydrateEventPortraitFields(docSnap.data() as WeddingEvent);
                 if (evt && docSnap.id && !isGlobalSharedPresetId(docSnap.id)) {
                   list.push({ ...evt, id: evt.id || docSnap.id });
                 }
@@ -1078,7 +1104,7 @@ export async function fetchUserTemplatesFromFirebase(
           .then((snap) => {
             const list: WeddingEvent[] = [];
             snap.forEach((docSnap) => {
-              const evt = docSnap.data() as WeddingEvent;
+              const evt = rehydrateEventPortraitFields(docSnap.data() as WeddingEvent);
               if (evt && docSnap.id && !isGlobalSharedPresetId(docSnap.id)) {
                 list.push({ ...evt, id: evt.id || docSnap.id });
               }
@@ -1357,7 +1383,7 @@ export function subscribeToEvent(
             scopedRef,
             (snap) => {
               if (snap.exists()) {
-                emitIfFresh(snap.data() as WeddingEvent);
+                emitIfFresh(rehydrateEventPortraitFields(snap.data() as WeddingEvent) as WeddingEvent);
               }
             },
             () => {
@@ -1374,7 +1400,7 @@ export function subscribeToEvent(
             docRef,
             (snap) => {
               if (snap.exists()) {
-                emitIfFresh(snap.data() as WeddingEvent);
+                emitIfFresh(rehydrateEventPortraitFields(snap.data() as WeddingEvent) as WeddingEvent);
               }
             },
             (error) => {

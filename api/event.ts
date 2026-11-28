@@ -17,7 +17,8 @@ function loadFirebaseConfig(): FirebaseRuntimeConfig {
   const fallback: FirebaseRuntimeConfig = {
     projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'wedding-invitation-0007',
     firestoreDatabaseId:
-      process.env.VITE_FIREBASE_DATABASE_ID || '(default)',
+      process.env.VITE_FIREBASE_DATABASE_ID ||
+      'ai-studio-invitationonline-6145d4e3-f054-4b92-8181-aa9c53ee300a',
     apiKey: process.env.VITE_FIREBASE_API_KEY || undefined,
   };
   try {
@@ -82,13 +83,33 @@ export default async function handler(req: VercelReq, res: VercelRes) {
   const eventType = normalizeCategoryString(rawType) || rawType;
 
   if (eventId) {
-    const fbEvent = await fetchEventFromFirestoreRest({
+    let fbEvent = await fetchEventFromFirestoreRest({
       projectId: firebaseCfg.projectId,
       databaseId: firebaseCfg.firestoreDatabaseId,
       eventId,
       ownerId: ownerId || undefined,
       apiKey: firebaseCfg.apiKey,
     });
+    const strippedId = stripScopedEventId(eventId);
+    const idPreset = findTemplatePreset(strippedId);
+    if (!fbEvent && idPreset) {
+      const effectiveOwner = ownerId || (eventId.includes('__') ? eventId.split('__')[0] : '');
+      if (effectiveOwner) {
+        const candidateIds = Array.from(
+          new Set([idPreset.sampleEvent?.id, idPreset.id].filter((cid): cid is string => Boolean(cid) && cid !== strippedId))
+        );
+        for (const cid of candidateIds) {
+          fbEvent = await fetchEventFromFirestoreRest({
+            projectId: firebaseCfg.projectId,
+            databaseId: firebaseCfg.firestoreDatabaseId,
+            eventId: `${effectiveOwner}__${cid}`,
+            ownerId: effectiveOwner,
+            apiKey: firebaseCfg.apiKey,
+          });
+          if (fbEvent) break;
+        }
+      }
+    }
     if (fbEvent) {
       return res.status(200).json({
         success: true,
@@ -98,7 +119,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       });
     }
     const preset =
-      findTemplatePreset(stripScopedEventId(eventId)) ||
+      idPreset ||
       (eventType ? findTemplatePreset(eventType) : undefined);
     if (preset) {
       return res.status(200).json({

@@ -1356,7 +1356,11 @@ export default function DesignSettingsSection({
       {/* 3. រូបថតគូស្នេហ៍ចម្បង (Hero Portrait Photo) */}
       <DesignFilePicker
         label="រូបថតគូស្នេហ៍ចម្បង (Main Couple Portrait)"
-        previewUrl={eventImage || config.image || config.main_background}
+        previewUrl={
+          [eventImage, config.image, config.main_background].find(
+            (u) => typeof u === 'string' && !['', 'none', 'null', 'undefined'].includes(u.trim().toLowerCase())
+          )
+        }
         onFileSelected={(url) => onUpdateEventImage(url)}
         aspectClass="aspect-[3/4] w-48 mx-auto"
         helpText="រូបថតបង្ហាញនៅចំកណ្តាលលិខិតអញ្ជើញ (Shown in the middle of the invitation)"

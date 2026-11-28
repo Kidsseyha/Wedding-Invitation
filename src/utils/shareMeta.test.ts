@@ -5,6 +5,7 @@ import {
   buildAllShareTemplates,
   buildInvitationMeta,
   injectMetaIntoHtml,
+  rehydrateEventPortraitFields,
   resolveEventCoverImage,
   resolveSelectedShareTemplateId,
 } from './shareMeta.js';
@@ -317,6 +318,98 @@ test('Main Couple Portrait takes priority over envelope_header_image and serves 
   assert.ok(injectedHtml.includes(`<meta property="og:image" content="${dataUrlMeta.image.replace(/&/g, '&amp;')}" />`));
   assert.ok(injectedHtml.includes(`<meta name="twitter:image" content="${dataUrlMeta.image.replace(/&/g, '&amp;')}" />`));
 });
+
+test('rehydrateEventPortraitFields restores cover_image and config.image after Firestore deduplication', () => {
+  const compressedPortrait = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/';
+  const dehydratedFromFirestore: Record<string, any> = {
+    id: 'u_alice__modern-wedding-mw001',
+    templateId: 'preset-modern-wedding',
+    name: 'សំបុត្រអាពាហ៍ពិពាហ៍បែបសម័យ',
+    image: compressedPortrait,
+    config: {
+      theme_color: '#1a2e22',
+      envelope_header_image: 'https://cdn.example.com/wax-seal.jpg',
+    },
+  };
+
+  const rehydrated = rehydrateEventPortraitFields(dehydratedFromFirestore);
+  assert.ok(rehydrated);
+  assert.equal(rehydrated.image, compressedPortrait);
+  assert.equal(rehydrated.cover_image, compressedPortrait);
+  assert.equal(rehydrated.config.image, compressedPortrait);
+  assert.equal(rehydrated.config.theme_color, '#1a2e22');
+});
+
+test('buildAllShareTemplates keeps Main Couple Portraits isolated per template and includes tpl in /api/og-image', () => {
+  const tradPortrait = 'https://cdn.example.com/trad-couple.jpg';
+  const modernPortrait = 'https://cdn.example.com/modern-couple.jpg';
+  const birthdayPortrait = 'https://cdn.example.com/birthday-portrait.jpg';
+
+  const options = buildAllShareTemplates({
+    presets: EVENT_PRESETS,
+    savedEventsById: {
+      cmgrawhnk0003le0434762j7n: {
+        ...EVENT_PRESETS[0].sampleEvent,
+        id: 'u_alice__cmgrawhnk0003le0434762j7n',
+        templateId: 'preset-wedding',
+        ownerId: 'u_alice',
+        image: tradPortrait,
+        updatedAt: '2026-11-27T10:00:00.000Z',
+      },
+      'modern-wedding-mw001': {
+        ...EVENT_PRESETS[1].sampleEvent,
+        id: 'u_alice__modern-wedding-mw001',
+        templateId: 'preset-modern-wedding',
+        ownerId: 'u_alice',
+        image: modernPortrait,
+        updatedAt: '2026-11-27T11:00:00.000Z',
+      },
+      'birthday-bd001': {
+        ...EVENT_PRESETS.find((p) => p.type === 'birthday')!.sampleEvent,
+        id: 'u_alice__birthday-bd001',
+        templateId: 'preset-birthday',
+        ownerId: 'u_alice',
+        image: birthdayPortrait,
+        updatedAt: '2026-11-27T09:00:00.000Z',
+      },
+    },
+  });
+
+  const tradOpt = options.find((o) => o.templateId === 'preset-wedding');
+  const modernOpt = options.find((o) => o.templateId === 'preset-modern-wedding');
+  const bdayOpt = options.find((o) => o.templateId === 'preset-birthday');
+
+  assert.equal(tradOpt?.coverImage, tradPortrait);
+  assert.equal(tradOpt?.event.cover_image, tradPortrait);
+  assert.equal(tradOpt?.event.config.image, tradPortrait);
+
+  assert.equal(modernOpt?.coverImage, modernPortrait);
+  assert.equal(modernOpt?.event.cover_image, modernPortrait);
+  assert.equal(modernOpt?.event.config.image, modernPortrait);
+
+  assert.equal(bdayOpt?.coverImage, birthdayPortrait);
+
+  const ogMeta = buildInvitationMeta({
+    event: {
+      id: 'u_alice__modern-wedding-mw001',
+      templateId: 'preset-modern-wedding',
+      ownerId: 'u_alice',
+      eventType: 'wedding',
+      name: 'សំបុត្រអាពាហ៍ពិពាហ៍បែបសម័យ',
+      image: 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/',
+      updatedAt: '2026-11-27T11:00:00.000Z',
+    },
+    guestName: 'លោក ដារ៉ា',
+    queryType: 'wedding',
+    eventId: 'u_alice__modern-wedding-mw001',
+    origin: 'https://wedding-invitation-inky-kappa.vercel.app',
+  });
+
+  assert.ok(ogMeta.image.includes('/api/og-image?'));
+  assert.ok(ogMeta.image.includes('tpl=preset-modern-wedding'));
+  assert.ok(ogMeta.image.includes('id=u_alice__modern-wedding-mw001'));
+});
+
 
 
 

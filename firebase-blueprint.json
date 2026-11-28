@@ -68,6 +68,8 @@
         "bride_name": { "type": "string", "description": "Bride name alias", "maxLength": 200 },
         "ownerId": { "type": "string", "description": "Owner User ID for per-user event isolation", "maxLength": 128 },
         "ownerEmail": { "type": "string", "description": "Owner email address", "maxLength": 256 },
+        "image": { "type": "string", "description": "Main Couple Portrait URL or compressed data URI", "maxLength": 500000 },
+        "cover_image": { "type": "string", "description": "Cover portrait URL fallback", "maxLength": 500000 },
         "config": { "type": "object", "description": "Full wedding configuration object" },
         "updatedAt": { "type": "string", "description": "ISO timestamp of last update", "maxLength": 64 }
       },

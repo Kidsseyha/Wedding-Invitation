@@ -1,12 +1,12 @@
 {
   "projectId": "wedding-invitation-0007",
-  "appId": "1:131242179043:web:OGI5YmMyMGUtZWVmOC00YjQ3LTgwMDQtMWJjMjJjYWQ5YTU2",
-  "apiKey": "AIzaSyAkVsHYJaVPQ29iTKw0D-3Umc_yelSrrzg",
+  "appId": "1:955479726222:web:c82a0c0a7d6617eefd11df",
+  "apiKey": "AIzaSyC0ThZj857KgDcnXEWHnuhGAyKm5-uka7U",
   "authDomain": "wedding-invitation-0007.firebaseapp.com",
-  "firestoreDatabaseId": "(default)",
+  "firestoreDatabaseId": "ai-studio-invitationonline-6145d4e3-f054-4b92-8181-aa9c53ee300a",
   "storageBucket": "wedding-invitation-0007.firebasestorage.app",
-  "messagingSenderId": "131242179043",
-  "measurementId": "G-ZRSSKQG1FV",
-  "oAuthClientId": "131242179043-a11v9t5htcncfklnla28g4llg4fv2hse.apps.googleusercontent.com",
+  "messagingSenderId": "955479726222",
+  "measurementId": "",
+  "oAuthClientId": "955479726222-hduuhok7nbl390skrdj8fish4rq5ihjm.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

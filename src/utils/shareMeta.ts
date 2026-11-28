@@ -128,6 +128,44 @@ export function resolveEventCoverImage(event: any, category: InvitationCategory,
   return getCategoryCoverImage(isModern ? 'preset-modern-wedding' : category);
 }
 
+/**
+ * Ensures image, cover_image, and config.image stay synchronized when an event record
+ * is hydrated from Firestore (where duplicate data:image fields may be stripped to save bytes).
+ */
+export function rehydrateEventPortraitFields<T extends Record<string, any>>(event: T | null | undefined): T | null {
+  if (!event || typeof event !== 'object') return event ?? null;
+  const primaryCandidate = !isInvalidCoverValue(event.image)
+    ? String(event.image).trim()
+    : !isInvalidCoverValue(event.config?.image)
+    ? String(event.config.image).trim()
+    : !isInvalidCoverValue(event.cover_image)
+    ? String(event.cover_image).trim()
+    : '';
+  if (!primaryCandidate) return event;
+
+  const needsCoverSync = isInvalidCoverValue(event.cover_image);
+  const needsImageSync = isInvalidCoverValue(event.image);
+  const needsConfigSync = event.config && typeof event.config === 'object' && isInvalidCoverValue(event.config.image);
+
+  if (!needsCoverSync && !needsImageSync && !needsConfigSync) {
+    return event;
+  }
+
+  return {
+    ...event,
+    image: primaryCandidate,
+    cover_image: primaryCandidate,
+    ...(event.config && typeof event.config === 'object'
+      ? {
+          config: {
+            ...event.config,
+            image: primaryCandidate,
+          },
+        }
+      : {}),
+  };
+}
+
 export function buildAllShareTemplates(params: {
   presets: EventTypePreset[];
   deletedPresetIds?: string[];
@@ -256,6 +294,16 @@ export function buildAllShareTemplates(params: {
         eventType: meta.category,
         cover_image: coverImage,
         image: coverImage,
+        ...(eventData?.config && typeof eventData.config === 'object'
+          ? {
+              config: {
+                ...eventData.config,
+                ...(!isInvalidCoverValue(coverImage) ? { image: coverImage } : {}),
+              },
+            }
+          : !isInvalidCoverValue(coverImage)
+          ? { config: { image: coverImage } }
+          : {}),
       },
     };
   };
@@ -273,7 +321,11 @@ export function buildAllShareTemplates(params: {
         byTypeBaseId === p.sampleEvent.id ||
         byTypeRaw.name === p.sampleEvent.name);
 
-    const saved = bySampleId || byPresetId || (canUseByType ? byTypeRaw : null);
+    const saved = pickNewestDatabaseEvent([
+      bySampleId,
+      byPresetId,
+      canUseByType ? byTypeRaw : null,
+    ]);
     const isCurrent = matchedCurrentPresetId === p.id && Boolean(currentEvent);
     const mergedEvent = isCurrent
       ? {
@@ -662,6 +714,7 @@ export function buildInvitationMeta(params: {
         qs.set('id', resolvedEventId);
         qs.set('type', category);
         if (resolvedOwnerId) qs.set('ownerId', resolvedOwnerId);
+        if (effectiveEvent?.templateId) qs.set('tpl', String(effectiveEvent.templateId));
         if (effectiveEvent?.updatedAt) qs.set('v', String(effectiveEvent.updatedAt));
         selectedImage = `${cleanOrigin}/api/og-image?${qs.toString()}`;
         break;
@@ -846,24 +899,35 @@ export async function fetchEventFromFirestoreRest(options: {
 
     try {
       let res = await fetch(endpoint, { signal: controller.signal });
-      if (!res.ok && dbSegment !== '(default)') {
-        const fallbackEndpoint = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
-          projectId
-        )}/databases/(default)/documents/${docPath}${keyParam}`;
-        res = await fetch(fallbackEndpoint, { signal: controller.signal });
-      }
       if (!res.ok) {
+        let primaryErr = '';
         if (res.status === 404) {
-          const errText = await res.text().catch(() => '');
-          if (errText.includes('does not exist')) {
+          primaryErr = await res.text().catch(() => '');
+        }
+        const isPrimaryDatabaseMissing =
+          res.status === 404 && /database\b[\s\S]*\bdoes not exist/i.test(primaryErr);
+
+        if (isPrimaryDatabaseMissing && dbSegment !== '(default)') {
+          const fallbackEndpoint = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+            projectId
+          )}/databases/(default)/documents/${docPath}${keyParam}`;
+          const fallbackRes = await fetch(fallbackEndpoint, { signal: controller.signal });
+          if (fallbackRes.ok) {
+            res = fallbackRes;
+          } else {
+            markFirestoreRestMissing(projectId, dbSegment);
+            return null;
+          }
+        } else {
+          if (isPrimaryDatabaseMissing) {
             markFirestoreRestMissing(projectId, dbSegment);
           }
+          return null;
         }
-        return null;
       }
       const json = (await res.json()) as { fields?: Record<string, any> };
       if (!json || !json.fields) return null;
-      const parsed = parseFirestoreDocumentFields(json.fields);
+      const parsed = rehydrateEventPortraitFields(parseFirestoreDocumentFields(json.fields)) || parseFirestoreDocumentFields(json.fields);
       if (!parsed.id) parsed.id = eventId;
       return parsed;
     } catch {
@@ -897,10 +961,9 @@ export async function fetchShortLinkFromFirestoreRest(options: {
 }): Promise<{ code: string; url: string; lang?: string; createdAt?: string } | null> {
   const { projectId, databaseId = '(default)', code, apiKey, timeoutMs = 1200 } = options;
   if (!projectId || !code || !/^[a-zA-Z0-9_-]{1,128}$/.test(code)) return null;
-  const dbSegmentCheck = databaseId || '(default)';
-  if (isFirestoreRestTemporarilyMissing(projectId, dbSegmentCheck)) return null;
-
   const dbSegment = databaseId || '(default)';
+  if (isFirestoreRestTemporarilyMissing(projectId, dbSegment)) return null;
+
   const keyParam = apiKey ? `?key=${encodeURIComponent(apiKey)}` : '';
   const endpoint = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
     projectId
@@ -911,13 +974,32 @@ export async function fetchShortLinkFromFirestoreRest(options: {
 
   try {
     let res = await fetch(endpoint, { signal: controller.signal });
-    if (!res.ok && dbSegment !== '(default)') {
-      const fallbackEndpoint = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
-        projectId
-      )}/databases/(default)/documents/short_links/${encodeURIComponent(code)}${keyParam}`;
-      res = await fetch(fallbackEndpoint, { signal: controller.signal });
+    if (!res.ok) {
+      let primaryErr = '';
+      if (res.status === 404) {
+        primaryErr = await res.text().catch(() => '');
+      }
+      const isPrimaryDatabaseMissing =
+        res.status === 404 && /database\b[\s\S]*\bdoes not exist/i.test(primaryErr);
+
+      if (isPrimaryDatabaseMissing && dbSegment !== '(default)') {
+        const fallbackEndpoint = `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(
+          projectId
+        )}/databases/(default)/documents/short_links/${encodeURIComponent(code)}${keyParam}`;
+        const fallbackRes = await fetch(fallbackEndpoint, { signal: controller.signal });
+        if (fallbackRes.ok) {
+          res = fallbackRes;
+        } else {
+          markFirestoreRestMissing(projectId, dbSegment);
+          return null;
+        }
+      } else {
+        if (isPrimaryDatabaseMissing) {
+          markFirestoreRestMissing(projectId, dbSegment);
+        }
+        return null;
+      }
     }
-    if (!res.ok) return null;
     const json = (await res.json()) as { fields?: Record<string, any> };
     if (!json || !json.fields) return null;
     const parsed = parseFirestoreDocumentFields(json.fields);

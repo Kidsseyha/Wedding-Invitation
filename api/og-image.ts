@@ -19,7 +19,9 @@ interface FirebaseRuntimeConfig {
 function loadFirebaseConfig(): FirebaseRuntimeConfig {
   const fallback: FirebaseRuntimeConfig = {
     projectId: process.env.VITE_FIREBASE_PROJECT_ID || 'wedding-invitation-0007',
-    firestoreDatabaseId: process.env.VITE_FIREBASE_DATABASE_ID || '(default)',
+    firestoreDatabaseId:
+      process.env.VITE_FIREBASE_DATABASE_ID ||
+      'ai-studio-invitationonline-6145d4e3-f054-4b92-8181-aa9c53ee300a',
     apiKey: process.env.VITE_FIREBASE_API_KEY || undefined,
   };
   try {
@@ -77,6 +79,7 @@ export default async function handler(req: VercelReq, res: VercelRes) {
 
     const eventId = getQueryParam(params, req, 'id').trim();
     const ownerId = getQueryParam(params, req, 'ownerId').trim();
+    const tplHint = getQueryParam(params, req, 'tpl').trim();
     const rawType = (getQueryParam(params, req, 'type') || getQueryParam(params, req, 'category')).trim();
     const eventType = normalizeCategoryString(rawType);
 
@@ -91,19 +94,25 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       });
     }
 
-    if (!targetEvent && eventId) {
-      const strippedId = stripScopedEventId(eventId);
-      const idPreset = findTemplatePreset(strippedId);
-      if (idPreset?.sampleEvent?.id && strippedId !== idPreset.sampleEvent.id) {
-        const effectiveOwner = ownerId || (eventId.includes('__') ? eventId.split('__')[0] : '');
-        if (effectiveOwner) {
+    if (!targetEvent && (eventId || tplHint)) {
+      const strippedId = eventId ? stripScopedEventId(eventId) : '';
+      const idPreset =
+        (strippedId ? findTemplatePreset(strippedId) : undefined) ||
+        (tplHint ? findTemplatePreset(stripScopedEventId(tplHint)) : undefined);
+      const effectiveOwner = ownerId || (eventId.includes('__') ? eventId.split('__')[0] : '');
+      if (idPreset && effectiveOwner) {
+        const candidateIds = Array.from(
+          new Set([idPreset.sampleEvent?.id, idPreset.id, tplHint ? stripScopedEventId(tplHint) : ''].filter((cid): cid is string => Boolean(cid) && cid !== strippedId))
+        );
+        for (const cid of candidateIds) {
           targetEvent = await fetchEventFromFirestoreRest({
             projectId: firebaseCfg.projectId,
             databaseId: firebaseCfg.firestoreDatabaseId,
-            eventId: `${effectiveOwner}__${idPreset.sampleEvent.id}`,
+            eventId: `${effectiveOwner}__${cid}`,
             ownerId: effectiveOwner,
             apiKey: firebaseCfg.apiKey,
           });
+          if (targetEvent) break;
         }
       }
       if (!targetEvent && idPreset && (!eventType || idPreset.type === eventType)) {
@@ -118,13 +127,17 @@ export default async function handler(req: VercelReq, res: VercelRes) {
       if (!targetEvent || (loadedCat && loadedCat !== eventType)) {
         const preset =
           (eventId ? findTemplatePreset(stripScopedEventId(eventId)) : undefined) ||
+          (tplHint ? findTemplatePreset(stripScopedEventId(tplHint)) : undefined) ||
           findTemplatePreset(eventType);
         if (preset) targetEvent = preset.sampleEvent;
       }
     }
 
     if (!targetEvent) {
-      const preset = (eventId ? findTemplatePreset(stripScopedEventId(eventId)) : undefined) || findTemplatePreset('wedding');
+      const preset =
+        (eventId ? findTemplatePreset(stripScopedEventId(eventId)) : undefined) ||
+        (tplHint ? findTemplatePreset(stripScopedEventId(tplHint)) : undefined) ||
+        findTemplatePreset('wedding');
       targetEvent = preset?.sampleEvent;
     }
 

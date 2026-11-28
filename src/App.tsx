@@ -54,7 +54,7 @@ import {
 import { WEDDING_EVENT } from './data/weddingData';
 import { sanitizeWeddingEvent, VERIFIED_WEDDING_COVER } from './utils/sanitizeEvent';
 import { findTemplatePreset, getCategoryCoverImage, VERIFIED_CATEGORY_COVERS, EVENT_PRESETS } from './data/eventTemplates';
-import { buildInvitationMeta, normalizeCategoryString, resolveEventCoverImage } from './utils/shareMeta';
+import { buildInvitationMeta, normalizeCategoryString, resolveCategoryFromHints, resolveEventCoverImage } from './utils/shareMeta';
 import {
   PUBLIC_APP_URL,
   detectLanguageFromUrl,
@@ -1851,8 +1851,8 @@ export default function App() {
         const localScopedRaw =
           localStorage.getItem(getUserStorageKey(`wedding_template_saved_${fetchId}`, scopeId)) ||
           localStorage.getItem(getUserStorageKey(`wedding_template_saved_${stripScopedEventId(fetchId)}`, scopeId)) ||
-          (urlTypeParam ? localStorage.getItem(getUserStorageKey(`wedding_template_type_${normalizeCategoryString(urlTypeParam)}`, scopeId)) : null) ||
-          localStorage.getItem(getUserStorageKey('wedding_custom_event_data', scopeId));
+          (!urlIdParam && urlTypeParam ? localStorage.getItem(getUserStorageKey(`wedding_template_type_${normalizeCategoryString(urlTypeParam)}`, scopeId)) : null) ||
+          (!urlIdParam && !urlTypeParam ? localStorage.getItem(getUserStorageKey('wedding_custom_event_data', scopeId)) : null);
 
         if (localScopedRaw) {
           try {
@@ -3313,51 +3313,59 @@ export default function App() {
                   }}
                   title={!isViewer ? "ចុចដើម្បីប្តូររូបថតគូស្នេហ៍ / Click to change photo" : undefined}
                 >
-                  {portraitShape === 'heart' ? (
-                    <div className="w-full h-full relative">
-                      <svg className="w-full h-full" viewBox="0 0 100 100">
-                        <defs>
-                          <clipPath id="wedding-heart-clip-direct">
-                            <path d="M 50,86 C 24,65 7,47 7,30 C 7,16 17,7 31,7 C 39,7 46,11 50,18 C 54,11 61,7 69,7 C 83,7 93,16 93,30 C 93,47 76,65 50,86 Z" />
-                          </clipPath>
-                        </defs>
-                        <image
-                          href={event.image || getCategoryCoverImage(event.eventType || event.id)}
-                          xlinkHref={event.image || getCategoryCoverImage(event.eventType || event.id)}
-                          width="100"
-                          height="100"
-                          preserveAspectRatio="xMidYMid slice"
-                          clipPath="url(#wedding-heart-clip-direct)"
+                  {(() => {
+                    const resolvedHeroCategory = resolveCategoryFromHints({
+                      eventType: event.eventType,
+                      eventId: event.id,
+                      eventName: event.name,
+                    });
+                    const resolvedHeroPortrait = resolveEventCoverImage(event, resolvedHeroCategory);
+                    return portraitShape === 'heart' ? (
+                      <div className="w-full h-full relative">
+                        <svg className="w-full h-full" viewBox="0 0 100 100">
+                          <defs>
+                            <clipPath id="wedding-heart-clip-direct">
+                              <path d="M 50,86 C 24,65 7,47 7,30 C 7,16 17,7 31,7 C 39,7 46,11 50,18 C 54,11 61,7 69,7 C 83,7 93,16 93,30 C 93,47 76,65 50,86 Z" />
+                            </clipPath>
+                          </defs>
+                          <image
+                            href={resolvedHeroPortrait}
+                            xlinkHref={resolvedHeroPortrait}
+                            width="100"
+                            height="100"
+                            preserveAspectRatio="xMidYMid slice"
+                            clipPath="url(#wedding-heart-clip-direct)"
+                          />
+                          <path
+                            d="M 50,86 C 24,65 7,47 7,30 C 7,16 17,7 31,7 C 39,7 46,11 50,18 C 54,11 61,7 69,7 C 83,7 93,16 93,30 C 93,47 76,65 50,86 Z"
+                            fill="none"
+                            stroke="#f59e0b"
+                            strokeWidth="5"
+                            strokeLinejoin="round"
+                            className="filter drop-shadow-[0_2px_8px_rgba(245,158,11,0.6)]"
+                          />
+                        </svg>
+                      </div>
+                    ) : (
+                      <div className="w-full h-full relative overflow-hidden rounded-[inherit] bg-neutral-900">
+                        <img
+                          src={resolvedHeroPortrait}
+                          alt={event.singlePerson ? event.groom : `${event.groom} & ${event.bride}`}
+                          referrerPolicy="no-referrer"
+                          loading="eager"
+                          onError={(e) => {
+                            const fallback = getCategoryCoverImage(event.eventType || event.id);
+                            if (e.currentTarget.src !== fallback) {
+                              e.currentTarget.src = fallback;
+                            }
+                          }}
+                          className={`w-full h-full object-cover object-center ${!isViewer ? 'group-hover:scale-105' : ''} transition-transform duration-500`}
                         />
-                        <path
-                          d="M 50,86 C 24,65 7,47 7,30 C 7,16 17,7 31,7 C 39,7 46,11 50,18 C 54,11 61,7 69,7 C 83,7 93,16 93,30 C 93,47 76,65 50,86 Z"
-                          fill="none"
-                          stroke="#f59e0b"
-                          strokeWidth="5"
-                          strokeLinejoin="round"
-                          className="filter drop-shadow-[0_2px_8px_rgba(245,158,11,0.6)]"
-                        />
-                      </svg>
-                    </div>
-                  ) : (
-                    <div className="w-full h-full relative overflow-hidden rounded-[inherit] bg-neutral-900">
-                      <img
-                        src={event.image || getCategoryCoverImage(event.eventType || event.id)}
-                        alt={event.singlePerson ? event.groom : `${event.groom} & ${event.bride}`}
-                        referrerPolicy="no-referrer"
-                        loading="eager"
-                        onError={(e) => {
-                          const fallback = getCategoryCoverImage(event.eventType || event.id);
-                          if (e.currentTarget.src !== fallback) {
-                            e.currentTarget.src = fallback;
-                          }
-                        }}
-                        className={`w-full h-full object-cover object-center ${!isViewer ? 'group-hover:scale-105' : ''} transition-transform duration-500`}
-                      />
-                      {/* Soft bottom edge glow */}
-                      <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/30 to-transparent pointer-events-none" />
-                    </div>
-                  )}
+                        {/* Soft bottom edge glow */}
+                        <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-black/30 to-transparent pointer-events-none" />
+                      </div>
+                    );
+                  })()}
 
                   {/* Hover overlay hint */}
                   {!isViewer && (
